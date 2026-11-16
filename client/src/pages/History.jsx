@@ -14,7 +14,7 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx";
 import logoImg from '../assets/zuna-logo.png';
-import { addStandardPDFHeader } from "../utils/pdfHeader";
+import { addStandardPDFHeader, addPDFFooter } from "../utils/pdfHeader";
 export default function History() {
   const { currentUser } = useAuth();
   const { showToast } = useToast();

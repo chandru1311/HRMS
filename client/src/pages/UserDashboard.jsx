@@ -28,6 +28,7 @@ import {
   getFaceEnrollmentStatus,
   verifyFaceSession
 } from "../firebase";
+import { fetchMyEmployeePayslips } from "../services/globalPayrollApi";
 import CameraCapture from "../components/CameraCapture";
 import { getDoc, doc } from "firebase/firestore";
 import { resolveLocationName, getDistanceFromLatLonInMeters, isPointInPolygon } from "../utils/locationHelper";
@@ -63,7 +64,9 @@ import {
   IndianRupee,
   Banknote,
   FileText,
-  Download
+  Download,
+  Lock,
+  ShieldAlert
 } from "lucide-react";
 import CustomDateRangePicker from "../components/CustomDateRangePicker";
 
@@ -228,22 +231,25 @@ export default function UserDashboard() {
 
   const toastShownRef = useRef(false);
 
-  const isCheckedOut = !!(todayLog && (
+  const isAttendanceLocked = !!(todayLog && (
+    todayLog.is_admin_locked === true || 
+    Boolean(todayLog.penalty_status) || 
+    todayLog.status === "absent"
+  ));
+  const isCheckedOut = !isAttendanceLocked && !!(todayLog && (
     todayLog.status === "checked-out" || 
     todayLog.status === "completed" || 
-    !!todayLog.check_out ||
-    !!todayLog.checkOutTime ||
-    !!todayLog.checkOut
+    (Boolean(todayLog.check_out) && todayLog.status !== "checked-in" && todayLog.status !== "present")
   ));
-  const isOnBreak = !isCheckedOut && !!(todayLog && (
+  const isOnBreak = !isAttendanceLocked && !isCheckedOut && !!(todayLog && (
     todayLog.status === "on-break" || 
     (Array.isArray(todayLog.breaks) && todayLog.breaks.some(b => !b.end && !b.resumeTime))
   ));
-  const isCheckedIn = !isOnBreak && !isCheckedOut && !!(todayLog && (
+  const isCheckedIn = !isAttendanceLocked && !isOnBreak && !isCheckedOut && !!(todayLog && (
     todayLog.status === "checked-in" || 
     todayLog.status === "in-progress" || 
     todayLog.status === "present" || 
-    (todayLog.check_in && !todayLog.check_out && !todayLog.checkOutTime && !todayLog.checkOut)
+    (Boolean(todayLog.check_in) && !todayLog.check_out)
   ));
 
   const getElapsedWorkingMs = () => {
@@ -364,7 +370,7 @@ export default function UserDashboard() {
   const isForgotToCheckIn = (() => {
     if (loading) return false;
     if (currentUser.role === "admin") return false;
-    if (todayLog || isCheckedIn || isCheckedOut) return false;
+    if (todayLog || isCheckedIn || isCheckedOut || isAttendanceLocked) return false;
     
     // Check if today is a weekday
     const day = currentTime.getDay();
@@ -372,8 +378,8 @@ export default function UserDashboard() {
     if (!isWeekday) return false;
     
     // Parse shiftStart (e.g. "10:00")
-    if (!currentUser.shiftStart) return false;
-    const [startH, startM] = currentUser.shiftStart.split(":").map(Number);
+    if (!currentUser?.shiftStart) return false;
+    const [startH, startM] = String(currentUser.shiftStart).split(":").map(Number);
     const shiftStartToday = new Date(currentTime);
     shiftStartToday.setHours(startH, startM, 0, 0);
     
@@ -428,7 +434,7 @@ export default function UserDashboard() {
     const unsubscribe = subscribeToUserLogs(currentUser.uid, (logs) => {
       setUserLogs(logs);
       const todayStr = getLocalDateString();
-      const today = logs.find(log => {
+      const todayLogs = (logs || []).filter(log => {
         if (!log) return false;
         const logDateStr = typeof log.date === "string" ? log.date.split("T")[0] : "";
         if (logDateStr === todayStr) return true;
@@ -436,7 +442,9 @@ export default function UserDashboard() {
         if (log.check_in && new Date(log.check_in).toDateString() === new Date().toDateString()) return true;
         return false;
       });
-      setTodayLog(today || null);
+      // Prioritize active session without check_out over completed sessions
+      const today = todayLogs.find(l => Boolean(l.check_in) && !l.check_out) || todayLogs[0] || null;
+      setTodayLog(today);
       setLoading(false);
     });
 
@@ -496,7 +504,30 @@ export default function UserDashboard() {
     });
 
     const unsubscribePayroll = subscribeToCompanyPayroll(currentUser.companyId, null, null, (list) => {
-      setMyPayslips(list.filter(p => p.employeeId === currentUser.uid));
+      const localList = list.filter(p => p.employeeId === currentUser.uid);
+      fetchMyEmployeePayslips().then(globalList => {
+        if (Array.isArray(globalList) && globalList.length > 0) {
+          const mapped = globalList.map(g => ({
+            ...g,
+            id: g.id,
+            employeeId: g.user_id,
+            month: g.period_start ? new Date(g.period_start).toLocaleString('default', { month: 'long' }) : 'Global',
+            year: g.period_start ? new Date(g.period_start).getFullYear() : 2026,
+            grossSalary: parseFloat(g.gross_salary),
+            netSalary: parseFloat(g.net_salary),
+            basicSalary: parseFloat(g.basic_salary),
+            allowances: parseFloat(g.allowances),
+            totalDeductions: parseFloat(g.statutory_deductions) + parseFloat(g.other_deductions),
+            currency: g.currency,
+            isGlobal: true
+          }));
+          setMyPayslips([...localList, ...mapped]);
+        } else {
+          setMyPayslips(localList);
+        }
+      }).catch(() => {
+        setMyPayslips(localList);
+      });
     });
 
     return () => {
@@ -907,9 +938,9 @@ export default function UserDashboard() {
     } else {
       // Validate emergency leaves applied for today must be before shift start
       if (startDate === todayString) {
-        if (currentUser.shiftStart) {
+        if (currentUser?.shiftStart) {
           const now = new Date();
-          const [shiftH, shiftM] = currentUser.shiftStart.split(":").map(Number);
+          const [shiftH, shiftM] = String(currentUser.shiftStart).split(":").map(Number);
           const shiftStartToday = new Date();
           shiftStartToday.setHours(shiftH, shiftM, 0, 0);
 
@@ -976,9 +1007,9 @@ export default function UserDashboard() {
   const timerPercentage = breakTotalSeconds > 0 ? (timeLeft / breakTotalSeconds) * 100 : 0;
 
   const getShiftDurationMinutes = () => {
-    if (!currentUser.shiftStart || !currentUser.shiftEnd) return 540; // 9 hours
-    const [startH, startM] = currentUser.shiftStart.split(":").map(Number);
-    const [endH, endM] = currentUser.shiftEnd.split(":").map(Number);
+    if (!currentUser?.shiftStart || !currentUser?.shiftEnd) return 540; // 9 hours
+    const [startH, startM] = String(currentUser.shiftStart).split(":").map(Number);
+    const [endH, endM] = String(currentUser.shiftEnd).split(":").map(Number);
     let startMin = startH * 60 + startM;
     let endMin = endH * 60 + endM;
     if (endMin < startMin) endMin += 1440;
@@ -1167,6 +1198,14 @@ export default function UserDashboard() {
     html2pdf().set(opt).from(element).save();
   };
 
+  if (!currentUser) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="w-8 h-8 rounded-full border-2 border-brand-primary border-t-transparent animate-spin" />
+      </div>
+    );
+  }
+
   return (
       <div className="space-y-5 sm:space-y-8 w-full max-w-[1400px] mx-auto text-left animate-fade-in">
         {/* Welcome Panel Skeleton */}
@@ -1220,6 +1259,14 @@ export default function UserDashboard() {
     };
     html2pdf().set(opt).from(element).save();
   };
+
+  if (!currentUser) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="w-8 h-8 rounded-full border-2 border-brand-primary border-t-transparent animate-spin" />
+      </div>
+    );
+  }
 
   return (
       <div className="space-y-6 w-full max-w-[1400px] mx-auto text-left animate-fade-in">
@@ -1277,6 +1324,14 @@ export default function UserDashboard() {
     };
     html2pdf().set(opt).from(element).save();
   };
+
+  if (!currentUser) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="w-8 h-8 rounded-full border-2 border-brand-primary border-t-transparent animate-spin" />
+      </div>
+    );
+  }
 
   return (
                 <div key={idx} className="bg-bg-card border border-border-card rounded-[24px] p-6 shadow-sm flex flex-col group hover:shadow-md transition-shadow relative overflow-hidden text-left">
@@ -1534,6 +1589,14 @@ export default function UserDashboard() {
     html2pdf().set(opt).from(element).save();
   };
 
+  if (!currentUser) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="w-8 h-8 rounded-full border-2 border-brand-primary border-t-transparent animate-spin" />
+      </div>
+    );
+  }
+
   return (
       <div className="space-y-6 w-full max-w-[1400px] mx-auto text-left animate-fade-in">
         {/* Breadcrumb & Header */}
@@ -1577,6 +1640,14 @@ export default function UserDashboard() {
     };
     html2pdf().set(opt).from(element).save();
   };
+
+  if (!currentUser) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="w-8 h-8 rounded-full border-2 border-brand-primary border-t-transparent animate-spin" />
+      </div>
+    );
+  }
 
   return (
                 <div key={asset.id} className="bg-bg-card border border-border-card rounded-[24px] p-6 shadow-sm flex flex-col justify-between hover:shadow-md transition-shadow relative overflow-hidden">
@@ -1639,6 +1710,14 @@ export default function UserDashboard() {
     };
     html2pdf().set(opt).from(element).save();
   };
+
+  if (!currentUser) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="w-8 h-8 rounded-full border-2 border-brand-primary border-t-transparent animate-spin" />
+      </div>
+    );
+  }
 
   return (
       <div className="space-y-6 w-full max-w-[1400px] mx-auto text-left">
@@ -1822,6 +1901,14 @@ export default function UserDashboard() {
     html2pdf().set(opt).from(element).save();
   };
 
+  if (!currentUser) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="w-8 h-8 rounded-full border-2 border-brand-primary border-t-transparent animate-spin" />
+      </div>
+    );
+  }
+
   return (
                           <tr key={req.id} className="hover:bg-bg-base/30">
                             <td className="py-3.5 pr-4 text-text-main font-bold">
@@ -1884,6 +1971,14 @@ export default function UserDashboard() {
     };
     html2pdf().set(opt).from(element).save();
   };
+
+  if (!currentUser) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="w-8 h-8 rounded-full border-2 border-brand-primary border-t-transparent animate-spin" />
+      </div>
+    );
+  }
 
   return (
                         <button
@@ -2082,6 +2177,14 @@ export default function UserDashboard() {
     html2pdf().set(opt).from(element).save();
   };
 
+  if (!currentUser) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="w-8 h-8 rounded-full border-2 border-brand-primary border-t-transparent animate-spin" />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-5 sm:space-y-8 w-full max-w-[1400px] mx-auto">
       {/* Forgot to check-in Warning Banner */}
@@ -2176,7 +2279,7 @@ export default function UserDashboard() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-6">
         <div>
           <h1 className="text-2xl sm:text-3xl font-extrabold text-text-main tracking-tight flex items-center gap-2.5 flex-wrap">
-            <span>Welcome back, {currentUser.name.split(" ")[0]}</span>
+            <span>Welcome back, {(currentUser?.name || "User").split(" ")[0]}</span>
             {(currentUser.employeeId || currentUser.employee_id) && (
               <span className="text-xs font-mono font-bold px-2.5 py-0.5 rounded-full bg-brand-primary/10 text-brand-primary border border-brand-primary/20">
                 {currentUser.employeeId || currentUser.employee_id}
@@ -2200,7 +2303,12 @@ export default function UserDashboard() {
           </div>
 
           {/* Top check in Shortcut */}
-          {!isCheckedIn && !isCheckedOut && !isOnBreak ? (
+          {isAttendanceLocked ? (
+            <span className="text-xs font-bold text-red-500 bg-red-500/10 border border-red-500/20 px-3.5 py-2 rounded-[10px] flex items-center gap-1.5 shadow-sm">
+              <Lock size={12} />
+              <span>Attendance Locked (Absent)</span>
+            </span>
+          ) : !isCheckedIn && !isCheckedOut && !isOnBreak ? (
             isWithinShiftHours() ? (
               <button
                 onClick={handleCheckIn}
@@ -2240,14 +2348,14 @@ export default function UserDashboard() {
                 <span>check out</span>
               </button>
             </div>
-          ) : (
+          ) : isCheckedOut ? (
             <span className="text-xs font-bold text-text-mut px-3 py-2 bg-bg-base rounded-[10px] flex items-center gap-2">
               <span>Shift Ended</span>
               <span className="text-[10px] font-mono text-text-sec bg-bg-card border border-border-card px-2 py-0.5 rounded">
                 {formatDuration(getElapsedWorkingMs())}
               </span>
             </span>
-          )}
+          ) : null}
         </div>
       </div>
 
@@ -2256,13 +2364,15 @@ export default function UserDashboard() {
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
           <div className="flex items-center gap-2">
             <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
+              isAttendanceLocked ? "bg-red-500 animate-pulse" :
               !isCheckedIn && !isCheckedOut && !isOnBreak ? "bg-slate-400" :
               isCheckedIn ? "bg-brand-success animate-pulse" :
               isOnBreak ? "bg-brand-warning animate-pulse" :
               "bg-brand-primary"
             }`} />
             <span className="text-sm font-extrabold text-text-main">
-              {!isCheckedIn && !isCheckedOut && !isOnBreak ? "Not Checked In" :
+              {isAttendanceLocked ? "Marked Absent (Locked)" :
+               !isCheckedIn && !isCheckedOut && !isOnBreak ? "Not Checked In" :
                isCheckedIn ? "Active Shift" :
                isOnBreak ? "On Break" : "Shift Completed"}
             </span>
@@ -2323,8 +2433,32 @@ export default function UserDashboard() {
 
           {/* Card 1: Shift Control / Active Action Panel */}
           <div className="bg-bg-card border border-border-card rounded-[24px] p-6 lg:p-8 shadow-sm flex flex-col justify-center items-center min-h-[280px]">
+            {/* Action State: 0. ATTENDANCE LOCKED (ABSENT PENALTY) */}
+            {isAttendanceLocked && (
+              <div className="text-center max-w-md p-6 w-full animate-fade-in">
+                <div className="w-16 h-16 rounded-full bg-red-500/10 text-red-500 flex items-center justify-center mx-auto mb-4 border border-red-500/25">
+                  <Lock size={28} />
+                </div>
+                <h3 className="text-xl font-extrabold text-text-main mb-1.5">
+                  Attendance Marked Absent & Locked
+                </h3>
+                <p className="text-xs text-text-sec mb-4 leading-relaxed font-semibold">
+                  You did not acknowledge an assigned task within 10 minutes. Your attendance has been marked <strong className="text-red-500">Absent</strong> and check-in is locked for today.
+                </p>
+                {todayLog?.penalty_reason && (
+                  <div className="mb-5 p-3 bg-red-500/5 border border-red-500/20 rounded-[12px] text-[11px] font-mono text-red-400">
+                    {todayLog.penalty_reason}
+                  </div>
+                )}
+                <div className="p-3 bg-bg-base/70 border border-border-card rounded-[14px] text-xs text-text-sec font-semibold flex items-center justify-center gap-2">
+                  <ShieldAlert size={16} className="text-amber-500 flex-shrink-0" />
+                  <span>Check-in can only be unlocked and returned by your Administrator.</span>
+                </div>
+              </div>
+            )}
+
             {/* Action State: 1. NOT CHECKED IN AND SHIFT NOT ACTIVE */}
-            {!isCheckedIn && !isCheckedOut && !isOnBreak && !isWithinShiftHours() && (
+            {!isAttendanceLocked && !isCheckedIn && !isCheckedOut && !isOnBreak && !isWithinShiftHours() && (
               <div className="text-center max-w-md p-4">
                 <div className="w-16 h-16 rounded-full bg-brand-warning/10 text-brand-warning flex items-center justify-center mx-auto mb-5">
                   <Clock size={28} />
@@ -2340,7 +2474,7 @@ export default function UserDashboard() {
             )}
 
             {/* Action State: 2. NOT CHECKED IN AND SHIFT IS ACTIVE */}
-            {!isCheckedIn && !isCheckedOut && !isOnBreak && isWithinShiftHours() && (
+            {!isAttendanceLocked && !isCheckedIn && !isCheckedOut && !isOnBreak && isWithinShiftHours() && (
               <div className="text-center max-w-md p-4">
                 <div className="w-16 h-16 rounded-full bg-brand-primary/10 text-brand-primary flex items-center justify-center mx-auto mb-5 animate-pulse">
                   <Play size={24} fill="currentColor" className="ml-1" />

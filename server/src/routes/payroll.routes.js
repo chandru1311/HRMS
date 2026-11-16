@@ -5,13 +5,15 @@ import {
   deletePayroll,
   wipeAllPayrolls,
   calculatePayrollBatch,
-  approvePayrollBatch
+  approvePayrollBatch,
+  getEmployeeAttendancePayrollSummary
 } from "../controllers/payrollController.js";
 import { authenticateToken, requireAdmin } from "../middlewares/auth.js";
 
 const router = express.Router();
 
 router.use(authenticateToken);
+router.get("/attendance-summary", getEmployeeAttendancePayrollSummary);
 router.get("/", getPayroll);
 router.post("/", requireAdmin, savePayroll);
 router.post("/calculate", requireAdmin, calculatePayrollBatch);

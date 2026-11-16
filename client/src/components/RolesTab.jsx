@@ -13,6 +13,7 @@ const MODULES = [
   { id: "Regularization", name: "Regularization Approvals" },
   { id: "AttendanceLogs", name: "Attendance Logs" },
   { id: "Payroll", name: "Payroll Processing" },
+  { id: "GlobalPayroll", name: "Global Multi-Currency Payroll" },
   { id: "NoticeBoard", name: "Notice Board & Rules" },
   { id: "Assets", name: "Asset Management" },
   { id: "ActivityHistory", name: "Activity Log / History" },

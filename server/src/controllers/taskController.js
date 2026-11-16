@@ -1,5 +1,6 @@
 import { query } from "../config/db.js";
 import auditService from "../services/auditService.js";
+import { sendNotificationOnce } from "../services/notificationService.js";
 
 export const getTasks = async (req, res) => {
   try {
@@ -138,31 +139,25 @@ export const createTask = async (req, res) => {
 
     const taskRow = result.rows[0];
 
-    // Create immediate in-app notification for the assigned employee
-    const notifId = "notif_" + Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
-    const deadlineText = targetDeadline ? new Date(targetDeadline).toLocaleString() : "Not specified";
-    const notifMessage = `You have been assigned a new task: "${title.trim()}". Deadline: ${deadlineText}. You must open/acknowledge this task within 1 hour.`;
-
-    await query(
-      `INSERT INTO notifications (id, user_id, title, message, type, read, link)
-       VALUES ($1, $2, $3, $4, 'info', FALSE, '/tasks')`,
-      [notifId, targetAssignee, `New Task: ${title.trim()}`, notifMessage]
-    );
-
+    // Create exactly one in-app notification for the assigned employee
     const io = req.app?.get("io");
+    const deadlineText = targetDeadline ? new Date(targetDeadline).toLocaleString() : "Not specified";
+    const notifMessage = `You have been assigned a new task: "${title.trim()}". Deadline: ${deadlineText}. You must open/acknowledge this task within 10 minutes.`;
+
+    await sendNotificationOnce({
+      userId: targetAssignee,
+      title: `New Task: ${title.trim()}`,
+      message: notifMessage,
+      type: "info",
+      link: "/tasks",
+      io,
+      activityType: "task_assigned",
+      entityId: id
+    });
+
     if (io) {
       if (targetCompanyId) io.to(`company_${targetCompanyId}`).emit("task_created", taskRow);
       io.to(`user_${targetAssignee}`).emit("task_created", taskRow);
-      io.emit(`notification_${targetAssignee}`, {
-        id: notifId,
-        userId: targetAssignee,
-        title: `New Task: ${title.trim()}`,
-        message: notifMessage,
-        type: "info",
-        read: false,
-        link: "/tasks",
-        createdAt: new Date().toISOString()
-      });
       io.emit("task_created", taskRow);
     }
 

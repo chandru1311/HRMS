@@ -4,9 +4,7 @@ import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 import {
   getFaceEnrollmentStatus,
-  enrollFace,
-  requestFaceReenrollment,
-  getMyFaceReenrollmentRequest
+  enrollFace
 } from "../firebase";
 import CameraCapture from "../components/CameraCapture";
 import {
@@ -34,10 +32,6 @@ export default function FaceEnrollment() {
   const [consentAgreed, setConsentAgreed] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [request, setRequest] = useState(null);
-  const [requestReason, setRequestReason] = useState("");
-  const [requesting, setRequesting] = useState(false);
-  const [showRequestModal, setShowRequestModal] = useState(false);
 
   const isAdmin =
     currentUser?.role === "admin" ||
@@ -57,51 +51,28 @@ export default function FaceEnrollment() {
     }
   };
 
-  const fetchRequest = async () => {
-    try {
-      const res = await getMyFaceReenrollmentRequest();
-      setRequest(res?.request || null);
-    } catch (err) {
-      console.warn("Failed to load face re-enrollment request:", err);
-      setRequest(null);
-    }
-  };
-
   useEffect(() => {
     fetchStatus();
-    fetchRequest();
   }, []);
 
   const isEnrolled = status?.enrollment_status === "enrolled";
   const isAuthorized = Boolean(status?.metadata?.selfEnrollmentAuthorized);
   const isReenrollAuthorized = Boolean(status?.metadata?.reenrollmentAuthorized);
-  const requestStatus = request?.status || "";
-  const canCapture = isAdmin || (!isEnrolled && isAuthorized) || (isEnrolled && (isReenrollAuthorized || isAuthorized));
-  const canRequestReenrollment = isEnrolled && !isAdmin && requestStatus !== "pending" && requestStatus !== "approved";
+  const hasApprovedReenrollment = isEnrolled && isReenrollAuthorized;
+  const canCapture = isAdmin || (!isEnrolled && isAuthorized) || hasApprovedReenrollment;
 
-  const handleRequestReenrollment = async () => {
-    const reason = requestReason.trim();
-    if (!reason) {
-      showToast("Please provide a short reason for requesting face re-enrollment.", "warning");
+  const handleCaptureClick = () => {
+    if (isEnrolled && !hasApprovedReenrollment && !isAdmin) {
+      showToast("Re-enrollment has not been enabled by an administrator. Please contact your manager or HR.", "warning");
       return;
     }
-    setRequesting(true);
-    try {
-      const res = await requestFaceReenrollment(reason);
-      setRequest(res?.request || { status: "pending" });
-      setRequestReason("");
-      setShowRequestModal(false);
-      showToast("Face re-enrollment request submitted successfully.", "success");
-    } catch (err) {
-      showToast(err.message || "Unable to submit face re-enrollment request.", "error");
-    } finally {
-      setRequesting(false);
-    }
-  };
 
-  const handleOpenRequestModal = () => {
-    setRequestReason("");
-    setShowRequestModal(true);
+    if (!consentAgreed) {
+      showToast("Please acknowledge and check the biometric consent before proceeding.", "warning");
+      return;
+    }
+
+    setShowCamera(true);
   };
 
   const handleCaptureComplete = async (imageBase64) => {
@@ -122,7 +93,6 @@ export default function FaceEnrollment() {
       setShowCamera(false);
       setConsentAgreed(false);
       await fetchStatus();
-      await fetchRequest();
     } catch (err) {
       showToast(err.message || "Failed to enroll face. Please ensure your face is well-lit and centered.", "error");
     } finally {
@@ -253,7 +223,19 @@ export default function FaceEnrollment() {
               <span>Re-Enrollment Authorization Required</span>
             </p>
             <p>
-              Your facial reference template is currently enrolled. To update or replace your registered template, please contact your administrator or HR department to authorize re-enrollment.
+              Your facial reference template is currently enrolled. Re-enrollment must be authorized by an administrator or HR. Once an administrator enables re-enrollment for your account, you will be able to capture and update your face template here.
+            </p>
+          </div>
+        )}
+
+        {isEnrolled && canCapture && (
+          <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-600 dark:text-emerald-400 space-y-1.5">
+            <p className="font-bold flex items-center gap-1.5">
+              <CheckCircle2 size={14} />
+              <span>Re-Enrollment Access Granted</span>
+            </p>
+            <p>
+              An administrator has granted you access to re-enroll your reference face template. Check the biometric consent below and click "Re-Enroll Reference Template" to capture your updated face.
             </p>
           </div>
         )}
@@ -285,13 +267,7 @@ export default function FaceEnrollment() {
 
           <button
             type="button"
-            onClick={() => {
-              if (!consentAgreed) {
-                showToast("Please acknowledge and check the biometric consent before proceeding.", "warning");
-                return;
-              }
-              setShowCamera(true);
-            }}
+            onClick={handleCaptureClick}
             disabled={!canCapture}
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-brand-primary text-white text-xs font-bold hover:bg-brand-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed shadow-sm"
           >
@@ -299,66 +275,7 @@ export default function FaceEnrollment() {
             <span>{isEnrolled ? "Re-Enroll Reference Template" : "Start Face Capture"}</span>
           </button>
         </div>
-
-        {/* Re-enrollment Request Button */}
-        {isEnrolled && !isAdmin && requestStatus !== "pending" && requestStatus !== "approved" && (
-          <button
-            type="button"
-            onClick={handleOpenRequestModal}
-            disabled={requesting}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-brand-primary text-white text-xs font-bold hover:bg-brand-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed shadow-sm"
-          >
-            <Lock size={15} />
-            <span>Request Face Re-enrollment</span>
-          </button>
-        )}
       </div>
-
-      {showRequestModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
-          <div className="w-full max-w-md rounded-[24px] border border-border-card bg-bg-card p-5 shadow-2xl">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-base font-black text-text-main">Request Face Re-enrollment</h3>
-              <button
-                type="button"
-                onClick={() => setShowRequestModal(false)}
-                className="text-text-sec hover:text-text-main text-sm"
-              >
-                ✕
-              </button>
-            </div>
-
-            <label className="block text-xs font-bold text-text-sec mb-2">
-              Reason for re-enrollment
-            </label>
-            <textarea
-              value={requestReason}
-              onChange={(e) => setRequestReason(e.target.value)}
-              rows={4}
-              placeholder="Example: Need to refresh my face template after a new appearance."
-              className="w-full rounded-xl border border-border-card bg-bg-base p-3 text-xs text-text-main placeholder-text-mut focus:outline-none focus:ring-1 focus:ring-brand-primary resize-none"
-            />
-
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setShowRequestModal(false)}
-                className="px-4 py-2 text-xs font-bold rounded-xl border border-border-card text-text-sec hover:text-text-main"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleRequestReenrollment}
-                disabled={requesting || !requestReason.trim()}
-                className="px-4 py-2 text-xs font-bold rounded-xl bg-brand-primary text-white disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                {requesting ? "Submitting..." : "Submit Request"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Camera Capture Modal */}
       {showCamera && (

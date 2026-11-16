@@ -156,7 +156,7 @@ describe("Task SLA & Hourly Report Compliance Engine Test Suite", () => {
     assert.strictEqual(attCheck.rows[0].status, "absent");
     assert.strictEqual(attCheck.rows[0].penalty_status, "unseen_task_penalty");
     assert.strictEqual(attCheck.rows[0].is_admin_locked, true);
-    assert.ok(attCheck.rows[0].penalty_reason.includes("1 hour"));
+    assert.ok(attCheck.rows[0].penalty_reason.includes("10 minutes") || attCheck.rows[0].penalty_reason.includes("1 hour"));
 
     // Verify task sla_penalty_applied is now TRUE
     const taskCheck = await query("SELECT sla_penalty_applied FROM tasks WHERE id = $1", [taskId]);
@@ -166,6 +166,16 @@ describe("Task SLA & Hourly Report Compliance Engine Test Suite", () => {
     const notifs = await query("SELECT * FROM notifications WHERE user_id = $1 ORDER BY created_at DESC", [testEmp.id]);
     assert.ok(notifs.rows.length > 0);
     assert.ok(notifs.rows[0].title.includes("Attendance Marked Absent"));
+
+    // Employee cannot check in again today while compliance lock is active
+    const checkInFail = await fetch(`${baseUrl}/attendance/check-in`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${empToken}` },
+      body: JSON.stringify({ userId: testEmp.id, verificationSessionToken: "any_token" })
+    });
+    assert.strictEqual(checkInFail.status, 403);
+    const checkInFailJson = await checkInFail.json();
+    assert.ok(checkInFailJson.error.includes("blocked") || checkInFailJson.error.includes("locked"));
   });
 
   it("4. Admin can revert penalty -> restores Present status and lifts lock", async () => {

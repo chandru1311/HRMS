@@ -1,4 +1,5 @@
 import { query } from "../config/db.js";
+import { sendNotificationOnce } from "../services/notificationService.js";
 
 export const getNotifications = async (req, res) => {
   try {
@@ -35,65 +36,38 @@ export const getNotifications = async (req, res) => {
 
 export const createNotification = async (req, res) => {
   try {
-    const { userId, title, message, type = "info", link = "" } = req.body;
+    const { userId, title, message, type = "info", link = "", activityType = null, entityId = null } = req.body;
     if (!userId || !title || !message) {
       return res.status(400).json({ error: "userId, title, and message are required." });
     }
 
-    // Deduplication check: prevent duplicate notifications
-    const existing = await query(
-      `SELECT * FROM notifications WHERE user_id = $1 AND title = $2 AND message = $3 LIMIT 1`,
-      [userId, title, message]
-    );
+    const io = req.app?.get("io");
+    const result = await sendNotificationOnce({
+      userId,
+      title,
+      message,
+      type,
+      link,
+      io,
+      activityType,
+      entityId
+    });
 
-    if (existing.rows.length > 0) {
-      const row = existing.rows[0];
+    if (!result) {
+      return res.status(500).json({ error: "Failed to create notification." });
+    }
+
+    if (result.duplicate) {
       return res.json({
-        id: row.id,
-        _id: row.id,
-        userId: row.user_id,
-        title: row.title,
-        message: row.message,
-        type: row.type,
-        read: row.read,
-        link: row.link,
-        createdAt: row.created_at,
-        created_at: row.created_at,
-        timestamp: row.created_at,
-        duplicate: true
+        ...result,
+        _id: result.id,
+        type,
+        read: false,
+        link
       });
     }
 
-    const id = "notif_" + Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
-    const result = await query(
-      `INSERT INTO notifications (id, user_id, title, message, type, read, link)
-       VALUES ($1, $2, $3, $4, $5, false, $6)
-       RETURNING *`,
-      [id, userId, title, message, type, link]
-    );
-
-    const row = result.rows[0];
-    const formatted = {
-      id: row.id,
-      _id: row.id,
-      userId: row.user_id,
-      title: row.title,
-      message: row.message,
-      type: row.type,
-      read: row.read,
-      link: row.link,
-      createdAt: row.created_at,
-      created_at: row.created_at,
-      timestamp: row.created_at
-    };
-
-    // Broadcast live socket event if io is available
-    const io = req.app?.get("io");
-    if (io) {
-      io.emit(`notification_${userId}`, formatted);
-    }
-
-    res.status(201).json(formatted);
+    return res.status(201).json(result);
   } catch (err) {
     console.error("createNotification error:", err);
     res.status(500).json({ error: "Failed to create notification." });

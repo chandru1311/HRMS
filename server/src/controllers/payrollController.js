@@ -357,23 +357,49 @@ export const calculatePayrollBatch = async (req, res) => {
 
       const attRes = await query(
         `SELECT COUNT(*) as count, status FROM attendance 
-         WHERE user_id = $1 AND date LIKE $2 
+         WHERE user_id = $1 
+           AND (
+             TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM') = $2 
+             OR id LIKE $3
+           )
          GROUP BY status`,
-        [emp.id, `${datePrefix}%`]
+        [emp.id, datePrefix, `${emp.id}_${datePrefix}%`]
       ).catch(() => ({ rows: [] }));
 
+      const leaveRes = await query(
+        `SELECT COALESCE(SUM(total_days::numeric), 0) as approved_leave_days 
+         FROM leave_requests 
+         WHERE user_id = $1 
+           AND status = 'approved'
+           AND (
+             TO_CHAR(start_date AT TIME ZONE 'UTC', 'YYYY-MM') = $2 
+             OR TO_CHAR(end_date AT TIME ZONE 'UTC', 'YYYY-MM') = $2
+           )`,
+        [emp.id, datePrefix]
+      ).catch(() => ({ rows: [{ approved_leave_days: 0 }] }));
+
       let presentCount = 0;
-      let onLeaveCount = 0;
+      let halfDayCount = 0;
+      let onLeaveCount = Number(leaveRes.rows[0]?.approved_leave_days || 0);
+      let absentCount = 0;
+
       attRes.rows.forEach(r => {
         const count = Number(r.count || 0);
-        if (r.status === "present") presentCount += count;
-        else if (r.status === "half-day") presentCount += (count * 0.5);
-        else if (r.status === "on-leave") onLeaveCount += count;
+        const st = String(r.status || "").toLowerCase();
+        if (st === "present" || st === "completed" || st === "checked-in" || st === "checked-out" || st === "in-progress" || st === "on-break") {
+          presentCount += count;
+        } else if (st === "half-day") {
+          halfDayCount += count;
+        } else if (st === "on-leave") {
+          onLeaveCount += count;
+        } else if (st === "absent") {
+          absentCount += count;
+        }
       });
 
-      const loggedDays = presentCount + onLeaveCount;
-      const paidDays = loggedDays > 0 ? Math.min(wDays, loggedDays) : wDays;
-      const lopsDays = Math.max(0, wDays - paidDays);
+      // Loss of Pay (LOP) Days = absent days + 0.5 of half-days
+      const lopsDays = Math.round((absentCount + (halfDayCount * 0.5)) * 10) / 10;
+      const paidDays = Math.max(0, Math.round((wDays - lopsDays) * 10) / 10);
 
       const actualGross = Math.round(((gross / wDays) * paidDays) * 100) / 100;
       const lopAmount = Math.round((gross - actualGross) * 100) / 100;
@@ -547,5 +573,95 @@ export const approvePayrollBatch = async (req, res) => {
     res.status(500).json({ error: "Failed to approve payroll batch." });
   }
 };
+
+/**
+ * Automatically calculate an employee's attendance days, LOP (Loss of Pay) days,
+ * and paid days for a specific payroll month and year directly from daily attendance logs & leave requests.
+ */
+export const getEmployeeAttendancePayrollSummary = async (req, res) => {
+  try {
+    const { userId, employeeId, month, year, companyId, workingDays = 30 } = req.query;
+    const targetUserId = userId || employeeId;
+    if (!targetUserId || !month || !year) {
+      return res.status(400).json({ error: "userId, month, and year are required." });
+    }
+
+    const monthNames = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+    let mIdx = monthNames.indexOf(String(month).toLowerCase());
+    let monthNumberStr = mIdx !== -1 ? String(mIdx + 1).padStart(2, '0') : String(month).padStart(2, '0');
+    const datePrefix = `${year}-${monthNumberStr}`;
+    const wDays = Number(workingDays) || 30;
+
+    // 1. Fetch attendance records for this month
+    const attRes = await query(
+      `SELECT id, date, status, check_in, check_out, duration_minutes 
+       FROM attendance 
+       WHERE user_id = $1 
+         AND (
+           TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM') = $2 
+           OR id LIKE $3
+         )
+       ORDER BY date ASC`,
+      [targetUserId, datePrefix, `${targetUserId}_${datePrefix}%`]
+    ).catch(() => ({ rows: [] }));
+
+    // 2. Fetch approved leaves for this month
+    const leaveRes = await query(
+      `SELECT COALESCE(SUM(total_days::numeric), 0) as approved_leave_days 
+       FROM leave_requests 
+       WHERE user_id = $1 
+         AND status = 'approved'
+         AND (
+           TO_CHAR(start_date AT TIME ZONE 'UTC', 'YYYY-MM') = $2 
+           OR TO_CHAR(end_date AT TIME ZONE 'UTC', 'YYYY-MM') = $2
+         )`,
+      [targetUserId, datePrefix]
+    ).catch(() => ({ rows: [{ approved_leave_days: 0 }] }));
+
+    const approvedLeaveDays = Number(leaveRes.rows[0]?.approved_leave_days || 0);
+
+    let presentDays = 0;
+    let halfDays = 0;
+    let absentDays = 0;
+    let onLeaveDays = 0;
+
+    attRes.rows.forEach(r => {
+      const st = String(r.status || "").toLowerCase();
+      if (st === "present" || st === "completed" || st === "checked-in" || st === "checked-out" || st === "in-progress" || st === "on-break") {
+        presentDays += 1;
+      } else if (st === "half-day") {
+        halfDays += 1;
+      } else if (st === "on-leave") {
+        onLeaveDays += 1;
+      } else if (st === "absent") {
+        absentDays += 1;
+      }
+    });
+
+    const totalApprovedLeave = onLeaveDays + approvedLeaveDays;
+    // Loss of Pay days = absent days + half of half-days
+    const lopDays = Math.round((absentDays + (halfDays * 0.5)) * 10) / 10;
+    const paidDays = Math.max(0, Math.round((wDays - lopDays) * 10) / 10);
+
+    res.json({
+      userId: targetUserId,
+      month,
+      year: Number(year),
+      workingDays: wDays,
+      presentDays,
+      halfDays,
+      onLeaveDays: totalApprovedLeave,
+      absentDays,
+      lopDays,
+      paidDays,
+      totalLogs: attRes.rows.length,
+      logs: attRes.rows
+    });
+  } catch (err) {
+    console.error("getEmployeeAttendancePayrollSummary error:", err);
+    res.status(500).json({ error: "Failed to calculate employee attendance summary." });
+  }
+};
+
 
 

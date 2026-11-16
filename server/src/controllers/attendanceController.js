@@ -11,6 +11,7 @@ import { validateEnrollmentPayload, canEnrollFace } from "../services/faceEnroll
 import { generateVerificationSessionToken, hashToken } from "../services/livenessVerification.js";
 import { validateServerGeofence } from "../utils/geofence.js";
 import { withTransaction } from "../utils/transaction.js";
+import { sendNotificationOnce } from "../services/notificationService.js";
 
 const FACE_REENROLL_VALIDITY_HOURS = Number(process.env.FACE_REENROLL_VALIDITY_HOURS || 24);
 
@@ -787,13 +788,15 @@ export const adminRevertPenalty = async (req, res) => {
     if (allRes?.rows) updatedTasks = allRes.rows;
 
     // Restore employee attendance record to Present and remove lock
+    // Restore employee attendance record and remove lock
     const attRes = await query(
       `UPDATE attendance
-       SET status = 'present',
+       SET status = CASE WHEN check_in IS NOT NULL THEN 'present' ELSE 'not-checked-in' END,
            is_admin_locked = FALSE,
            penalty_status = NULL,
            penalty_reason = NULL,
            penalized_by_task_id = NULL,
+           check_out = NULL,
            updated_at = NOW()
        WHERE id = $1
        RETURNING *`,
@@ -802,19 +805,17 @@ export const adminRevertPenalty = async (req, res) => {
     const updatedAttendance = attRes.rows[0];
     const updated = updatedAttendance || record;
 
-    const notifId = "notif_" + Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
-    await query(
-      `INSERT INTO notifications (id, user_id, title, message, type, read, link)
-       VALUES ($1, $2, $3, $4, 'info', FALSE, '/attendance')`,
-      [
-        notifId,
-        record.user_id,
-        "Attendance Penalty Resolved by Admin",
-        `Your attendance penalty has been resolved by Admin. Status restored to Present and reporting lock removed.`
-      ]
-    );
-
     const io = req.app?.get("io");
+    await sendNotificationOnce({
+      userId: record.user_id,
+      title: "Attendance Penalty Resolved by Admin",
+      message: "Your attendance penalty has been resolved by Admin. Status restored to Present and reporting lock removed.",
+      type: "info",
+      link: "/attendance",
+      io,
+      activityType: "penalty_resolved",
+      entityId: id
+    });
     if (io) {
       const isRestored = updated.status === "present";
       const payload = {
@@ -925,7 +926,7 @@ export const getFaceStatus = async (req, res) => {
 export const authorizeFaceEnrollment = async (req, res) => {
   try {
     await ensureFaceReenrollmentTable();
-    const { targetUserId } = req.body;
+    const { targetUserId, authorized = true } = req.body;
     if (!targetUserId) {
       return res.status(400).json({ error: "targetUserId is required." });
     }
@@ -951,6 +952,51 @@ export const authorizeFaceEnrollment = async (req, res) => {
 
     const profileId = `${targetUserId}_profile`;
     const now = new Date().toISOString();
+
+    if (authorized === false) {
+      await query(
+        `UPDATE employee_face_profiles
+         SET metadata = COALESCE(metadata, '{}'::jsonb) || $1::jsonb,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $2 OR (user_id = $3 AND company_id = $4)`,
+        [
+          JSON.stringify({
+            selfEnrollmentAuthorized: false,
+            reenrollmentAuthorized: false,
+            revokedAt: now,
+            revokedBy: req.user.id
+          }),
+          profileId,
+          targetUserId,
+          targetUser.company_id || companyId
+        ]
+      );
+
+      await query(
+        `UPDATE face_reenrollment_requests
+         SET status = 'cancelled',
+             permission_expires_at = NULL,
+             updated_at = NOW()
+         WHERE employee_id = $1 AND company_id = $2 AND status = 'approved'`,
+        [targetUserId, targetUser.company_id || companyId]
+      );
+
+      auditService.logAudit({
+        userId: req.user.id,
+        action: "BIOMETRIC_ENROLLMENT_REVOKED",
+        resourceType: "biometrics",
+        resourceId: profileId,
+        details: { targetUserId, revokedBy: req.user.id },
+        req
+      });
+
+      return res.json({
+        success: true,
+        message: "Face re-enrollment access revoked successfully for employee.",
+        targetUserId,
+        authorized: false
+      });
+    }
 
     await query(
       `INSERT INTO employee_face_profiles (id, user_id, company_id, enrollment_status, metadata, updated_at)
@@ -993,7 +1039,7 @@ export const authorizeFaceEnrollment = async (req, res) => {
       req
     });
 
-    res.json({ success: true, message: "Face self-enrollment authorized successfully for employee.", targetUserId });
+    res.json({ success: true, message: "Face self-enrollment authorized successfully for employee.", targetUserId, authorized: true });
   } catch (err) {
     console.error("authorizeFaceEnrollment error:", err);
     res.status(500).json({ error: "Failed to authorize face enrollment." });
@@ -1409,7 +1455,9 @@ export const getAttendance = async (req, res) => {
 
       let frontendStatus = "not-checked-in";
       let currentBreakTimerEnd = null;
-      if (row.check_out) {
+      if (row.is_admin_locked || row.penalty_status || row.status === "absent") {
+        frontendStatus = "absent";
+      } else if (row.check_out) {
         frontendStatus = "checked-out";
       } else if (Array.isArray(row.breaks) && row.breaks.some(b => !b.end && !b.resumeTime)) {
         frontendStatus = "on-break";
@@ -1432,8 +1480,8 @@ export const getAttendance = async (req, res) => {
         date: dateStr,
         checkIn: formatTime(checkInDate),
         checkOut: formatTime(checkOutDate),
-        checkInTime: row.check_in || now,
-        checkOutTime: row.check_out || now,
+        checkInTime: row.check_in || null,
+        checkOutTime: row.check_out || null,
         checkInLocation: row.check_in_location || row.location,
         checkOutLocation: row.check_out_location,
         totalHours: durationHours,
@@ -1459,6 +1507,36 @@ export const checkIn = async (req, res) => {
     const today = req.body.date || new Date().toISOString().split("T")[0];
     const now = new Date().toISOString();
     const { location, workMode = "office", verificationSessionToken } = req.body;
+    const recordId = `${userId}_${today}`;
+
+    // Enforce compliance lock: Employee cannot check in again today once marked absent/locked by compliance
+    const lockCheck = await query(
+      `SELECT id, status, is_admin_locked, penalty_status, penalty_reason
+       FROM attendance
+       WHERE (id = $1 OR (user_id = $2 AND date = $3))
+         AND (is_admin_locked IS TRUE OR penalty_status IS NOT NULL OR status = 'absent')
+       LIMIT 1`,
+      [recordId, userId, today]
+    );
+
+    if (lockCheck.rows.length > 0) {
+      const lockedRow = lockCheck.rows[0];
+      if (lockedRow.is_admin_locked || lockedRow.penalty_status || lockedRow.status === "absent") {
+        auditService.logAudit({
+          userId,
+          action: "ATTENDANCE_CHECKIN_BLOCKED_COMPLIANCE_LOCK",
+          resourceType: "attendance",
+          resourceId: lockedRow.id,
+          details: { reason: "Locked out due to compliance penalty; requires Admin resolution", penaltyReason: lockedRow.penalty_reason },
+          req
+        });
+        return res.status(403).json({
+          error: "Check-in blocked: Your attendance for today is marked Absent and locked due to an unacknowledged task. You cannot check in again today unless unlocked by an Administrator.",
+          locked: true,
+          penaltyReason: lockedRow.penalty_reason || "Task was not viewed within 10 minutes."
+        });
+      }
+    }
 
     if (!verificationSessionToken) {
       return res.status(400).json({
@@ -1500,12 +1578,14 @@ export const checkIn = async (req, res) => {
       });
     }
 
-    const recordId = `${userId}_${today}`;
     const result = await query(
       `INSERT INTO attendance (id, user_id, company_id, date, check_in, status, work_mode, check_in_location, location)
        VALUES ($1, $2, $3, $4, $5, 'present', $6, $7, $7)
        ON CONFLICT (id) DO UPDATE SET
-         check_in = COALESCE(attendance.check_in, EXCLUDED.check_in),
+         check_in = CASE
+           WHEN attendance.check_out IS NOT NULL THEN EXCLUDED.check_in
+           ELSE COALESCE(attendance.check_in, EXCLUDED.check_in)
+         END,
          check_out = NULL,
          status = 'present',
          check_in_location = EXCLUDED.check_in_location,

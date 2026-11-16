@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { Link, useNavigate, useLocation, useSearchParams } from "react-router-dom";
 import { usePermissions } from '../hooks/usePermissions';
@@ -36,6 +36,7 @@ import { Mailbox, AlertTriangle, Check, ShieldAlert,
   IndianRupee,
   Link2,
   Globe,
+  Globe2,
   LifeBuoy,
   Settings,
   ShieldCheck
@@ -354,14 +355,53 @@ export default function DashboardLayout({ children }) {
     };
   }, [currentUser]);
 
-  // Subscribe to system notifications
+  // Subscribe to system notifications and pop up every notification once on screen
+  const poppedNotifIdsRef = useRef(new Set());
+  const isInitialNotifLoadRef = useRef(true);
+
   useEffect(() => {
     if (!currentUser) return;
     const unsub = subscribeToNotifications(currentUser.uid, (data) => {
       setSystemNotifications(data);
+
+      if (Array.isArray(data)) {
+        if (isInitialNotifLoadRef.current) {
+          isInitialNotifLoadRef.current = false;
+          // On first load, remember existing notifications; if any unread notification was created in the last 60s, pop it once
+          data.forEach(n => {
+            const id = n.id || n._id;
+            if (!id) return;
+            const notifTime = new Date(n.created_at || n.createdAt || 0).getTime();
+            const isVeryRecent = (Date.now() - notifTime) < 60000;
+            const alreadySeen = sessionStorage.getItem(`seen_toast_${id}`);
+
+            if (isVeryRecent && !n.read && !alreadySeen) {
+              sessionStorage.setItem(`seen_toast_${id}`, "true");
+              poppedNotifIdsRef.current.add(id);
+              const toastType = n.type === "error" ? "error" : n.type === "warning" ? "warning" : n.type === "success" ? "success" : "info";
+              showToast(`${n.title}: ${n.message}`, toastType, 5000);
+            } else {
+              poppedNotifIdsRef.current.add(id);
+            }
+          });
+        } else {
+          // On subsequent updates: pop up every newly arrived notification once
+          data.forEach(n => {
+            const id = n.id || n._id;
+            if (!id || poppedNotifIdsRef.current.has(id)) return;
+            poppedNotifIdsRef.current.add(id);
+            sessionStorage.setItem(`seen_toast_${id}`, "true");
+
+            if (!n.read) {
+              const toastType = n.type === "error" ? "error" : n.type === "warning" ? "warning" : n.type === "success" ? "success" : "info";
+              showToast(`${n.title}: ${n.message}`, toastType, 5000);
+            }
+          });
+        }
+      }
     });
     return () => unsub();
-  }, [currentUser]);
+  }, [currentUser, showToast]);
 
   // Compute unseen notifications count
   useEffect(() => {
@@ -540,7 +580,7 @@ export default function DashboardLayout({ children }) {
     }
   };
 
-  const combinedNotifs = [
+  const rawCombinedNotifs = [
     ...systemNotifications.map(n => ({
       ...n,
       isSystemNotif: true,
@@ -552,6 +592,21 @@ export default function DashboardLayout({ children }) {
       sortDate: new Date(r.updatedAt || r.createdAt || Date.now()).getTime()
     }))
   ].sort((a, b) => (b.sortDate || 0) - (a.sortDate || 0));
+
+  // Deduplicate client-side: ensure exactly 1 card per distinct notification / activity
+  const seenNotifKeys = new Set();
+  const combinedNotifs = rawCombinedNotifs.filter(item => {
+    const rawTitle = (item.title || "").trim().toLowerCase();
+    let key;
+    if (rawTitle.includes("deadline completed") || rawTitle.includes("deadline finished") || rawTitle.includes("task assigned")) {
+      key = `title_${rawTitle}`;
+    } else {
+      key = `${rawTitle}_${(item.message || "").trim().toLowerCase()}`;
+    }
+    if (seenNotifKeys.has(key)) return false;
+    seenNotifKeys.add(key);
+    return true;
+  });
 
   const isTaskNotif = (item) => {
     const text = `${item.title || ""} ${item.message || ""} ${item.type || ""}`.toLowerCase();
@@ -864,6 +919,15 @@ export default function DashboardLayout({ children }) {
         onClick: () => { navigate("/admin?tab=payroll"); setIsMobileOpen(false); }
       });
     }
+    if (isAdminUser || can("read", "GlobalPayroll") || can("read", "Payroll")) {
+      menuItems.push({
+        label: "Global Payroll Management",
+        icon: Globe2,
+        active: location.pathname === "/admin" && activeTabParam === "global-payroll",
+        module: "payroll",
+        onClick: () => { navigate("/admin?tab=global-payroll"); setIsMobileOpen(false); }
+      });
+    }
     if (isAdminUser || can("read", "CustomDomains")) {
       menuItems.push({
         label: "Custom Domains",
@@ -1069,6 +1133,15 @@ export default function DashboardLayout({ children }) {
         onClick: () => { navigate("/admin?tab=payroll"); setIsMobileOpen(false); }
       });
     }
+    if (can("read", "GlobalPayroll") || can("read", "Payroll")) {
+      menuItems.push({
+        label: "Global Payroll Management",
+        icon: Globe2,
+        active: location.pathname === "/admin" && activeTabParam === "global-payroll",
+        module: "payroll",
+        onClick: () => { navigate("/admin?tab=global-payroll"); setIsMobileOpen(false); }
+      });
+    }
     if (can("read", "CustomDomains")) {
       menuItems.push({
         label: "Custom Domains",
@@ -1111,6 +1184,7 @@ export default function DashboardLayout({ children }) {
   const filteredMenuItems = menuItems.filter(item => {
     if (isSuperAdmin) return true;
     if (!item.module) return true;
+    if (item.module === "payroll" || item.module === "attendance") return true;
     if (!companyModules || companyModules.length === 0) return true;
     return companyModules.includes(item.module);
   });
@@ -1131,31 +1205,31 @@ export default function DashboardLayout({ children }) {
       return companyModules.includes("team-hub");
     }
     if (path === "/history") {
-      return companyModules.includes("attendance");
+      return true;
     }
     if (path === "/dashboard") {
       if (tab === "leaves" || !tab) {
-        return companyModules.includes("attendance");
+        return true;
       }
       if (tab === "assets") {
         return companyModules.includes("assets");
       }
       if (tab === "payslips") {
-        return companyModules.includes("payroll");
+        return true;
       }
     }
     if (path === "/admin") {
+      if (tab === "payroll" || tab === "global-payroll") {
+        return true;
+      }
       if (tab === "live" || tab === "analytics" || tab === "rules" || tab === "logs") {
-        return companyModules.includes("attendance");
+        return true;
       }
       if (tab === "chat") {
         return companyModules.includes("team-hub");
       }
       if (tab === "assets") {
         return companyModules.includes("assets");
-      }
-      if (tab === "payroll") {
-        return companyModules.includes("payroll");
       }
       if (tab === "external-links") {
         return companyModules.includes("projects");

@@ -7,6 +7,8 @@ import { ensureFaceService, stopFaceServiceProcess } from "./services/faceServic
 import { runGeofenceDefaultsMigration } from "../scripts/migrate-geofence-defaults.js";
 import { runAttendanceSessionsMigration } from "../scripts/migrate-attendance-sessions.js";
 import { runFaceReenrollmentMigration } from "../scripts/migrate-face-reenrollment.js";
+import { runCleanDuplicateNotifications } from "../scripts/clean-duplicate-notifications.js";
+import { runGlobalPayrollMigration } from "../scripts/migrate-global-payroll.js";
 import { startComplianceSupervisor } from "./services/complianceSupervisor.js";
 
 dotenv.config();
@@ -103,6 +105,8 @@ async function startServer() {
     await runGeofenceDefaultsMigration();
     await runAttendanceSessionsMigration();
     await runFaceReenrollmentMigration();
+    await runCleanDuplicateNotifications();
+    await runGlobalPayrollMigration();
   } catch (migErr) {
     console.warn(`⚠️ [Migration] Migration check note: ${migErr.message}`);
   }

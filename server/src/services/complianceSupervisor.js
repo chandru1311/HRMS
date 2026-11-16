@@ -1,4 +1,5 @@
 import { query } from "../config/db.js";
+import { sendNotificationOnce } from "./notificationService.js";
 
 /**
  * Compliance Supervisor Service
@@ -50,7 +51,7 @@ export const checkComplianceNow = async (io = null, targetCompanyId = null) => {
 };
 
 /**
- * 1. Check for tasks assigned to employees not viewed/acknowledged within 1 hour
+ * 1. Check for tasks assigned to employees not viewed/acknowledged within 10 minutes
  */
 export const runTaskUnseenComplianceCheck = async (io = null, targetCompanyId = null) => {
   try {
@@ -63,7 +64,7 @@ export const runTaskUnseenComplianceCheck = async (io = null, targetCompanyId = 
         AND t.assigned_to IS NOT NULL
         AND t.viewed_at IS NULL
         AND (t.sla_penalty_applied IS FALSE OR t.sla_penalty_applied IS NULL)
-        AND COALESCE(t.assigned_at, t.created_at) <= (NOW() - INTERVAL '1 hour')
+        AND COALESCE(t.assigned_at, t.created_at) <= (NOW() - INTERVAL '10 minutes')
     `;
     const params = [];
     if (targetCompanyId) {
@@ -76,7 +77,7 @@ export const runTaskUnseenComplianceCheck = async (io = null, targetCompanyId = 
     const violations = res.rows;
     if (violations.length === 0) return 0;
 
-    console.log(`⏱️ [Compliance] Found ${violations.length} task(s) unviewed for > 1 hour. Applying penalties...`);
+    console.log(`⏱️ [Compliance] Found ${violations.length} task(s) unviewed for > 10 minutes. Applying penalties...`);
 
     for (const task of violations) {
       // 1. Mark task penalty applied immediately to prevent duplicate runs
@@ -87,7 +88,7 @@ export const runTaskUnseenComplianceCheck = async (io = null, targetCompanyId = 
 
       const tz = await getCompanyTimezone(task.company_id);
       const today = getLocalDateInTz(tz);
-      const penaltyReason = `Task "${task.title}" was not opened or acknowledged within 1 hour of assignment.`;
+      const penaltyReason = `Task "${task.title}" was not opened or acknowledged within 10 minutes of assignment.`;
 
       // 2. Check if employee already has an attendance record today
       const attRes = await query(
@@ -102,7 +103,6 @@ export const runTaskUnseenComplianceCheck = async (io = null, targetCompanyId = 
         await query(
           `UPDATE attendance
            SET status = 'absent',
-               check_out = COALESCE(check_out, NOW()),
                penalty_status = 'unseen_task_penalty',
                is_admin_locked = TRUE,
                penalty_applied_at = NOW(),
@@ -113,32 +113,39 @@ export const runTaskUnseenComplianceCheck = async (io = null, targetCompanyId = 
           [penaltyReason, task.id, attId]
         );
       } else {
-        attId = "att_" + Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
+        attId = `${task.assigned_to}_${today}`;
         await query(
           `INSERT INTO attendance (
             id, user_id, company_id, date, status, penalty_status,
             is_admin_locked, penalty_applied_at, penalty_reason, penalized_by_task_id,
             created_at, updated_at
           )
-          VALUES ($1, $2, $3, $4, 'absent', 'unseen_task_penalty', TRUE, NOW(), $5, $6, NOW(), NOW())`,
+          VALUES ($1, $2, $3, $4, 'absent', 'unseen_task_penalty', TRUE, NOW(), $5, $6, NOW(), NOW())
+          ON CONFLICT (id) DO UPDATE SET
+            status = 'absent',
+            penalty_status = 'unseen_task_penalty',
+            is_admin_locked = TRUE,
+            penalty_applied_at = NOW(),
+            penalty_reason = EXCLUDED.penalty_reason,
+            penalized_by_task_id = EXCLUDED.penalized_by_task_id,
+            updated_at = NOW()`,
           [attId, task.assigned_to, task.company_id, today, penaltyReason, task.id]
         );
       }
 
-      // 3. Send Notification to Employee
-      const empNotifId = "notif_" + Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
-      await query(
-        `INSERT INTO notifications (id, user_id, title, message, type, read, link)
-         VALUES ($1, $2, $3, $4, 'error', FALSE, '/tasks')`,
-        [
-          empNotifId,
-          task.assigned_to,
-          "Attendance Marked Absent (Task Unviewed SLA)",
-          `You did not view or acknowledge task "${task.title}" within 1 hour of assignment. Your attendance has been marked Absent and locked. Contact your Admin to resolve.`
-        ]
-      );
+      // 3. Send Notification to Employee (guaranteed exactly 1 notification)
+      await sendNotificationOnce({
+        userId: task.assigned_to,
+        title: "Attendance Marked Absent (Task Unviewed SLA)",
+        message: `You did not view or acknowledge task "${task.title}" within 10 minutes of assignment. Your attendance has been marked Absent and check-in is locked for today. Contact your Admin to resolve.`,
+        type: "error",
+        link: "/tasks",
+        io,
+        activityType: "absent_penalty",
+        entityId: task.id
+      });
 
-      // 4. Send Notification to Admins of this company
+      // 4. Send Notification to Admins of this company (guaranteed exactly 1 alert per employee absent)
       if (task.company_id) {
         const adminsRes = await query(
           `SELECT id FROM users WHERE company_id = $1 AND role IN ('admin', 'superadmin')`,
@@ -146,17 +153,16 @@ export const runTaskUnseenComplianceCheck = async (io = null, targetCompanyId = 
         );
 
         for (const admin of adminsRes.rows) {
-          const adminNotifId = "notif_" + Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
-          await query(
-            `INSERT INTO notifications (id, user_id, title, message, type, read, link)
-             VALUES ($1, $2, $3, $4, 'warning', FALSE, '/admin')`,
-            [
-              adminNotifId,
-              admin.id,
-              "Employee Marked Absent: Task SLA Breach",
-              `${task.employee_name} did not view task "${task.title}" within 1 hour. Attendance automatically marked Absent.`
-            ]
-          );
+          await sendNotificationOnce({
+            userId: admin.id,
+            title: "Employee Marked Absent: Task SLA Breach",
+            message: `${task.employee_name || "Employee"} did not view task "${task.title}" within 10 minutes. Attendance automatically marked Absent.`,
+            type: "warning",
+            link: "/admin",
+            io,
+            activityType: "admin_absent_alert",
+            entityId: `${task.assigned_to}_${task.id}`
+          });
         }
       }
 
@@ -230,7 +236,11 @@ export const runHourlyReportingComplianceCheck = async (io = null, targetCompany
       );
 
       // If task deadline is already passed and has expired, reporting is locked on deadline grounds
-      const meta = (task.metadata && typeof task.metadata === 'object') ? task.metadata : {};
+      const rawMeta = task.metadata;
+      const meta = (rawMeta && typeof rawMeta === 'object') ? rawMeta : (typeof rawMeta === 'string' ? JSON.parse(rawMeta || '{}') : {});
+      if (meta.deadlineNotified || task.deadline_notified) {
+        continue;
+      }
       const candidateDeadlines = [
         task.deadline ? new Date(task.deadline).getTime() : 0,
         meta.deadlineTimestamp ? new Date(meta.deadlineTimestamp).getTime() : 0
@@ -238,7 +248,25 @@ export const runHourlyReportingComplianceCheck = async (io = null, targetCompany
       const exactDeadline = candidateDeadlines.length > 0 ? new Date(Math.max(...candidateDeadlines)) : null;
       if (exactDeadline && !isNaN(exactDeadline.getTime())) {
         if (Date.now() > exactDeadline.getTime()) {
-          // Task deadline has expired without extension; skip hourly report penalties
+          // Task deadline has completed; mark metadata so it never notifies again
+          const updatedMeta = { ...meta, deadlineNotified: true, deadlineNotifiedAt: new Date().toISOString() };
+          await query(
+            `UPDATE tasks SET metadata = $1, updated_at = NOW() WHERE id = $2`,
+            [JSON.stringify(updatedMeta), task.task_id]
+          ).catch(() => {});
+
+          // Send exactly one notification and skip hourly report penalties
+          await sendNotificationOnce({
+            userId: task.assigned_to,
+            title: `Task Deadline Completed: ${task.task_title}`,
+            message: `The deadline for task "${task.task_title}" has completed. Action on this task is concluded.`,
+            type: "warning",
+            link: "/task-management",
+            io,
+            activityType: "task_deadline_completed",
+            entityId: task.task_id,
+            taskTitle: task.task_title
+          });
           continue;
         }
       }
@@ -261,44 +289,24 @@ export const runHourlyReportingComplianceCheck = async (io = null, targetCompany
 
       const elapsedMinutes = Math.floor((Date.now() - baselineTime) / (60 * 1000));
 
-      // Rule 1: Every 5 minutes reminder (>= 5 and < 10)
+      // Rule 1: At most 1 progress reminder per task
       if (elapsedMinutes >= 5 && elapsedMinutes < 10 && !remindedUsers.has(task.assigned_to)) {
-        const notifCheck = await query(
-          `SELECT id FROM notifications 
-           WHERE user_id = $1 
-             AND created_at >= (NOW() - INTERVAL '4 minutes')
-           LIMIT 1`,
-          [task.assigned_to]
-        );
+        const notifResult = await sendNotificationOnce({
+          userId: task.assigned_to,
+          title: `Task Progress Report Due (5m): ${task.task_title}`,
+          message: `5 minutes have passed since your last update on task "${task.task_title}". Please submit your progress report. If you do not report within 10 minutes, your attendance will be marked Absent.`,
+          type: "warning",
+          link: "/task-management",
+          io,
+          activityType: "report_reminder",
+          entityId: task.task_id,
+          taskTitle: task.task_title
+        });
 
-        if (notifCheck.rows.length === 0) {
+        if (notifResult && !notifResult.duplicate) {
           remindersCount++;
-          remindedUsers.add(task.assigned_to);
-          const remNotifId = "notif_" + Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
-          await query(
-            `INSERT INTO notifications (id, user_id, title, message, type, read, link)
-             VALUES ($1, $2, $3, $4, 'warning', FALSE, '/task-management')`,
-            [
-              remNotifId,
-              task.assigned_to,
-              `Task Progress Report Due (5m): ${task.task_title}`,
-              `5 minutes have passed since your last update on task "${task.task_title}". Please submit your progress report. If you do not report within 10 minutes, your attendance will be marked Absent.`
-            ]
-          );
-
-          if (io) {
-            io.emit(`notification_${task.assigned_to}`, {
-              id: remNotifId,
-              userId: task.assigned_to,
-              title: `Task Progress Report Due (5m): ${task.task_title}`,
-              message: `5 minutes have passed. Please submit your progress report on task "${task.task_title}".`,
-              type: "warning",
-              read: false,
-              link: "/task-management",
-              createdAt: new Date().toISOString()
-            });
-          }
         }
+        remindedUsers.add(task.assigned_to);
       }
 
       // Rule 2: 10-Minute Missing Report Violation (>= 10 minutes) -> Mark Absent & Lock Task
@@ -330,7 +338,6 @@ export const runHourlyReportingComplianceCheck = async (io = null, targetCompany
             await query(
               `UPDATE attendance
                SET status = 'absent',
-                   check_out = COALESCE(check_out, NOW()),
                    penalty_status = COALESCE(penalty_status, 'missed_hourly_report_penalty'),
                    is_admin_locked = TRUE,
                    penalty_applied_at = NOW(),
@@ -339,11 +346,6 @@ export const runHourlyReportingComplianceCheck = async (io = null, targetCompany
                    updated_at = NOW()
                WHERE id = $3`,
               [penaltyReason, task.task_id, attId]
-            );
-          } else if (!attRecord.check_out) {
-            await query(
-              `UPDATE attendance SET check_out = NOW(), updated_at = NOW() WHERE id = $1`,
-              [attId]
             );
           }
         } else {
@@ -363,33 +365,19 @@ export const runHourlyReportingComplianceCheck = async (io = null, targetCompany
         if (!penalizedUsers.has(task.assigned_to)) {
           penalizedUsers.add(task.assigned_to);
 
-          // Check if employee already received this penalty notification recently
-          const existingEmpNotif = await query(
-            `SELECT id FROM notifications 
-             WHERE user_id = $1 
-               AND title = 'Attendance Marked Absent (Missed Task Report)'
-               AND message LIKE $2 
-               AND created_at >= (NOW() - INTERVAL '12 hours')
-             LIMIT 1`,
-            [task.assigned_to, `%${task.task_title}%`]
-          );
+          // Exactly ONE notification to employee for marking absent
+          await sendNotificationOnce({
+            userId: task.assigned_to,
+            title: "Attendance Marked Absent (Missed Task Report)",
+            message: `You have not reported to the admin on task "${task.task_title}" for over 10 minutes. Your attendance has been marked Absent and task actions locked. Contact your Admin to resolve.`,
+            type: "error",
+            link: "/task-management",
+            io,
+            activityType: "absent_penalty",
+            entityId: task.task_id
+          });
 
-          if (existingEmpNotif.rows.length === 0) {
-            // Notify Employee
-            const empNotifId = "notif_" + Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
-            await query(
-              `INSERT INTO notifications (id, user_id, title, message, type, read, link)
-               VALUES ($1, $2, $3, $4, 'error', FALSE, '/task-management')`,
-              [
-                empNotifId,
-                task.assigned_to,
-                "Attendance Marked Absent (Missed Task Report)",
-                `You have not reported to the admin on task "${task.task_title}" for over 10 minutes. Your attendance has been marked Absent and task actions locked. Contact your Admin to resolve.`
-              ]
-            );
-          }
-
-          // Notify Company Admins (only once per task penalty)
+          // Exactly ONE notification to Company Admins per employee absent
           if (task.company_id) {
             const adminsRes = await query(
               `SELECT id FROM users WHERE company_id = $1 AND role IN ('admin', 'superadmin')`,
@@ -397,29 +385,16 @@ export const runHourlyReportingComplianceCheck = async (io = null, targetCompany
             );
 
             for (const admin of adminsRes.rows) {
-              const existingAdminNotif = await query(
-                `SELECT id FROM notifications 
-                 WHERE user_id = $1 
-                   AND title = 'Missed Task Report: Attendance Marked Absent'
-                   AND message LIKE $2 
-                   AND created_at >= (NOW() - INTERVAL '12 hours')
-                 LIMIT 1`,
-                [admin.id, `%${task.task_title}%`]
-              );
-
-              if (existingAdminNotif.rows.length === 0) {
-                const adminNotifId = "notif_" + Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
-                await query(
-                  `INSERT INTO notifications (id, user_id, title, message, type, read, link)
-                   VALUES ($1, $2, $3, $4, 'warning', FALSE, '/task-management')`,
-                  [
-                    adminNotifId,
-                    admin.id,
-                    "Missed Task Report: Attendance Marked Absent",
-                    `${task.employee_name} did not report on task "${task.task_title}" within 10 minutes. Attendance automatically marked Absent and task locked.`
-                  ]
-                );
-              }
+              await sendNotificationOnce({
+                userId: admin.id,
+                title: "Missed Task Report: Attendance Marked Absent",
+                message: `${task.employee_name || "Employee"} did not report on task "${task.task_title}" within 10 minutes. Attendance automatically marked Absent and task locked.`,
+                type: "warning",
+                link: "/task-management",
+                io,
+                activityType: "admin_absent_alert",
+                entityId: `${task.assigned_to}_${task.task_id}`
+              });
             }
           }
 
@@ -446,7 +421,7 @@ export const runHourlyReportingComplianceCheck = async (io = null, targetCompany
 
     // 2. Also check general active check-ins (for test suite or employees without explicit tasks)
     let sql = `
-      SELECT a.id as attendance_id, a.user_id, a.company_id, a.check_in, a.date,
+      SELECT a.id as attendance_id, a.user_id, a.company_id, a.check_in, a.date, a.updated_at,
              u.name as employee_name, u.email as employee_email,
              c.settings as company_settings
       FROM attendance a
@@ -494,57 +469,35 @@ export const runHourlyReportingComplianceCheck = async (io = null, targetCompany
 
       const elapsedMinutes = Math.floor((Date.now() - latestTime) / (60 * 1000));
 
-      // Rule 1: Every 5 minutes reminder (>= 5 and < 10)
-      if (elapsedMinutes >= 5 && elapsedMinutes < 10 && !remindedUsers.has(record.user_id)) {
-        const notifCheck = await query(
-          `SELECT id FROM notifications 
-           WHERE user_id = $1 
-             AND created_at >= (NOW() - INTERVAL '4 minutes')
-           LIMIT 1`,
-          [record.user_id]
-        );
+      // Rule 1: Hourly progress report reminder (>= 60 and < 120 minutes) - at most 1 reminder per day
+      if (elapsedMinutes >= 60 && elapsedMinutes < 120 && !remindedUsers.has(record.user_id)) {
+        const notifResult = await sendNotificationOnce({
+          userId: record.user_id,
+          title: "Progress Report Due",
+          message: `An hour has passed since your last update. Please submit your progress report to maintain your attendance standing.`,
+          type: "warning",
+          link: "/task-management",
+          io,
+          activityType: "report_reminder",
+          entityId: "hourly_general"
+        });
 
-        if (notifCheck.rows.length === 0) {
+        if (notifResult && !notifResult.duplicate) {
           remindersCount++;
-          remindedUsers.add(record.user_id);
-          const remNotifId = "notif_" + Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
-          await query(
-            `INSERT INTO notifications (id, user_id, title, message, type, read, link)
-             VALUES ($1, $2, $3, $4, 'warning', FALSE, '/task-management')`,
-            [
-              remNotifId,
-              record.user_id,
-              "Progress Report Due (5m)",
-              `5 minutes have passed since your last update. Please submit your progress report to avoid attendance absence.`
-            ]
-          );
-
-          if (io) {
-            io.emit(`notification_${record.user_id}`, {
-              id: remNotifId,
-              userId: record.user_id,
-              title: "Progress Report Due (5m)",
-              message: "5 minutes have passed. Please submit your progress report.",
-              type: "warning",
-              read: false,
-              link: "/task-management",
-              createdAt: new Date().toISOString()
-            });
-          }
         }
+        remindedUsers.add(record.user_id);
       }
 
-      // Rule 2: 10-Minute Missed Report Violation (>= 10 minutes)
-      if (elapsedMinutes >= 10) {
+      // Rule 2: Missed General Hourly Report Violation (>= 120 minutes)
+      if (elapsedMinutes >= 120) {
         penaltyCount++;
         penalizedUsers.add(record.user_id);
-        const penaltyReason = `Missed required progress report for ${elapsedMinutes} minutes (exceeded 10-minute limit).`;
+        const penaltyReason = `Missed required progress report for ${elapsedMinutes} minutes (exceeded 2-hour limit).`;
 
-        // Update attendance to Absent and Lock reporting, auto checkout
+        // Update attendance to Absent and Lock reporting (do NOT auto check out)
         await query(
           `UPDATE attendance
            SET status = 'absent',
-               check_out = COALESCE(check_out, NOW()),
                penalty_status = 'missed_hourly_report_penalty',
                is_admin_locked = TRUE,
                penalty_applied_at = NOW(),
@@ -554,32 +507,19 @@ export const runHourlyReportingComplianceCheck = async (io = null, targetCompany
           [penaltyReason, record.attendance_id]
         );
 
-        // Check if employee already received this penalty notification recently
-        const existingEmpNotif = await query(
-          `SELECT id FROM notifications 
-           WHERE user_id = $1 
-             AND title = 'Attendance Marked Absent (Missed Progress Reports)'
-             AND created_at >= (NOW() - INTERVAL '12 hours')
-           LIMIT 1`,
-          [record.user_id]
-        );
+        // Exactly ONE notification to Employee for marking absent
+        await sendNotificationOnce({
+          userId: record.user_id,
+          title: "Attendance Marked Absent (Missed Progress Reports)",
+          message: `You have missed submitting progress reports for over 10 minutes. Your attendance is marked Absent and reporting is locked. Contact your Admin to resolve.`,
+          type: "error",
+          link: "/task-management",
+          io,
+          activityType: "absent_penalty",
+          entityId: record.attendance_id
+        });
 
-        if (existingEmpNotif.rows.length === 0) {
-          // Notify Employee
-          const empNotifId = "notif_" + Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
-          await query(
-            `INSERT INTO notifications (id, user_id, title, message, type, read, link)
-             VALUES ($1, $2, $3, $4, 'error', FALSE, '/task-management')`,
-            [
-              empNotifId,
-              record.user_id,
-              "Attendance Marked Absent (Missed Progress Reports)",
-              `You have missed submitting progress reports for over 10 minutes. Your attendance is marked Absent and reporting is locked. Contact your Admin to resolve.`
-            ]
-          );
-        }
-
-        // Notify Company Admins
+        // Exactly ONE notification to Company Admins per employee absent
         if (record.company_id) {
           const adminsRes = await query(
             `SELECT id FROM users WHERE company_id = $1 AND role IN ('admin', 'superadmin')`,
@@ -587,29 +527,16 @@ export const runHourlyReportingComplianceCheck = async (io = null, targetCompany
           );
 
           for (const admin of adminsRes.rows) {
-            const existingAdminNotif = await query(
-              `SELECT id FROM notifications 
-               WHERE user_id = $1 
-                 AND title = 'Missed Report Alert: Attendance Marked Absent'
-                 AND message LIKE $2 
-                 AND created_at >= (NOW() - INTERVAL '12 hours')
-               LIMIT 1`,
-              [admin.id, `%${record.employee_name}%`]
-            );
-
-            if (existingAdminNotif.rows.length === 0) {
-              const adminNotifId = "notif_" + Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
-              await query(
-                `INSERT INTO notifications (id, user_id, title, message, type, read, link)
-                 VALUES ($1, $2, $3, $4, 'warning', FALSE, '/task-management')`,
-                [
-                  adminNotifId,
-                  admin.id,
-                  "Missed Report Alert: Attendance Marked Absent",
-                  `${record.employee_name} has not submitted progress reports for > 10 minutes. Attendance automatically marked Absent.`
-                ]
-              );
-            }
+            await sendNotificationOnce({
+              userId: admin.id,
+              title: "Missed Report Alert: Attendance Marked Absent",
+              message: `${record.employee_name || "Employee"} has not submitted progress reports for > 10 minutes. Attendance automatically marked Absent.`,
+              type: "warning",
+              link: "/task-management",
+              io,
+              activityType: "admin_absent_alert",
+              entityId: `${record.user_id}_hourly`
+            });
           }
         }
 

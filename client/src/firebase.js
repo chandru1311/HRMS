@@ -1612,6 +1612,11 @@ export const approveAndSendPayslips = async (companyId, month, year) => {
   });
 };
 
+export const getEmployeeAttendancePayrollSummary = async (userId, month, year, companyId = "", workingDays = 30) => {
+  const url = `/payroll/attendance-summary?userId=${encodeURIComponent(userId || "")}&month=${encodeURIComponent(month || "")}&year=${encodeURIComponent(year || "")}&companyId=${encodeURIComponent(companyId || "")}&workingDays=${encodeURIComponent(workingDays || 30)}`;
+  return apiFetch(url, { method: "GET" });
+};
+
 // ----------------------------------------------------
 // COMPANIES & WORKSPACES
 // ----------------------------------------------------
@@ -2104,10 +2109,10 @@ export const getFaceEnrollmentStatus = async (userId = null) => {
   return apiFetch(url);
 };
 
-export const authorizeFaceEnrollment = async (targetUserId) => {
+export const authorizeFaceEnrollment = async (targetUserId, authorized = true) => {
   return apiFetch("/attendance/face/authorize", {
     method: "POST",
-    body: JSON.stringify({ targetUserId })
+    body: JSON.stringify({ targetUserId, authorized })
   });
 };
 

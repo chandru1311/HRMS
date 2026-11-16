@@ -44,7 +44,8 @@ import {
   updateEnvironmentSetting,
   deleteEnvironmentSetting,
   subscribeToEnvironmentSettings,
-  wipeAllEmployeePayrolls
+  wipeAllEmployeePayrolls,
+  getEmployeeAttendancePayrollSummary
 } from "../firebase";
 
 import { 
@@ -92,7 +93,9 @@ import {
   UserX,
   UserCheck,
   Upload,
-  Camera
+  Camera,
+  Sparkles,
+  RefreshCw
 } from "lucide-react";
 import { jsPDF } from "jspdf";
 import { addStandardPDFHeader, addPDFFooter } from "../utils/pdfHeader";
@@ -103,6 +106,7 @@ import ExternalLinksTab from "../components/ExternalLinksTab";
 import RolesTab from "../components/RolesTab";
 import AuditLogsAndSecurityTab from "../components/AuditLogsAndSecurityTab";
 import FaceEnrollmentPanel from "../components/FaceEnrollmentPanel";
+import GlobalPayrollPanel from "../components/GlobalPayroll/GlobalPayrollPanel";
 import { usePermissions } from "../hooks/usePermissions";
 import { subscribeToRoles } from "../firebase";
 import { 
@@ -249,6 +253,7 @@ export default function AdminDashboard() {
     else if (can("read", "Assets")) defaultTab = "assets";
     else if (can("read", "ExternalLinks")) defaultTab = "external-links";
     else if (can("read", "Payroll")) defaultTab = "payroll";
+    else if (can("read", "GlobalPayroll")) defaultTab = "global-payroll";
     else if (can("read", "CustomDomains")) defaultTab = "domains";
     else if (can("read", "RolesPermissions")) defaultTab = "roles";
     else if (can("read", "EnvironmentSetup")) defaultTab = "environmental-setup";
@@ -260,6 +265,36 @@ export default function AdminDashboard() {
   const [users, setUsers] = useState([]);
   const [showPayrollSettingsModal, setShowPayrollSettingsModal] = useState(false);
   const [companyPayrollSettings, setCompanyPayrollSettings] = useState({ pf: true, esi: true, pt: true, insurance: false, insuranceAmount: 0 });
+
+  const calculatePayroll = (gross, paidDays, wDays) => {
+    const lopsDays = Math.max(0, wDays - paidDays);
+    const actualGross = (gross / wDays) * paidDays;
+    const lopAmount = gross - actualGross;
+
+    const basic = gross * 0.5;
+    const hra = basic * 0.4;
+    const special = gross - basic - hra;
+    
+    const actualBasic = actualGross * 0.5;
+    const pf = companyPayrollSettings?.pf ? actualBasic * 0.12 : 0;
+    const esi = (companyPayrollSettings?.esi && actualGross <= 21000) ? actualGross * 0.0075 : 0;
+    
+    const getPTDeduction = (g) => {
+      if (companyPayrollSettings && !companyPayrollSettings.pt) return 0;
+      if (g <= 21000) return 0;
+      if (g <= 30000) return Math.round((180 / 6) * 100) / 100;
+      if (g <= 45000) return Math.round((425 / 6) * 100) / 100;
+      if (g <= 60000) return Math.round((930 / 6) * 100) / 100;
+      if (g <= 75000) return Math.round((1025 / 6) * 100) / 100;
+      return Math.round((1250 / 6) * 100) / 100;
+    };
+    const pt = getPTDeduction(actualGross);
+    const insurance = companyPayrollSettings?.insurance ? Number(companyPayrollSettings.insuranceAmount || 0) : 0;
+
+    const tds = actualGross > 50000 ? (actualGross - pf - pt - insurance) * 0.05 : 0;
+    const net = actualGross - (pf + esi + pt + tds + insurance);
+    return { basic, hra, special, pf, esi, pt, tds, insurance, net, actualGross, lopAmount, lopsDays };
+  };
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -548,6 +583,8 @@ export default function AdminDashboard() {
   const [selectedPayrollUser, setSelectedPayrollUser] = useState(null);
   const [editSalaryValue, setEditSalaryValue] = useState("");
   const [editLeaveDaysValue, setEditLeaveDaysValue] = useState("");
+  const [attendanceSummaryLoading, setAttendanceSummaryLoading] = useState(false);
+  const [attendanceSummary, setAttendanceSummary] = useState(null);
 
   useEffect(() => {
     if (activeTab === "payroll" && currentUser?.role === "admin") {
@@ -6497,11 +6534,32 @@ export default function AdminDashboard() {
                           <td className="py-3 px-4 text-right">
                             <div className="flex justify-end gap-2">
                               <button 
-                                onClick={() => {
+                                onClick={async () => {
                                   setSelectedPayrollUser(user);
                                   setEditSalaryValue(user.gross);
-                                  setEditLeaveDaysValue(user.paidDays !== undefined ? Math.max(0, (companyPayrollSettings?.workingDays || 30) - user.paidDays) : 0);
+                                  setAttendanceSummary(null);
                                   setShowEditSalaryModal(true);
+                                  setAttendanceSummaryLoading(true);
+                                  try {
+                                    const targetId = user.uid || user.id || user.employeeId || user.employee_id;
+                                    const summary = await getEmployeeAttendancePayrollSummary(
+                                      targetId,
+                                      payrollMonth,
+                                      payrollYear,
+                                      currentUser.companyId,
+                                      companyPayrollSettings?.workingDays || 30
+                                    );
+                                    if (summary && summary.lopDays !== undefined) {
+                                      setAttendanceSummary(summary);
+                                      setEditLeaveDaysValue(summary.lopDays);
+                                    } else {
+                                      setEditLeaveDaysValue(user.paidDays !== undefined ? Math.max(0, (companyPayrollSettings?.workingDays || 30) - user.paidDays) : 0);
+                                    }
+                                  } catch (err) {
+                                    setEditLeaveDaysValue(user.paidDays !== undefined ? Math.max(0, (companyPayrollSettings?.workingDays || 30) - user.paidDays) : 0);
+                                  } finally {
+                                    setAttendanceSummaryLoading(false);
+                                  }
                                 }}
                                 className="p-1.5 text-text-mut hover:text-brand-primary bg-bg-base hover:bg-brand-primary/10 rounded-lg transition-colors border border-border-card/60"
                                 title="Edit Salary Structure"
@@ -6691,6 +6749,14 @@ export default function AdminDashboard() {
           </>
         );
       })()}
+
+      {/* ------------------ VIEW: GLOBAL PAYROLL MANAGEMENT ------------------ */}
+      {(activeTab === "global-payroll" && (isAdminUser || can("read", "GlobalPayroll") || can("read", "Payroll"))) && (
+        <div className="animate-fade-in">
+          <GlobalPayrollPanel />
+        </div>
+      )}
+
       {/* ------------------ VIEW: EXTERNAL LINKS ------------------ */}
       {(activeTab === "external-links" && (isAdminUser || can("read", "ExternalLinks"))) && (
         <div className="animate-fade-in">
@@ -6733,15 +6799,60 @@ export default function AdminDashboard() {
               </div>
 
               <div>
-                <label className="text-xs font-bold text-text-sec block mb-2">Number of Leave (LOP Days)</label>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs font-bold text-text-sec">Number of Leave (LOP Days)</label>
+                  {attendanceSummary && (
+                    <span className="text-[11px] font-bold text-brand-primary flex items-center gap-1">
+                      <Sparkles size={12} />
+                      Auto-Calculated: {attendanceSummary.lopDays} Days
+                    </span>
+                  )}
+                </div>
                 <div className="relative">
                   <input 
                     type="number"
+                    step="0.5"
+                    min="0"
                     value={editLeaveDaysValue}
                     onChange={(e) => setEditLeaveDaysValue(e.target.value)}
                     className="w-full px-4 py-3 bg-bg-base/50 border border-border-card rounded-[12px] text-sm text-text-main outline-none focus:border-brand-primary transition-colors font-bold"
                   />
                 </div>
+                {attendanceSummaryLoading ? (
+                  <div className="flex items-center gap-2 text-xs text-brand-primary mt-2 animate-pulse font-semibold">
+                    <RefreshCw size={12} className="animate-spin" />
+                    <span>Calculating attendance days & leaves for {payrollMonth} {payrollYear}...</span>
+                  </div>
+                ) : attendanceSummary ? (
+                  <div className="mt-2.5 p-3 bg-brand-primary/10 border border-brand-primary/20 rounded-[12px] space-y-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-extrabold text-brand-primary flex items-center gap-1.5">
+                        <Sparkles size={13} />
+                        Attendance Engine Breakdown
+                      </span>
+                      <span className="text-[10px] font-mono font-bold text-text-sec bg-bg-base px-2 py-0.5 rounded-full border border-border-card">
+                        {attendanceSummary.totalLogs} logs in {payrollMonth} {payrollYear}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 text-[11px]">
+                      <div className="bg-bg-base/70 p-2 rounded-lg text-center border border-border-card/50">
+                        <span className="block text-[10px] text-text-mut font-semibold">Present</span>
+                        <strong className="text-emerald-500 font-extrabold text-xs">{attendanceSummary.presentDays} d</strong>
+                      </div>
+                      <div className="bg-bg-base/70 p-2 rounded-lg text-center border border-border-card/50">
+                        <span className="block text-[10px] text-text-mut font-semibold">Approved Leave</span>
+                        <strong className="text-brand-primary font-extrabold text-xs">{attendanceSummary.onLeaveDays} d</strong>
+                      </div>
+                      <div className="bg-bg-base/70 p-2 rounded-lg text-center border border-border-card/50">
+                        <span className="block text-[10px] text-text-mut font-semibold">Absent / LOP</span>
+                        <strong className="text-brand-danger font-extrabold text-xs">{attendanceSummary.lopDays} d</strong>
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-text-mut font-medium">
+                      Based on daily check-ins, half-days (0.5), missed shifts, and approved leaves.
+                    </p>
+                  </div>
+                ) : null}
               </div>
 
               {(() => {
