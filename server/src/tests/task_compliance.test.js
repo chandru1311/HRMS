@@ -213,6 +213,13 @@ describe("Task SLA & Hourly Report Compliance Engine Test Suite", () => {
     await query("DELETE FROM hourly_reports WHERE user_id = $1 AND report_date = $2", [testEmp.id, today]);
     await query("DELETE FROM attendance WHERE user_id = $1 AND date = $2", [testEmp.id, today]);
 
+    // Seed an active task for the employee so progress reporting is required
+    await query(
+      `INSERT INTO tasks (id, company_id, title, assigned_to, created_by, status, viewed_at, assigned_at, created_at)
+       VALUES ($1, $2, 'Active Sprint Task', $3, $4, 'in_progress', NOW() - INTERVAL '3 hours', NOW() - INTERVAL '3 hours', NOW() - INTERVAL '3 hours')`,
+      ["task_hourly_test_" + Date.now(), testCompany, testEmp.id, testAdmin.id]
+    );
+
     // Check in 2 hours and 30 minutes ago with NO hourly report submitted
     await query(
       `INSERT INTO attendance (id, user_id, company_id, date, status, check_in, is_admin_locked)
@@ -267,5 +274,37 @@ describe("Task SLA & Hourly Report Compliance Engine Test Suite", () => {
     assert.ok(repData.id);
     assert.strictEqual(repData.work_completed, "Completed module integration and tests");
     assert.strictEqual(repData.progress_percentage, 85);
+  });
+
+  it("6. Employee without any active tasks -> is NOT penalized and remains Present without notifications", async () => {
+    const today = new Date().toISOString().split("T")[0];
+    const attId = "att_no_task_test_" + Date.now();
+
+    // Ensure NO active tasks exist for this employee
+    await query("DELETE FROM tasks WHERE company_id = $1", [testCompany]);
+    await query("DELETE FROM hourly_reports WHERE user_id = $1 AND report_date = $2", [testEmp.id, today]);
+    await query("DELETE FROM attendance WHERE user_id = $1 AND date = $2", [testEmp.id, today]);
+    await query("DELETE FROM notifications WHERE user_id = $1", [testEmp.id]);
+
+    // Check in 2 hours ago with NO tasks assigned
+    await query(
+      `INSERT INTO attendance (id, user_id, company_id, date, status, check_in, is_admin_locked)
+       VALUES ($1, $2, $3, $4, 'present', NOW() - INTERVAL '2 hours', FALSE)`,
+      [attId, testEmp.id, testCompany, today]
+    );
+
+    // Run compliance check
+    const reportCheck = await checkComplianceNow(null, testCompany);
+    assert.strictEqual(reportCheck.penaltyCount, 0, "Must NOT penalize employee without active tasks");
+
+    // Verify attendance is STILL present and NOT locked
+    const attRow = await query("SELECT * FROM attendance WHERE id = $1", [attId]);
+    assert.strictEqual(attRow.rows[0].status, "present");
+    assert.strictEqual(attRow.rows[0].is_admin_locked, false);
+    assert.strictEqual(attRow.rows[0].penalty_status, null);
+
+    // Verify NO notifications were sent to employee
+    const notifs = await query("SELECT * FROM notifications WHERE user_id = $1", [testEmp.id]);
+    assert.strictEqual(notifs.rows.length, 0, "No notifications should be sent to an employee without tasks");
   });
 });

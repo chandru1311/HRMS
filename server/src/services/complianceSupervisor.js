@@ -444,6 +444,21 @@ export const runHourlyReportingComplianceCheck = async (io = null, targetCompany
     for (const record of activeAtt.rows) {
       if (penalizedUsers.has(record.user_id)) continue;
 
+      // CRITICAL: An employee without active tasks must NEVER be penalized or marked absent for missed progress reports!
+      // Progress reporting and absent penalties only apply when an employee has active tasks assigned to them.
+      const activeTasksCheck = await query(
+        `SELECT id FROM tasks 
+         WHERE assigned_to = $1 
+           AND status NOT IN ('completed', 'cancelled', 'suspended')
+         LIMIT 1`,
+        [record.user_id]
+      );
+
+      if (activeTasksCheck.rows.length === 0) {
+        // Employee has no active tasks -> No progress report requirement -> Skip completely!
+        continue;
+      }
+
       const today = record.date ? new Date(record.date).toISOString().split("T")[0] : new Date().toISOString().split("T")[0];
 
       // Find latest hourly report for this employee today
