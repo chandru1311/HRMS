@@ -341,7 +341,7 @@ export default function TaskManagement() {
 
     if (diff <= 0) {
       const overdueMins = Math.floor(Math.abs(diff) / 60000);
-      if (overdueMins >= 5) {
+      if (overdueMins >= 10) {
         return { isOverdue: true, isLocked: true, text: "Locked (Absent Penalty)" };
       }
       return { isOverdue: true, isLocked: false, text: `Report overdue by ${overdueMins}m` };

@@ -106,6 +106,19 @@ export const createTask = async (req, res) => {
       }
     }
 
+    // Deduplicate: If an identical task was assigned to the employee in the past 60s, return it to prevent double-click duplicates
+    const existingRecent = await query(
+      `SELECT * FROM tasks 
+       WHERE assigned_to = $1 
+         AND title = $2 
+         AND created_at >= (NOW() - INTERVAL '60 seconds')
+       ORDER BY created_at DESC LIMIT 1`,
+      [targetAssignee, title.trim()]
+    );
+    if (existingRecent.rows.length > 0) {
+      return res.status(200).json(existingRecent.rows[0]);
+    }
+
     const id = "task_" + Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
     const taskMeta = {
       deadlineTimestamp: targetDeadline || null,
