@@ -719,7 +719,7 @@ export const submitHourlyReport = async (req, res) => {
           [companyId]
         );
         const employeeName = req.user?.name || "Employee";
-        const targetTitle = taskTitle || "Task";
+        const targetTitle = req.body.taskTitle || req.body.task_title || "Task";
         for (const admin of adminsRes.rows) {
           if (admin.id === userId) continue;
           await sendNotificationOnce({

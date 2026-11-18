@@ -255,20 +255,24 @@ export default function UserDashboard() {
   const getElapsedWorkingMs = () => {
     if (!todayLog) return 0;
     
-    // If today is checked out, freeze duration immediately at total completed duration and never use currentTime
-    if (isCheckedOut) {
+    // If today is checked out OR attendance is locked/absent/auto-checked-out,
+    // freeze duration immediately at total completed duration and NEVER use currentTime
+    if (isCheckedOut || isAttendanceLocked || todayLog.status === "absent" || todayLog.auto_checked_out) {
       if (todayLog.totalWorkingMinutes !== undefined && todayLog.totalWorkingMinutes !== null) {
         return (Number(todayLog.totalWorkingMinutes) || 0) * 60 * 1000;
       }
       if (todayLog.duration_minutes !== undefined && todayLog.duration_minutes !== null) {
         return (Number(todayLog.duration_minutes) || 0) * 60 * 1000;
       }
+      if (todayLog.durationMinutes !== undefined && todayLog.durationMinutes !== null) {
+        return (Number(todayLog.durationMinutes) || 0) * 60 * 1000;
+      }
       if (Array.isArray(todayLog.sessions) && todayLog.sessions.length > 0) {
         const totalSessionMins = todayLog.sessions.reduce((acc, s) => acc + (Number(s.durationMinutes) || 0), 0);
         return totalSessionMins * 60 * 1000;
       }
       const activeIn = todayLog.latestCheckInTime || todayLog.lastCheckInTime || todayLog.checkInTime || todayLog.check_in;
-      const activeOut = todayLog.checkOutTime || todayLog.check_out;
+      const activeOut = todayLog.checkOutTime || todayLog.check_out || todayLog.penalty_applied_at;
       if (activeIn && activeOut) {
         const inD = new Date(activeIn);
         const outD = new Date(activeOut);
@@ -283,11 +287,11 @@ export default function UserDashboard() {
             }
           });
           const exactMs = Math.max(0, outD.getTime() - inD.getTime() - breakMs);
-          const accumulatedMs = (Number(todayLog.accumulatedWorkingMinutes) || 0) * 60 * 1000;
+          const accumulatedMs = (Number(todayLog.accumulatedWorkingMinutes || todayLog.accumulated_working_minutes) || 0) * 60 * 1000;
           return accumulatedMs + exactMs;
         }
       }
-      return 0;
+      return (Number(todayLog.accumulatedWorkingMinutes || todayLog.accumulated_working_minutes) || 0) * 60 * 1000;
     }
 
     // Active shift or On-Break
@@ -301,10 +305,12 @@ export default function UserDashboard() {
       accumulatedMs = completedSessions.reduce((acc, s) => acc + (Number(s.durationMinutes) || 0), 0) * 60 * 1000;
 
       // Active session (open session without checkOut)
-      const activeS = todayLog.sessions.find(s => !s.checkOut) || todayLog.sessions[todayLog.sessions.length - 1];
+      const activeS = todayLog.sessions.find(s => !s.checkOut);
       if (activeS) {
         latestCheckIn = activeS.checkIn;
         currentSessionBreaks = Array.isArray(activeS.breaks) ? activeS.breaks : [];
+      } else {
+        return accumulatedMs;
       }
     } else {
       accumulatedMs = (Number(todayLog.accumulatedWorkingMinutes || todayLog.accumulated_working_minutes || todayLog.duration_minutes) || 0) * 60 * 1000;
@@ -407,14 +413,14 @@ export default function UserDashboard() {
   };
 
   // Ticking time effect: only active when employee is actively checked in or on break
-  // Stops immediately on checkout or unmount
+  // Stops immediately on checkout, lock, or unmount so time does not run in the background
   useEffect(() => {
-    if (isCheckedOut || (!isCheckedIn && !isOnBreak)) {
+    if (isCheckedOut || isAttendanceLocked || (!isCheckedIn && !isOnBreak)) {
       return;
     }
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
-  }, [isCheckedIn, isOnBreak, isCheckedOut]);
+  }, [isCheckedIn, isOnBreak, isCheckedOut, isAttendanceLocked]);
 
   // Reset pagination on tab change
   useEffect(() => {
@@ -2354,12 +2360,22 @@ export default function UserDashboard() {
               </button>
             </div>
           ) : isCheckedOut ? (
-            <span className="text-xs font-bold text-text-mut px-3 py-2 bg-bg-base rounded-[10px] flex items-center gap-2">
-              <span>Shift Ended</span>
-              <span className="text-[10px] font-mono text-text-sec bg-bg-card border border-border-card px-2 py-0.5 rounded">
-                {formatDuration(getElapsedWorkingMs())}
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-text-mut px-3 py-2 bg-bg-base rounded-[10px] flex items-center gap-2">
+                <span>Shift Ended</span>
+                <span className="text-[10px] font-mono text-text-sec bg-bg-card border border-border-card px-2 py-0.5 rounded">
+                  {formatDuration(getElapsedWorkingMs())}
+                </span>
               </span>
-            </span>
+              <button
+                onClick={handleCheckIn}
+                disabled={actionLoading || fetchingGps}
+                className="py-2.5 px-4 bg-brand-primary hover:bg-brand-hover text-white font-bold text-xs rounded-[10px] flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+              >
+                <Play size={12} fill="#fff" />
+                <span>Resume Shift</span>
+              </button>
+            </div>
           ) : null}
         </div>
       </div>
@@ -2392,10 +2408,10 @@ export default function UserDashboard() {
                 In: {new Date(todayLog.latestCheckInTime || todayLog.lastCheckInTime || todayLog.checkInTime || todayLog.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </span>
             )}
-            {isCheckedOut && (todayLog?.checkOutTime || todayLog?.check_out) && (
+            {(isCheckedOut || isAttendanceLocked) && (todayLog?.checkOutTime || todayLog?.check_out || todayLog?.penalty_applied_at) && (
               <span className="flex items-center gap-1">
                 <Square size={10} className="text-brand-danger" fill="currentColor" />
-                Out: {new Date(todayLog.checkOutTime || todayLog.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                Out: {new Date(todayLog.checkOutTime || todayLog.check_out || todayLog.penalty_applied_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </span>
             )}
           </div>
@@ -2455,10 +2471,19 @@ export default function UserDashboard() {
                     : <>Your attendance has been marked <strong className="text-red-500">Absent</strong> and check-in is locked for today.</>}
                 </p>
                 {todayLog?.penalty_reason && (
-                  <div className="mb-5 p-3 bg-red-500/5 border border-red-500/20 rounded-[12px] text-[11px] font-mono text-red-400">
+                  <div className="mb-4 p-3 bg-red-500/5 border border-red-500/20 rounded-[12px] text-[11px] font-mono text-red-400">
                     {todayLog.penalty_reason}
                   </div>
                 )}
+                {/* Frozen time display */}
+                <div className="relative w-full max-w-[260px] bg-bg-base/70 p-3 rounded-[16px] border border-dashed border-red-500/25 flex flex-col items-center justify-center mx-auto mb-4 overflow-hidden">
+                  <div className="text-2xl font-mono font-extrabold text-red-400 tracking-wider mb-0.5">
+                    {formatDuration(getElapsedWorkingMs())}
+                  </div>
+                  <span className="text-[9px] font-bold text-text-sec uppercase tracking-wide">
+                    Shift Time Frozen at Auto Check-Out
+                  </span>
+                </div>
                 <div className="p-3 bg-bg-base/70 border border-border-card rounded-[14px] text-xs text-text-sec font-semibold flex items-center justify-center gap-2">
                   <ShieldAlert size={16} className="text-amber-500 flex-shrink-0" />
                   <span>Check-in can only be unlocked and returned by your Administrator.</span>
@@ -2713,14 +2738,14 @@ export default function UserDashboard() {
 
                 {/* Re-check-in CTA */}
                 <div className="pt-2 border-t border-border-card/60 max-w-md mx-auto">
-                  <p className="text-xs text-text-sec mb-3">Need to continue working today? You can check in again anytime.</p>
+                  <p className="text-xs text-text-sec mb-3">Need to continue working today? Check in with biometric face verification to resume your shift.</p>
                   <button
                     onClick={handleCheckIn}
                     disabled={actionLoading || fetchingGps}
                     className="px-8 py-3 bg-brand-primary hover:bg-brand-hover text-white font-extrabold text-xs rounded-[14px] flex items-center justify-center gap-2 mx-auto shadow-md shadow-brand-primary/15 transition-all cursor-pointer"
                   >
                     <Play size={14} fill="#fff" />
-                    <span>Check In Again</span>
+                    <span>Resume Shift (Biometric Required)</span>
                   </button>
                 </div>
               </div>

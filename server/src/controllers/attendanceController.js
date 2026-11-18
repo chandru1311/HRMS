@@ -787,16 +787,18 @@ export const adminRevertPenalty = async (req, res) => {
     ).catch(() => ({ rows: [] }));
     if (allRes?.rows) updatedTasks = allRes.rows;
 
-    // Restore employee attendance record to Present and remove lock
-    // Restore employee attendance record and remove lock
+    // Restore employee attendance record and remove lock.
+    // The employee was auto checked-out during the penalty lock. Keep the checkout record intact
+    // and set status = 'checked-out' (or 'not-checked-in' if never checked in) so the employee
+    // checks in again with biometric verification to resume their shift!
     const attRes = await query(
       `UPDATE attendance
-       SET status = CASE WHEN check_in IS NOT NULL THEN 'present' ELSE 'not-checked-in' END,
+       SET status = CASE WHEN check_in IS NOT NULL THEN 'checked-out' ELSE 'not-checked-in' END,
            is_admin_locked = FALSE,
            penalty_status = NULL,
            penalty_reason = NULL,
            penalized_by_task_id = NULL,
-           check_out = NULL,
+           auto_checked_out = FALSE,
            updated_at = NOW()
        WHERE id = $1
        RETURNING *`,
@@ -809,20 +811,28 @@ export const adminRevertPenalty = async (req, res) => {
     await sendNotificationOnce({
       userId: record.user_id,
       title: "Attendance Penalty Resolved by Admin",
-      message: "Your attendance penalty has been resolved by Admin. Status restored to Present and reporting lock removed.",
+      message: "Your attendance penalty has been resolved by Admin. Please check in with biometric verification to resume your shift.",
       type: "info",
-      link: "/attendance",
+      link: "/dashboard",
       io,
       activityType: "penalty_resolved",
       entityId: id
     });
     if (io) {
-      const isRestored = updated.status === "present";
       const payload = {
         attendanceId: id,
         userId: record.user_id,
         status: updated.status,
-        is_admin_locked: updated.is_admin_locked,
+        is_admin_locked: false,
+        isAttendanceLocked: false,
+        auto_checked_out: false,
+        check_out: updated.check_out,
+        checkOutTime: updated.check_out,
+        check_in: updated.check_in,
+        checkInTime: updated.check_in,
+        sessions: updated.sessions,
+        totalWorkingMinutes: updated.duration_minutes,
+        accumulatedWorkingMinutes: updated.accumulated_working_minutes,
         resolutionNotes,
         updatedTasks: updatedTasks.map(t => ({
           id: t.id,
@@ -831,12 +841,17 @@ export const adminRevertPenalty = async (req, res) => {
           lastReportedAt: t.last_reported_at,
           last_reported_at: t.last_reported_at,
           attendanceStatus: updated.status,
-          isAttendanceLocked: updated.is_admin_locked
+          isAttendanceLocked: false
         }))
       };
       io.to(`user_${record.user_id}`).emit("attendance_penalty_reverted", payload);
-      if (record.company_id) io.to(`company_${record.company_id}`).emit("attendance_penalty_reverted", payload);
+      io.to(`user_${record.user_id}`).emit("attendance_updated", payload);
+      if (record.company_id) {
+        io.to(`company_${record.company_id}`).emit("attendance_penalty_reverted", payload);
+        io.to(`company_${record.company_id}`).emit("attendance_updated", payload);
+      }
       io.emit("attendance_penalty_reverted", payload);
+      io.emit("attendance_updated", payload);
 
       // Also emit individual task updates
       for (const t of updatedTasks) {
@@ -1479,7 +1494,11 @@ export const getAttendance = async (req, res) => {
       const checkOutDate = row.check_out ? new Date(row.check_out) : null;
       const formatTime = (d) => d ? `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` : "";
 
-      let totalMins = Number(row.duration_minutes) || 0;
+      let totalMins = Number(row.duration_minutes) || Number(row.accumulated_working_minutes) || 0;
+      if (Array.isArray(row.sessions) && row.sessions.length > 0) {
+        const totalSessionMins = row.sessions.reduce((acc, s) => acc + (Number(s.durationMinutes) || 0), 0);
+        totalMins = Math.max(totalMins, totalSessionMins);
+      }
       if (totalMins <= 0 && checkInDate && checkOutDate && checkOutDate >= checkInDate) {
         let totalBreakMins = 0;
         const breaks = Array.isArray(row.breaks) ? row.breaks : [];
@@ -1622,6 +1641,13 @@ export const checkIn = async (req, res) => {
 
     if (existingRes.rows.length > 0) {
       const prev = existingRes.rows[0];
+
+      if (prev.is_admin_locked) {
+        return res.status(403).json({
+          error: "Your attendance is currently locked by Administrator. Please contact your Admin to unlock your attendance before checking in."
+        });
+      }
+
       sessions = Array.isArray(prev.sessions) ? [...prev.sessions] : [];
       accumulatedMins = Number(prev.accumulated_working_minutes) || 0;
 
@@ -1667,6 +1693,11 @@ export const checkIn = async (req, res) => {
              accumulated_working_minutes = $4,
              duration_minutes = $4,
              breaks = '[]'::jsonb,
+             is_admin_locked = FALSE,
+             penalty_status = NULL,
+             penalty_reason = NULL,
+             penalized_by_task_id = NULL,
+             auto_checked_out = FALSE,
              updated_at = CURRENT_TIMESTAMP
          WHERE id = $5
          RETURNING *`,

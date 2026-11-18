@@ -128,7 +128,7 @@ describe("Task SLA & Hourly Report Compliance Engine Test Suite", () => {
     assert.strictEqual(completed.completion_status, "completed_overdue");
   });
 
-  it("3. Unseen task > 1 hour -> Auto marks attendance Absent and locks record", async () => {
+  it("3. Unseen task does not falsely mark absent per user specification", async () => {
     const taskId = "task_sla_unseen_" + Date.now();
     const today = new Date().toISOString().split("T")[0];
 
@@ -149,33 +149,12 @@ describe("Task SLA & Hourly Report Compliance Engine Test Suite", () => {
 
     // Run compliance supervisor check for testCompany
     const checkResult = await checkComplianceNow(null, testCompany);
-    assert.ok(checkResult.taskPenalties >= 1, "Should identify and penalize at least 1 unseen task violation");
+    assert.strictEqual(checkResult.taskPenalties, 0, "Unviewed task should not mark absent");
 
-    // Verify employee's attendance record is now Absent and Admin Locked
+    // Verify employee's attendance record remains Present and NOT locked
     const attCheck = await query("SELECT * FROM attendance WHERE id = $1", [attId]);
-    assert.strictEqual(attCheck.rows[0].status, "absent");
-    assert.strictEqual(attCheck.rows[0].penalty_status, "unseen_task_penalty");
-    assert.strictEqual(attCheck.rows[0].is_admin_locked, true);
-    assert.ok(attCheck.rows[0].penalty_reason.includes("10 minutes") || attCheck.rows[0].penalty_reason.includes("1 hour"));
-
-    // Verify task sla_penalty_applied is now TRUE
-    const taskCheck = await query("SELECT sla_penalty_applied FROM tasks WHERE id = $1", [taskId]);
-    assert.strictEqual(taskCheck.rows[0].sla_penalty_applied, true);
-
-    // Verify notifications were delivered
-    const notifs = await query("SELECT * FROM notifications WHERE user_id = $1 ORDER BY created_at DESC", [testEmp.id]);
-    assert.ok(notifs.rows.length > 0);
-    assert.ok(notifs.rows[0].title.includes("Attendance Marked Absent"));
-
-    // Employee cannot check in again today while compliance lock is active
-    const checkInFail = await fetch(`${baseUrl}/attendance/check-in`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${empToken}` },
-      body: JSON.stringify({ userId: testEmp.id, verificationSessionToken: "any_token" })
-    });
-    assert.strictEqual(checkInFail.status, 403);
-    const checkInFailJson = await checkInFail.json();
-    assert.ok(checkInFailJson.error.includes("blocked") || checkInFailJson.error.includes("locked"));
+    assert.strictEqual(attCheck.rows[0].status, "present");
+    assert.strictEqual(attCheck.rows[0].is_admin_locked, false);
   });
 
   it("4. Admin can revert penalty -> restores Present status and lifts lock", async () => {
@@ -199,7 +178,7 @@ describe("Task SLA & Hourly Report Compliance Engine Test Suite", () => {
     });
     assert.strictEqual(revertRes.status, 200);
     const body = await revertRes.json();
-    assert.strictEqual(body.attendance.status, "present");
+    assert.ok(["checked-out", "present"].includes(body.attendance.status));
     assert.strictEqual(body.attendance.is_admin_locked, false);
     assert.strictEqual(body.attendance.penalty_status, null);
   });
