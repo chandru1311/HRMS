@@ -201,7 +201,7 @@ export const updateTask = async (req, res) => {
 
     const allowed = [
       "title", "description", "project_id", "assigned_to", "status",
-      "priority", "due_date", "deadline", "start_time", "metadata"
+      "priority", "due_date", "deadline", "start_time", "metadata", "duration_minutes"
     ];
 
     for (const key of Object.keys(updates)) {
@@ -210,6 +210,7 @@ export const updateTask = async (req, res) => {
       if (key === "projectId") snakeKey = "project_id";
       if (key === "dueDate") snakeKey = "due_date";
       if (key === "startTime") snakeKey = "start_time";
+      if (key === "durationMinutes") snakeKey = "duration_minutes";
 
       if (allowed.includes(snakeKey)) {
         fields.push(`${snakeKey} = $${idx}`);

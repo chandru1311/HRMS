@@ -253,17 +253,6 @@ export const updateUser = async (req, res) => {
             // Auto-unblock employee attendance if deadline extended into future
             if (deadline && new Date(deadline).getTime() > Date.now()) {
               await query(
-                `UPDATE attendance
-                 SET status = 'present',
-                     is_admin_locked = FALSE,
-                     penalty_status = NULL,
-                     penalty_reason = NULL,
-                     updated_at = NOW()
-                 WHERE user_id = $1 AND (date >= CURRENT_DATE - INTERVAL '1 day') AND is_admin_locked = TRUE`,
-                [id]
-              ).catch(() => {});
-
-              await query(
                 `UPDATE tasks 
                  SET sla_penalty_applied = FALSE, 
                      overdue = FALSE, 
@@ -271,6 +260,25 @@ export const updateUser = async (req, res) => {
                  WHERE id = $1`,
                 [taskId, new Date(deadline).toISOString()]
               ).catch(() => {});
+
+              const io = req.app?.get("io");
+              if (io) {
+                const tPayload = {
+                  id: taskId,
+                  deadline,
+                  due_date: deadline,
+                  dueDate: deadline,
+                  durationMinutes,
+                  sla_penalty_applied: false,
+                  slaPenaltyApplied: false,
+                  overdue: false,
+                  assigned_to: id,
+                  assignedTo: id
+                };
+                io.to(`user_${id}`).emit("task_updated", tPayload);
+                if (targetCompany) io.to(`company_${targetCompany}`).emit("task_updated", tPayload);
+                io.emit("task_updated", tPayload);
+              }
             }
           }
 

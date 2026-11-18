@@ -1334,7 +1334,8 @@ export default function ProjectManagement() {
     if (editingTaskIndex !== null) {
       const existing = currentTasks[editingTaskIndex];
       const baseMs = existing?.assignedAt ? new Date(existing.assignedAt).getTime() : Date.now();
-      const updatedDeadline = new Date(baseMs + durHours * 3600 * 1000).toISOString();
+      const candidateDeadline = new Date(baseMs + durHours * 3600 * 1000).getTime();
+      const updatedDeadline = new Date(Math.max(Date.now() + durHours * 3600 * 1000, candidateDeadline)).toISOString();
       currentTasks[editingTaskIndex] = {
         ...currentTasks[editingTaskIndex],
         title: newTaskTitle,
@@ -1342,21 +1343,46 @@ export default function ProjectManagement() {
         durationMinutes: durHours * 60,
         deadline: updatedDeadline,
         dueDate: updatedDeadline,
-        project: newTaskProject
-      };
-    } else {
-      currentTasks.push({
-        id: "task_" + Date.now(),
-        title: newTaskTitle,
-        duration: durHours,
-        durationMinutes: durHours * 60,
-        deadline: calculatedDeadline,
-        dueDate: calculatedDeadline,
         project: newTaskProject,
         completed: false,
-        assignedBy: currentUser.uid,
-        assignedAt: assignedTime
-      });
+        overdue: false,
+        sla_penalty_applied: false
+      };
+    } else {
+      // Check if an active task with this exact title already exists for this user to avoid conflicting duplicate
+      const existingIdx = currentTasks.findIndex(
+        t => !t.completed && (t.title || "").trim().toLowerCase() === newTaskTitle.trim().toLowerCase()
+      );
+      if (existingIdx !== -1) {
+        currentTasks[existingIdx] = {
+          ...currentTasks[existingIdx],
+          title: newTaskTitle,
+          duration: durHours,
+          durationMinutes: durHours * 60,
+          deadline: calculatedDeadline,
+          dueDate: calculatedDeadline,
+          project: newTaskProject,
+          assignedAt: assignedTime,
+          completed: false,
+          overdue: false,
+          sla_penalty_applied: false
+        };
+      } else {
+        currentTasks.push({
+          id: "task_" + Date.now(),
+          title: newTaskTitle,
+          duration: durHours,
+          durationMinutes: durHours * 60,
+          deadline: calculatedDeadline,
+          dueDate: calculatedDeadline,
+          project: newTaskProject,
+          completed: false,
+          assignedBy: currentUser.uid,
+          assignedAt: assignedTime,
+          overdue: false,
+          sla_penalty_applied: false
+        });
+      }
     }
 
     try {

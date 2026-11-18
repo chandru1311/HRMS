@@ -989,20 +989,12 @@ export const subscribeToUserTasks = (userId, callback) => {
       try {
         const directTasks = await apiFetch(`/tasks?assignedTo=${userId}`);
         if (Array.isArray(directTasks)) {
+          const rawParsed = [];
           const seen = new Set();
-          const seenSignatures = new Set();
-          tasks = [];
           for (const dbt of directTasks) {
             const taskIdStr = String(dbt.id);
             if (seen.has(taskIdStr)) continue;
             seen.add(taskIdStr);
-
-            // De-duplicate tasks with the same title and status to prevent double display
-            const statusKey = (dbt.status === "completed" || dbt.status === "Completed") ? "completed" : "active";
-            const normTitle = (dbt.title || "").trim().toLowerCase();
-            const sig = normTitle + "_" + statusKey + "_" + (dbt.project_id || "");
-            if (seenSignatures.has(sig)) continue;
-            seenSignatures.add(sig);
 
             const meta = (dbt.metadata && typeof dbt.metadata === "object") ? dbt.metadata : {};
             const durationHours = Number(dbt.duration) || (dbt.duration_minutes ? Number(dbt.duration_minutes) / 60 : 0);
@@ -1011,7 +1003,8 @@ export const subscribeToUserTasks = (userId, callback) => {
               const base = dbt.assigned_at || dbt.created_at || Date.now();
               effectiveDeadline = new Date(new Date(base).getTime() + durationHours * 3600 * 1000).toISOString();
             }
-            tasks.push({
+
+            rawParsed.push({
               ...dbt,
               id: taskIdStr,
               title: dbt.title,
@@ -1035,6 +1028,31 @@ export const subscribeToUserTasks = (userId, callback) => {
               penaltyReason: dbt.employee_penalty_reason || null
             });
           }
+
+          // Group by title and status, always prioritizing the task with the latest/future extended deadline
+          const sigMap = new Map();
+          const nowMs = Date.now();
+          for (const item of rawParsed) {
+            const statusKey = item.completed ? "completed" : "active";
+            const normTitle = (item.title || "").trim().toLowerCase();
+            const sig = normTitle + "_" + statusKey + "_" + (item.project_id || item.project || "");
+            
+            if (!sigMap.has(sig)) {
+              sigMap.set(sig, item);
+            } else {
+              const existing = sigMap.get(sig);
+              const itemDl = item.deadline ? new Date(item.deadline).getTime() : 0;
+              const existDl = existing.deadline ? new Date(existing.deadline).getTime() : 0;
+              
+              // If current item deadline is in future while existing is expired, prefer item
+              if (itemDl > nowMs && existDl <= nowMs) {
+                sigMap.set(sig, item);
+              } else if (itemDl > existDl) {
+                sigMap.set(sig, item);
+              }
+            }
+          }
+          tasks = Array.from(sigMap.values());
         }
       } catch (err) {
         // Fallback if network blip
