@@ -9,7 +9,6 @@ import { runAttendanceSessionsMigration } from "../scripts/migrate-attendance-se
 import { runFaceReenrollmentMigration } from "../scripts/migrate-face-reenrollment.js";
 import { runCleanDuplicateNotifications } from "../scripts/clean-duplicate-notifications.js";
 import { runGlobalPayrollMigration } from "../scripts/migrate-global-payroll.js";
-import { runUnlockAllAccounts } from "../scripts/unlock-all-accounts.js";
 import { startComplianceSupervisor } from "./services/complianceSupervisor.js";
 
 dotenv.config();
@@ -109,19 +108,12 @@ async function startServer() {
   try { await runFaceReenrollmentMigration(); } catch (e) { console.warn("Face reenrollment migration note:", e.message); }
   try { await runCleanDuplicateNotifications(); } catch (e) { console.warn("Clean notifications note:", e.message); }
   try { await runGlobalPayrollMigration(); } catch (e) { console.warn("Global payroll migration note:", e.message); }
-  try { await runUnlockAllAccounts(io); } catch (e) { console.warn("Auto-unlock note:", e.message); }
 
   // 3. Start Express server
   server.listen(PORT, async () => {
     console.log(`🚀 HRMS Backend Server running on port ${PORT}`);
     console.log(`📡 Health check available at: http://localhost:${PORT}/api/health`);
     startComplianceSupervisor(io);
-    // Ensure all accounts are unlocked on server ready
-    try {
-      await runUnlockAllAccounts(io);
-    } catch (e) {
-      console.warn("Post-listen auto-unlock note:", e.message);
-    }
   });
 }
 

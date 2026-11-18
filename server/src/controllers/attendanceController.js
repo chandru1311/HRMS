@@ -906,6 +906,17 @@ export const getFaceStatus = async (req, res) => {
     }
 
     const row = result.rows[0];
+    let meta = (row.metadata && typeof row.metadata === "object") ? { ...row.metadata } : {};
+    if (typeof row.metadata === "string") {
+      try { meta = JSON.parse(row.metadata); } catch {}
+    }
+
+    const reenrollPerm = await getActiveFaceReenrollmentPermission(targetUserId, row.company_id || companyId);
+    if (reenrollPerm) {
+      meta.reenrollmentAuthorized = true;
+      meta.selfEnrollmentAuthorized = true;
+    }
+
     res.json({
       id: row.id,
       user_id: row.user_id,
@@ -915,7 +926,8 @@ export const getFaceStatus = async (req, res) => {
       embedding_model: row.embedding_model,
       enrolled_at: row.enrolled_at,
       consent_recorded_at: row.consent_recorded_at,
-      metadata: row.metadata || {}
+      metadata: meta,
+      hasApprovedReenrollment: Boolean(reenrollPerm || meta.reenrollmentAuthorized)
     });
   } catch (err) {
     console.error("getFaceStatus error:", err);
@@ -958,7 +970,7 @@ export const authorizeFaceEnrollment = async (req, res) => {
         `UPDATE employee_face_profiles
          SET metadata = COALESCE(metadata, '{}'::jsonb) || $1::jsonb,
              updated_at = CURRENT_TIMESTAMP
-         WHERE id = $2 OR (user_id = $3 AND company_id = $4)`,
+         WHERE user_id = $2 OR id = $3`,
         [
           JSON.stringify({
             selfEnrollmentAuthorized: false,
@@ -966,15 +978,15 @@ export const authorizeFaceEnrollment = async (req, res) => {
             revokedAt: now,
             revokedBy: req.user.id
           }),
-          profileId,
           targetUserId,
-          targetUser.company_id || companyId
+          profileId
         ]
       );
 
       await query(
         `UPDATE face_reenrollment_requests
-         SET status = 'cancelled',
+         SET status = 'rejected',
+             rejection_reason = 'Authorization revoked by administrator',
              permission_expires_at = NULL,
              updated_at = NOW()
          WHERE employee_id = $1 AND company_id = $2 AND status = 'approved'`,
@@ -998,29 +1010,38 @@ export const authorizeFaceEnrollment = async (req, res) => {
       });
     }
 
-    await query(
-      `INSERT INTO employee_face_profiles (id, user_id, company_id, enrollment_status, metadata, updated_at)
-       VALUES ($1, $2, $3, 'pending', $4, CURRENT_TIMESTAMP)
-       ON CONFLICT (id) DO UPDATE SET
-         metadata = COALESCE(employee_face_profiles.metadata, '{}'::jsonb) || $4,
-         updated_at = CURRENT_TIMESTAMP`,
-      [
-        profileId,
-        targetUserId,
-        targetUser.company_id || companyId,
-        JSON.stringify({
-          selfEnrollmentAuthorized: true,
-          reenrollmentAuthorized: true,
-          authorizedAt: now,
-          authorizedBy: req.user.id
-        })
-      ]
+    const authMeta = JSON.stringify({
+      selfEnrollmentAuthorized: true,
+      reenrollmentAuthorized: true,
+      authorizedAt: now,
+      authorizedBy: req.user.id
+    });
+
+    const existingProfileRes = await query(
+      "SELECT id FROM employee_face_profiles WHERE user_id = $1 LIMIT 1",
+      [targetUserId]
     );
+
+    if (existingProfileRes.rows.length > 0) {
+      await query(
+        `UPDATE employee_face_profiles
+         SET metadata = COALESCE(metadata, '{}'::jsonb) || $1::jsonb,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE user_id = $2`,
+        [authMeta, targetUserId]
+      );
+    } else {
+      await query(
+        `INSERT INTO employee_face_profiles (id, user_id, company_id, enrollment_status, metadata, updated_at)
+         VALUES ($1, $2, $3, 'pending', $4::jsonb, CURRENT_TIMESTAMP)`,
+        [profileId, targetUserId, targetUser.company_id || companyId, authMeta]
+      );
+    }
 
     const requestId = `face_reenroll_${crypto.randomUUID()}`;
     await query(
-      `INSERT INTO face_reenrollment_requests (id, employee_id, company_id, reason, status, reviewed_by, reviewed_at, permission_expires_at, created_at, updated_at)
-       VALUES ($1, $2, $3, 'admin authorization', 'approved', $4, NOW(), NOW() + INTERVAL '${FACE_REENROLL_VALIDITY_HOURS} hours', NOW(), NOW())
+      `INSERT INTO face_reenrollment_requests (id, employee_id, company_id, reason, status, reviewed_by, reviewed_at, permission_expires_at, requested_at, created_at, updated_at)
+       VALUES ($1, $2, $3, 'admin authorization', 'approved', $4, NOW(), NOW() + INTERVAL '${FACE_REENROLL_VALIDITY_HOURS} hours', NOW(), NOW(), NOW())
        ON CONFLICT (id) DO UPDATE SET
          status = 'approved',
          reviewed_by = EXCLUDED.reviewed_by,
@@ -1092,7 +1113,15 @@ export const enrollFace = async (req, res) => {
     );
 
     if (isSelf && !isAdmin) {
-      const isAuthorized = Boolean(existingProfile?.metadata?.selfEnrollmentAuthorized);
+      const activePermission = await getActiveFaceReenrollmentPermission(resolvedTargetId, targetCompanyId);
+      const isReenrollPermitted = Boolean(
+        existingProfile?.metadata?.reenrollmentAuthorized ||
+        activePermission
+      );
+      const isAuthorized = Boolean(
+        existingProfile?.metadata?.selfEnrollmentAuthorized ||
+        isReenrollPermitted
+      );
 
       if (!isAuthorized) {
         return res.status(403).json({
@@ -1101,7 +1130,7 @@ export const enrollFace = async (req, res) => {
         });
       }
 
-      if (isAlreadyEnrolled && !existingProfile?.metadata?.reenrollmentAuthorized) {
+      if (isAlreadyEnrolled && !isReenrollPermitted) {
         return res.status(403).json({
           error: "Face template is already enrolled. Self-replacement is not permitted. Please contact your administrator.",
           code: "SELF_ENROLLMENT_NOT_AUTHORIZED"

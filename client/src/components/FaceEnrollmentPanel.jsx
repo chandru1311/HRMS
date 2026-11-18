@@ -384,13 +384,13 @@ export default function FaceEnrollmentPanel({ users, showToast }) {
                         : "border-indigo-500/50 text-indigo-400 hover:bg-indigo-500/10"
                     }`}
                     title={
-                      selectedStatus?.metadata?.reenrollmentAuthorized
+                      (selectedStatus?.metadata?.reenrollmentAuthorized || selectedStatus?.hasApprovedReenrollment)
                         ? "Employee has access to re-enroll in their portal. Click to revoke."
                         : "Click to grant this employee access to re-enroll their face template."
                     }
                   >
-                    {selectedStatus?.metadata?.reenrollmentAuthorized ? <CheckCircle2 size={13} /> : <UserCheck size={13} />}
-                    <span>{selectedStatus?.metadata?.reenrollmentAuthorized ? "Re-Enroll Access Enabled" : "Re-Enroll by Employee Access"}</span>
+                    {(selectedStatus?.metadata?.reenrollmentAuthorized || selectedStatus?.hasApprovedReenrollment) ? <CheckCircle2 size={13} /> : <UserCheck size={13} />}
+                    <span>{(selectedStatus?.metadata?.reenrollmentAuthorized || selectedStatus?.hasApprovedReenrollment) ? "Re-Enroll Access Enabled" : "Re-Enroll by Employee Access"}</span>
                   </button>
                 )}
                 <button
@@ -513,8 +513,8 @@ export default function FaceEnrollmentPanel({ users, showToast }) {
                       const id = emp.uid || emp.id;
                       const statusObj = enrollmentStatuses[id];
                       const isEnrolled = statusObj?.enrollment_status === "enrolled";
-                      const isAuth = Boolean(statusObj?.metadata?.selfEnrollmentAuthorized);
-                      const isReenrollAuth = Boolean(statusObj?.metadata?.reenrollmentAuthorized);
+                      const isAuth = Boolean(statusObj?.metadata?.selfEnrollmentAuthorized || statusObj?.selfEnrollmentAuthorized);
+                      const isReenrollAuth = Boolean(statusObj?.metadata?.reenrollmentAuthorized || statusObj?.hasApprovedReenrollment);
                       const isSelected = id === selectedId;
 
                       return (

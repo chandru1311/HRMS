@@ -56,8 +56,12 @@ export default function FaceEnrollment() {
   }, []);
 
   const isEnrolled = status?.enrollment_status === "enrolled";
-  const isAuthorized = Boolean(status?.metadata?.selfEnrollmentAuthorized);
-  const isReenrollAuthorized = Boolean(status?.metadata?.reenrollmentAuthorized);
+  const isAuthorized = Boolean(status?.metadata?.selfEnrollmentAuthorized || status?.selfEnrollmentAuthorized);
+  const isReenrollAuthorized = Boolean(
+    status?.metadata?.reenrollmentAuthorized || 
+    status?.reenrollmentAuthorized || 
+    status?.hasApprovedReenrollment
+  );
   const hasApprovedReenrollment = isEnrolled && isReenrollAuthorized;
   const canCapture = isAdmin || (!isEnrolled && isAuthorized) || hasApprovedReenrollment;
 
