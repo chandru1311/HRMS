@@ -1499,6 +1499,10 @@ export const getAttendance = async (req, res) => {
         frontendStatus = "checked-in";
       }
 
+      const parsedBreaks = Array.isArray(row.breaks)
+        ? row.breaks
+        : (typeof row.breaks === "string" ? (() => { try { const p = JSON.parse(row.breaks); return Array.isArray(p) ? p : []; } catch { return []; } })() : []);
+
       return {
         ...row,
         id: row.id,
@@ -1517,6 +1521,7 @@ export const getAttendance = async (req, res) => {
         durationMinutes: totalMins,
         duration_minutes: totalMins,
         status: frontendStatus,
+        breaks: parsedBreaks,
         currentBreakTimerEnd
       };
     });

@@ -46,25 +46,32 @@ export default function History() {
   const [regsPage, setRegsPage] = useState(1);
 
   useEffect(() => {
-    const unsubscribe = subscribeToUserLogs(currentUser.uid, (data) => {
-      setLogs(data);
+    const userId = currentUser?.uid || currentUser?.id;
+    if (!userId) {
+      setLoading(false);
+      return;
+    }
+
+    const unsubscribe = subscribeToUserLogs(userId, (data) => {
+      setLogs(Array.isArray(data) ? data : []);
       setLoading(false);
     });
 
-    const unsubscribeReg = subscribeToRegularizationRequests(currentUser.companyId, (data) => {
-      setMyRegularizations((data || []).filter(r => (r.userId || r.user_id) === currentUser.uid));
+    const companyId = currentUser?.companyId || currentUser?.company_id || "";
+    const unsubscribeReg = subscribeToRegularizationRequests(companyId, (data) => {
+      setMyRegularizations((data || []).filter(r => (r.userId || r.user_id) === userId));
     });
 
-    const unsubscribeLeaves = subscribeToLeaveRequests(currentUser.companyId, (data) => {
-      setMyLeaves((data || []).filter(r => (r.userId || r.user_id) === currentUser.uid));
+    const unsubscribeLeaves = subscribeToLeaveRequests(companyId, (data) => {
+      setMyLeaves((data || []).filter(r => (r.userId || r.user_id) === userId));
     });
 
     return () => {
-      unsubscribe();
-      unsubscribeReg();
-      unsubscribeLeaves();
+      if (typeof unsubscribe === "function") unsubscribe();
+      if (typeof unsubscribeReg === "function") unsubscribeReg();
+      if (typeof unsubscribeLeaves === "function") unsubscribeLeaves();
     };
-  }, [currentUser.uid]);
+  }, [currentUser?.uid, currentUser?.id, currentUser?.companyId]);
 
   // Reactive filtering
   useEffect(() => {
@@ -151,18 +158,24 @@ export default function History() {
     const inTime = log.checkInTime || log.check_in;
     const outTime = log.checkOutTime || log.check_out;
     if (inTime && outTime) {
-      let breakMins = 0;
-      if (Array.isArray(log.breaks)) {
-        log.breaks.forEach(b => {
-          if (b.start && b.end) {
-            breakMins += Math.max(0, Math.floor((new Date(b.end) - new Date(b.start)) / 60000));
-          }
-        });
-      }
-      const diff = Math.max(0, Math.floor((new Date(outTime) - new Date(inTime)) / 60000) - breakMins);
+      const diff = Math.max(0, Math.floor((new Date(outTime) - new Date(inTime)) / 60000));
       if (diff > 0 && diff < 24 * 60) return diff;
     }
     return 0;
+  };
+
+  const parseBreaksList = (log) => {
+    if (!log || !log.breaks) return [];
+    if (Array.isArray(log.breaks)) return log.breaks;
+    if (typeof log.breaks === "string") {
+      try {
+        const p = JSON.parse(log.breaks);
+        return Array.isArray(p) ? p : [];
+      } catch {
+        return [];
+      }
+    }
+    return [];
   };
 
   // Compute summary stats
@@ -170,20 +183,25 @@ export default function History() {
   const totalHours = filteredLogs.reduce((acc, log) => acc + getLogWorkingMinutes(log), 0) / 60;
   const avgHours = totalDays > 0 ? totalHours / totalDays : 0;
   const shortBreaks = filteredLogs.reduce((acc, log) => {
-    const count = log.breaks?.filter(b => b.type === "short").length || 0;
+    const bList = parseBreaksList(log);
+    const count = bList.filter(b => b.type === "short" || b.breakType === "short").length;
     return acc + count;
   }, 0);
   const longBreaks = filteredLogs.reduce((acc, log) => {
-    const count = log.breaks?.filter(b => b.type === "long").length || 0;
+    const bList = parseBreaksList(log);
+    const count = bList.filter(b => b.type === "long" || b.breakType === "long").length;
     return acc + count;
   }, 0);
 
   // Hourly stats for last 7 logged days
   const chartData = [...filteredLogs].reverse().slice(-7).map(log => {
     const mins = getLogWorkingMinutes(log);
-    const hrs = parseFloat((mins / 60).toFixed(2));
-    const formattedDate = new Date(log.date).toLocaleDateString([], { month: "short", day: "numeric" });
-    return { dateLabel: formattedDate, hours: hrs, mins };
+    const hrs = parseFloat((mins / 60).toFixed(1));
+    const safeDateStr = log.date ? String(log.date).replace(/-/g, "/") : "";
+    const formattedDate = safeDateStr && !isNaN(new Date(safeDateStr).getTime())
+      ? new Date(safeDateStr).toLocaleDateString([], { month: "short", day: "numeric" })
+      : (log.date || "—");
+    return { dateLabel: formattedDate, hours: hrs };
   });
 
   const maxChartHours = Math.max(8, ...chartData.map(c => c.hours));
@@ -193,20 +211,26 @@ export default function History() {
 
     const doc = new jsPDF();
     const titleText = "EMPLOYEE ATTENDANCE REPORT";
-    const subtitleText = `Employee: ${currentUser.name} | Total Records: ${filteredLogs.length}`;
+    const subtitleText = `Employee: ${currentUser?.name || "Employee"} | Total Records: ${filteredLogs.length}`;
     const startY = await addStandardPDFHeader(doc, titleText, subtitleText);
 
     const tableData = filteredLogs.map((log) => {
       const mins = getLogWorkingMinutes(log);
-      const workingHours = mins > 0 
-        ? (mins < 60 ? `${mins} mins (${(mins / 60).toFixed(2)} hrs)` : `${(mins / 60).toFixed(2)} hrs`) 
-        : "—";
+      const workingHours = mins > 0 ? (mins / 60).toFixed(1) + " hrs" : "—";
+      const checkInRaw = log.checkInTime || log.check_in;
+      const checkOutRaw = log.checkOutTime || log.check_out;
+      const inText = checkInRaw && !isNaN(new Date(checkInRaw).getTime())
+        ? new Date(checkInRaw).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        : (log.checkIn || "—");
+      const outText = checkOutRaw && !isNaN(new Date(checkOutRaw).getTime())
+        ? new Date(checkOutRaw).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        : (log.checkOut || "—");
       return [
-        log.date,
-        log.checkInTime || "—",
-        log.checkOutTime || "—",
+        log.date || "—",
+        inText,
+        outText,
         workingHours,
-        log.status || "Present"
+        log.status ? (log.status.charAt(0).toUpperCase() + log.status.slice(1).replace("-", " ")) : "Present"
       ];
     });
 
@@ -228,11 +252,11 @@ export default function History() {
       didParseCell: (data) => {
         if (data.row.index >= 0 && data.column.index === 4) {
           const val = data.cell.text[0];
-          if (val === "Present") {
+          if (val === "Present" || val === "Working" || val === "Shift Ended") {
             data.cell.styles.fillColor = [220, 252, 231];
             data.cell.styles.textColor = [21, 128, 61];
             data.cell.styles.fontStyle = "bold";
-          } else if (val === "Late") {
+          } else if (val === "Late" || val === "Half Day" || val === "On Break") {
             data.cell.styles.fillColor = [254, 243, 199];
             data.cell.styles.textColor = [146, 64, 14];
             data.cell.styles.fontStyle = "bold";
@@ -246,7 +270,7 @@ export default function History() {
     });
     
     addPDFFooter(doc);
-    doc.save(`Attendance_Report_${currentUser.name.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`);
+    doc.save(`Attendance_Report_${(currentUser?.name || "Employee").replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`);
     showToast("Attendance report PDF exported successfully.", "success");
   };
 
@@ -255,21 +279,27 @@ export default function History() {
     
     const excelData = filteredLogs.map((log) => {
       const mins = getLogWorkingMinutes(log);
+      const checkInRaw = log.checkInTime || log.check_in;
+      const checkOutRaw = log.checkOutTime || log.check_out;
+      const inText = checkInRaw && !isNaN(new Date(checkInRaw).getTime())
+        ? new Date(checkInRaw).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        : (log.checkIn || "-");
+      const outText = checkOutRaw && !isNaN(new Date(checkOutRaw).getTime())
+        ? new Date(checkOutRaw).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        : (log.checkOut || "-");
       return {
-        "Date": log.date,
-        "Check In": log.checkInTime || log.checkIn || "-",
-        "Check Out": log.checkOutTime || log.checkOut || "-",
-        "Working Hours": mins > 0 
-          ? (mins < 60 ? `${mins} mins (${(mins / 60).toFixed(2)} hrs)` : `${(mins / 60).toFixed(2)} hrs`) 
-          : "-",
-        "Status": log.status || "Present",
+        "Date": log.date || "-",
+        "Check In": inText,
+        "Check Out": outText,
+        "Working Hours": mins > 0 ? (mins / 60).toFixed(1) + " hrs" : "-",
+        "Status": log.status ? (log.status.charAt(0).toUpperCase() + log.status.slice(1).replace("-", " ")) : "Present",
       };
     });
 
     const worksheet = XLSX.utils.json_to_sheet(excelData);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Attendance Report");
-    XLSX.writeFile(workbook, `Attendance_Report_${currentUser.name.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.xlsx`);
+    XLSX.writeFile(workbook, `Attendance_Report_${(currentUser?.name || "Employee").replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.xlsx`);
     showToast("Excel spreadsheet generated successfully.", "success");
   };
 
@@ -358,9 +388,7 @@ export default function History() {
           </div>
           <div>
             <span className="text-[10px] font-bold text-text-mut uppercase tracking-wider block">Total Hours</span>
-            <span className="text-2xl font-extrabold text-text-main block mt-0.5">
-              {totalHours > 0 && totalHours < 1 ? `${Math.round(totalHours * 60)} mins (${totalHours.toFixed(2)} hrs)` : `${totalHours.toFixed(1)} hrs`}
-            </span>
+            <span className="text-2xl font-extrabold text-text-main block mt-0.5">{totalHours.toFixed(1)} hrs</span>
           </div>
         </div>
 
@@ -400,11 +428,11 @@ export default function History() {
               return (
                 <div key={idx} className="flex flex-col items-center justify-end gap-1.5 group w-14 h-full">
                   <div className="opacity-0 group-hover:opacity-100 absolute transform -translate-y-12 z-10 bg-slate-900 text-white text-[9px] font-extrabold px-1.5 py-0.5 rounded shadow pointer-events-none transition-opacity duration-150">
-                    {c.mins < 60 && c.mins > 0 ? `${c.mins} mins (${c.hours} hrs)` : `${c.hours} hours`}
+                    {c.hours} hours
                   </div>
                   
                   <span className="text-[10px] font-bold text-brand-primary tracking-tight">
-                    {c.mins < 60 && c.mins > 0 ? `${c.mins}m` : (c.hours > 0 ? `${c.hours}h` : "0h")}
+                    {c.hours > 0 ? `${c.hours}h` : "0h"}
                   </span>
 
                   <div 
@@ -538,23 +566,31 @@ export default function History() {
                         </thead>
                         <tbody className="divide-y divide-border-card text-xs text-text-main font-semibold">
                           {paginatedLogs.map((log) => {
-                            const checkInTime = new Date(log.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                            const checkOutTime = log.checkOutTime 
-                              ? new Date(log.checkOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                              : "—";
+                            const checkInRaw = log.checkInTime || log.check_in;
+                            const checkOutRaw = log.checkOutTime || log.check_out;
+
+                            const checkInTime = checkInRaw && !isNaN(new Date(checkInRaw).getTime())
+                              ? new Date(checkInRaw).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                              : (log.checkIn || "—");
+                            const checkOutTime = checkOutRaw && !isNaN(new Date(checkOutRaw).getTime())
+                              ? new Date(checkOutRaw).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                              : (log.checkOut || "—");
                             
-                            const shorts = log.breaks?.filter(b => b.type === "short").length || 0;
-                            const longs = log.breaks?.filter(b => b.type === "long").length || 0;
-                            
+                            const bList = parseBreaksList(log);
+                            const shorts = bList.filter(b => b.type === "short" || b.breakType === "short").length;
+                            const longs = bList.filter(b => b.type === "long" || b.breakType === "long").length;
+                            const bios = bList.filter(b => b.type === "bio" || b.breakType === "bio").length;
+                            const mins = getLogWorkingMinutes(log);
+
                             return (
                               <tr key={log.id} className="hover:bg-bg-base/30">
-                                <td className="py-3.5 pr-4 font-bold text-text-main">{log.date}</td>
+                                <td className="py-3.5 pr-4 font-bold text-text-main">{log.date || "—"}</td>
                                 <td className="py-3.5 px-4 text-text-sec">
                                   <div>{checkInTime}</div>
                                   <div className="text-[10px] text-text-mut mt-0.5">
                                     {log.checkInLocation && (
                                       <a 
-                                        href={`https://www.google.com/maps?q=${log.checkInLocation.latitude},${log.checkInLocation.longitude}`}
+                                        href={`https://www.google.com/maps?q=${log.checkInLocation.latitude || log.checkInLocation.lat},${log.checkInLocation.longitude || log.checkInLocation.lng}`}
                                         target="_blank"
                                         rel="noreferrer"
                                         className="text-brand-primary hover:text-brand-hover hover:underline"
@@ -569,7 +605,7 @@ export default function History() {
                                   <div className="text-[10px] text-text-mut mt-0.5">
                                     {log.checkOutLocation && (
                                       <a 
-                                        href={`https://www.google.com/maps?q=${log.checkOutLocation.latitude},${log.checkOutLocation.longitude}`}
+                                        href={`https://www.google.com/maps?q=${log.checkOutLocation.latitude || log.checkOutLocation.lat},${log.checkOutLocation.longitude || log.checkOutLocation.lng}`}
                                         target="_blank"
                                         rel="noreferrer"
                                         className="text-brand-primary hover:text-brand-hover hover:underline"
@@ -580,27 +616,47 @@ export default function History() {
                                   </div>
                                 </td>
                                 <td className="py-3.5 px-4">
-                                  {shorts > 0 || longs > 0 ? (
+                                  {shorts > 0 || longs > 0 || bios > 0 ? (
                                     <div className="flex gap-1 flex-wrap">
-                                      {shorts > 0 && <span className="bg-amber-500/10 text-amber-500 px-1.5 py-0.5 rounded text-[10px] font-bold">{shorts} Break 1</span>}
-                                      {longs > 0 && <span className="bg-amber-500/10 text-amber-500 px-1.5 py-0.5 rounded text-[10px] font-bold">{longs} Break 2</span>}
+                                      {shorts > 0 && <span className="bg-amber-500/10 text-amber-500 px-1.5 py-0.5 rounded text-[10px] font-bold">{shorts} Short</span>}
+                                      {longs > 0 && <span className="bg-amber-500/10 text-amber-500 px-1.5 py-0.5 rounded text-[10px] font-bold">{longs} Lunch</span>}
+                                      {bios > 0 && <span className="bg-purple-500/10 text-purple-500 px-1.5 py-0.5 rounded text-[10px] font-bold">{bios} Bio</span>}
                                     </div>
                                   ) : (
                                     <span className="text-text-mut text-[10px]">No breaks</span>
                                   )}
                                 </td>
                                 <td className="py-3.5 px-4">
-                                  <div className="font-bold text-brand-primary">
-                                    {getLogWorkingMinutes(log) < 60 && getLogWorkingMinutes(log) > 0 
-                                      ? `${getLogWorkingMinutes(log)} mins (${(getLogWorkingMinutes(log) / 60).toFixed(2)} hrs)` 
-                                      : `${(getLogWorkingMinutes(log) / 60).toFixed(2)} hrs`}
-                                  </div>
-                                  <span className="text-[10px] text-text-mut">{getLogWorkingMinutes(log)} mins</span>
+                                  <div className="font-bold text-brand-primary">{(mins / 60).toFixed(2)} hrs</div>
+                                  <span className="text-[10px] text-text-mut">{mins} mins</span>
                                 </td>
                                 <td className="py-3.5 pl-4 text-right">
-                                  {log.status === "checked-in" && <span className="bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 text-[9px] px-2 py-0.5 rounded-full font-bold uppercase">Working</span>}
-                                  {log.status === "on-break" && <span className="bg-amber-500/10 text-amber-500 border border-amber-500/20 text-[9px] px-2 py-0.5 rounded-full font-bold uppercase">On Break</span>}
-                                  {log.status === "checked-out" && <span className="bg-slate-500/10 text-text-sec border border-border-card text-[9px] px-2 py-0.5 rounded-full font-bold uppercase">Shift Ended</span>}
+                                  {(log.status === "checked-in" || log.status === "in-progress" || log.status === "working") && (
+                                    <span className="bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 text-[9px] px-2 py-0.5 rounded-full font-bold uppercase">Working</span>
+                                  )}
+                                  {log.status === "on-break" && (
+                                    <span className="bg-amber-500/10 text-amber-500 border border-amber-500/20 text-[9px] px-2 py-0.5 rounded-full font-bold uppercase">On Break</span>
+                                  )}
+                                  {(log.status === "checked-out" || log.status === "completed") && (
+                                    <span className="bg-slate-500/10 text-text-sec border border-border-card text-[9px] px-2 py-0.5 rounded-full font-bold uppercase">Shift Ended</span>
+                                  )}
+                                  {log.status === "present" && (
+                                    <span className="bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 text-[9px] px-2 py-0.5 rounded-full font-bold uppercase">Present</span>
+                                  )}
+                                  {log.status === "half-day" && (
+                                    <span className="bg-purple-500/10 text-purple-500 border border-purple-500/20 text-[9px] px-2 py-0.5 rounded-full font-bold uppercase">Half Day</span>
+                                  )}
+                                  {log.status === "absent" && (
+                                    <span className="bg-red-500/10 text-red-500 border border-red-500/20 text-[9px] px-2 py-0.5 rounded-full font-bold uppercase">Absent</span>
+                                  )}
+                                  {log.status === "late" && (
+                                    <span className="bg-amber-500/10 text-amber-500 border border-amber-500/20 text-[9px] px-2 py-0.5 rounded-full font-bold uppercase">Late</span>
+                                  )}
+                                  {!["checked-in", "in-progress", "working", "on-break", "checked-out", "completed", "present", "half-day", "absent", "late"].includes(log.status) && (
+                                    <span className="bg-blue-500/10 text-blue-500 border border-blue-500/20 text-[9px] px-2 py-0.5 rounded-full font-bold uppercase">
+                                      {log.status ? log.status.replace("-", " ") : (checkInRaw ? "Present" : "Not Checked In")}
+                                    </span>
+                                  )}
                                 </td>
                               </tr>
                             );

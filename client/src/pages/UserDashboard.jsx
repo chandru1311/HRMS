@@ -301,22 +301,15 @@ export default function UserDashboard() {
       accumulatedMs = completedSessions.reduce((acc, s) => acc + (Number(s.durationMinutes) || 0), 0) * 60 * 1000;
 
       // Active session (open session without checkOut)
-      const activeS = todayLog.sessions.find(s => !s.checkOut);
+      const activeS = todayLog.sessions.find(s => !s.checkOut) || todayLog.sessions[todayLog.sessions.length - 1];
       if (activeS) {
         latestCheckIn = activeS.checkIn;
         currentSessionBreaks = Array.isArray(activeS.breaks) ? activeS.breaks : [];
-      } else {
-        latestCheckIn = todayLog.latestCheckInTime || todayLog.lastCheckInTime || todayLog.checkInTime || todayLog.check_in;
-        currentSessionBreaks = Array.isArray(todayLog.breaks) ? todayLog.breaks : [];
       }
     } else {
-      accumulatedMs = (Number(todayLog.accumulatedWorkingMinutes || todayLog.accumulated_working_minutes) || 0) * 60 * 1000;
+      accumulatedMs = (Number(todayLog.accumulatedWorkingMinutes || todayLog.accumulated_working_minutes || todayLog.duration_minutes) || 0) * 60 * 1000;
       latestCheckIn = todayLog.latestCheckInTime || todayLog.lastCheckInTime || todayLog.checkInTime || todayLog.check_in;
       currentSessionBreaks = Array.isArray(todayLog.currentSessionBreaks) ? todayLog.currentSessionBreaks : (Array.isArray(todayLog.breaks) ? todayLog.breaks : []);
-    }
-
-    if (accumulatedMs === 0 && (todayLog.accumulatedWorkingMinutes || todayLog.accumulated_working_minutes)) {
-      accumulatedMs = (Number(todayLog.accumulatedWorkingMinutes || todayLog.accumulated_working_minutes) || 0) * 60 * 1000;
     }
 
     if (!latestCheckIn) return accumulatedMs;
@@ -1052,38 +1045,25 @@ export default function UserDashboard() {
       targetDate.setDate(monday.getDate() + index);
       const targetDateStr = getLocalDateString(targetDate);
 
-      const log = userLogs.find(l => {
-        if (!l) return false;
-        const lDate = l.date_str || (typeof l.date === "string" ? l.date.split("T")[0] : "");
-        if (lDate === targetDateStr) return true;
-        if (l.check_in && getLocalDateString(new Date(l.check_in)) === targetDateStr) return true;
-        if (l.id && l.id.endsWith(`_${targetDateStr}`)) return true;
-        return false;
-      });
-
-      let mins = 0;
+      const log = userLogs.find(l => l.date === targetDateStr);
+      let hrs = 0;
       if (log) {
-        if (targetDateStr === todayStr && isCheckedIn) {
-          mins = Math.round(getElapsedWorkingMs() / 60000);
+        if (targetDateStr === todayStr && !isCheckedOut) {
+          hrs = getElapsedWorkingMs() / (1000 * 60 * 60);
         } else {
-          mins = Number(log.totalWorkingMinutes ?? log.duration_minutes ?? log.durationMinutes) || 0;
-          if (mins <= 0 && log.check_in && log.check_out) {
-            mins = Math.max(0, Math.floor((new Date(log.check_out) - new Date(log.check_in)) / 60000));
-          }
-          if (targetDateStr === todayStr && mins <= 0) {
-            mins = Math.round(getElapsedWorkingMs() / 60000);
-          }
+          const logMins = (typeof log.totalWorkingMinutes === "number" && log.totalWorkingMinutes >= 0)
+            ? log.totalWorkingMinutes
+            : (typeof log.duration_minutes === "number" && log.duration_minutes >= 0)
+              ? log.duration_minutes
+              : (typeof log.durationMinutes === "number" && log.durationMinutes >= 0)
+                ? log.durationMinutes
+                : (log.totalHours && !isNaN(parseFloat(log.totalHours)) ? parseFloat(log.totalHours) * 60 : 0);
+          hrs = (logMins || 0) / 60;
         }
-      } else if (targetDateStr === todayStr && (isCheckedIn || isCheckedOut)) {
-        mins = Math.round(getElapsedWorkingMs() / 60000);
       }
-
-      const hrs = mins / 60;
-
       return {
         label: dayName,
-        minutes: mins,
-        hours: parseFloat(hrs.toFixed(2)),
+        hours: parseFloat(hrs.toFixed(1)),
         active: targetDateStr === todayStr
       };
     });
@@ -1094,19 +1074,17 @@ export default function UserDashboard() {
 
     if (todayLog) {
       if (todayLog.checkOutTime || todayLog.check_out) {
-        const mins = Math.max(
-          Number(todayLog.totalWorkingMinutes ?? todayLog.duration_minutes ?? todayLog.durationMinutes) || 0,
-          Math.round(getElapsedWorkingMs() / 60000)
-        );
-        const durationText = mins < 60 && mins > 0
-          ? `Total: ${mins} mins (${(mins / 60).toFixed(2)} hrs)` 
-          : `Total: ${(mins / 60).toFixed(2)} hrs`;
+        const tMins = (typeof todayLog.totalWorkingMinutes === "number" && todayLog.totalWorkingMinutes > 0)
+          ? todayLog.totalWorkingMinutes
+          : (typeof todayLog.duration_minutes === "number" && todayLog.duration_minutes > 0)
+            ? todayLog.duration_minutes
+            : Math.floor(getElapsedWorkingMs() / 60000);
         list.push({
           type: "out",
           title: "Checked Out",
           time: new Date(todayLog.checkOutTime || todayLog.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           dateText: "Today",
-          desc: durationText
+          desc: `Total: ${(tMins / 60).toFixed(2)} hrs`
         });
       }
 
@@ -1147,22 +1125,25 @@ export default function UserDashboard() {
       }
     }
 
-    const historyLogs = userLogs.filter(l => l.date !== new Date().toISOString().split("T")[0]).slice(0, 3);
+    const todayDateStr = getLocalDateString();
+    const historyLogs = userLogs.filter(l => l.date !== todayDateStr).slice(0, 3);
     historyLogs.forEach(hLog => {
-      const dateText = new Date(hLog.date).toLocaleDateString([], { month: 'short', day: 'numeric' });
+      const safeHDate = hLog.date ? String(hLog.date).replace(/-/g, "/") : "";
+      const dateText = safeHDate && !isNaN(new Date(safeHDate).getTime())
+        ? new Date(safeHDate).toLocaleDateString([], { month: 'short', day: 'numeric' })
+        : (hLog.date || "Past");
       if (hLog.checkOutTime || hLog.check_out) {
-        const mins = Number(hLog.totalWorkingMinutes ?? hLog.duration_minutes ?? hLog.durationMinutes) || (
-          (hLog.check_in && hLog.check_out) ? Math.max(0, Math.floor((new Date(hLog.check_out) - new Date(hLog.check_in)) / 60000)) : 0
-        );
-        const durationText = mins < 60 && mins > 0
-          ? `Total: ${mins} mins (${(mins / 60).toFixed(2)} hrs)` 
-          : `Total: ${(mins / 60).toFixed(2)} hrs`;
+        const hMins = (typeof hLog.totalWorkingMinutes === "number" && hLog.totalWorkingMinutes > 0)
+          ? hLog.totalWorkingMinutes
+          : (typeof hLog.duration_minutes === "number" && hLog.duration_minutes > 0)
+            ? hLog.duration_minutes
+            : (hLog.totalHours ? Math.round(parseFloat(hLog.totalHours) * 60) : 0);
         list.push({
           type: "out",
           title: "Checked Out",
           time: new Date(hLog.checkOutTime || hLog.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           dateText: dateText,
-          desc: durationText
+          desc: `Total: ${(hMins / 60).toFixed(2)} hrs`
         });
       }
       if (hLog.checkInTime || hLog.check_in) {
@@ -2723,18 +2704,7 @@ export default function UserDashboard() {
 
                 <div className="inline-flex py-2 px-4 bg-brand-success/5 border border-brand-success/20 rounded-[12px] text-xs font-bold text-brand-success gap-1.5 uppercase tracking-wide mb-5">
                   <span>Logged:</span>
-                  <strong>
-                    {(() => {
-                      const mins = Math.max(
-                        Number(todayLog?.totalWorkingMinutes ?? todayLog?.duration_minutes ?? todayLog?.durationMinutes) || 0,
-                        Math.round(getElapsedWorkingMs() / 60000)
-                      );
-                      if (mins < 60 && mins > 0) {
-                        return `${mins} mins (${(mins / 60).toFixed(2)} hrs)`;
-                      }
-                      return `${((mins || 0) / 60).toFixed(2)} hrs`;
-                    })()}
-                  </strong>
+                  <strong>{(((todayLog?.totalWorkingMinutes ?? todayLog?.duration_minutes ?? Math.floor(getElapsedWorkingMs() / 60000)) || 0) / 60).toFixed(2)} hrs</strong>
                 </div>
 
                 {/* Re-check-in CTA */}
@@ -2789,18 +2759,10 @@ export default function UserDashboard() {
                     cursor={{ fill: '#f1f5f9', opacity: 0.1 }}
                     contentStyle={{ backgroundColor: '#0f172a', border: 'none', borderRadius: '8px', color: '#fff', fontSize: '12px', fontWeight: 'bold' }}
                     itemStyle={{ color: '#fff' }}
-                    formatter={(value, name, item) => {
-                      const mins = item?.payload?.minutes !== undefined ? item.payload.minutes : Math.round(Number(value) * 60);
-                      if (mins < 60 && mins > 0) {
-                        return [`${mins} mins (${value} hrs)`, 'Worked'];
-                      }
-                      const h = Math.floor(mins / 60);
-                      const m = mins % 60;
-                      return [`${value} hrs (${h}h ${m}m)`, 'Worked'];
-                    }}
+                    formatter={(value) => [`${value} hrs`, 'Worked']}
                     labelStyle={{ color: '#94a3b8', marginBottom: '4px' }}
                   />
-                  <Bar dataKey="hours" radius={[4, 4, 0, 0]} maxBarSize={30} isAnimationActive={false} minPointSize={6}>
+                  <Bar dataKey="hours" radius={[4, 4, 0, 0]} maxBarSize={30} isAnimationActive={false}>
                     {weeklyHoursData.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={entry.active ? '#4f46e5' : (entry.hours > 0 ? '#818cf8' : '#e2e8f0')} />
                     ))}
