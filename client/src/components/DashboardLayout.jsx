@@ -532,8 +532,9 @@ export default function DashboardLayout({ children }) {
   }, [currentUser?.tasks, currentUser?.uid]);
 
   const handleOpenNotifications = () => {
-    setShowNotifications(!showNotifications);
-    if (!showNotifications && currentUser && currentUser.role !== "admin") {
+    const nextState = !showNotifications;
+    setShowNotifications(nextState);
+    if (nextState && currentUser) {
       const seen = {};
       activeNotifications.forEach(req => {
         seen[req.id] = req.status;
@@ -545,32 +546,51 @@ export default function DashboardLayout({ children }) {
 
   const handleSystemNotifClick = async (notif) => {
     if (!notif.read) {
+      setSystemNotifications(prev => prev.map(n => n.id === notif.id ? { ...n, read: true } : n));
       await markNotificationRead(notif.id);
     }
     if (notif.link) {
-      navigate(notif.link);
+      let targetLink = notif.link;
+      if (currentUser?.role === "admin" || currentUser?.role === "superadmin") {
+        if (targetLink === "/tasks" || targetLink === "/project-management" || targetLink.startsWith("/task")) {
+          targetLink = "/task-management";
+        }
+      }
+      navigate(targetLink);
       setShowNotifications(false);
     }
   };
 
   const handleMarkAllAsRead = async () => {
-    // 1. Mark system notifications
-    const unreadSystem = systemNotifications.filter(n => !n.read);
-    for (const notif of unreadSystem) {
-      await markNotificationRead(notif.id);
+    // 1. Mark system notifications optimistically in state
+    setSystemNotifications(prev => prev.map(n => ({ ...n, read: true })));
+
+    // 2. Call backend batch read-all endpoint
+    if (currentUser?.uid) {
+      try {
+        await apiFetch("/notifications/read-all", {
+          method: "POST",
+          body: JSON.stringify({ userId: currentUser.uid })
+        });
+      } catch (err) {
+        const unreadSystem = systemNotifications.filter(n => !n.read);
+        for (const notif of unreadSystem) {
+          await markNotificationRead(notif.id);
+        }
+      }
     }
     
-    // 2. Dismiss active leave/system request notifications
+    // 3. Dismiss active leave/system request notifications
     if (activeNotifications.length > 0) {
-      const currentDismissed = localStorage.getItem(`dismissed_leaves_${currentUser.uid}`);
+      const currentDismissed = localStorage.getItem(`dismissed_notifs_${currentUser.uid}`);
       const dismissedArr = currentDismissed ? JSON.parse(currentDismissed) : [];
       const updated = [...new Set([...dismissedArr, ...activeNotifications.map(req => req.id)])];
-      localStorage.setItem(`dismissed_leaves_${currentUser.uid}`, JSON.stringify(updated));
+      localStorage.setItem(`dismissed_notifs_${currentUser.uid}`, JSON.stringify(updated));
       setDismissedNotifs(updated);
     }
 
-    // 3. Clear leave request update count for regular users
-    if (currentUser && currentUser.role !== "admin") {
+    // 4. Clear seen leaves
+    if (currentUser) {
       const seen = {};
       activeNotifications.forEach(req => {
         seen[req.id] = req.status;
@@ -608,20 +628,22 @@ export default function DashboardLayout({ children }) {
     return true;
   });
 
+  const isLeaveOrRequestNotif = (item) => {
+    if (item.isLeaveNotif) return true;
+    const text = `${item.title || ""} ${item.message || ""} ${item.type || ""}`.toLowerCase();
+    return text.includes("leave") || text.includes("permission") || text.includes("regulariz");
+  };
+
   const isTaskNotif = (item) => {
+    if (isLeaveOrRequestNotif(item)) return false;
     const text = `${item.title || ""} ${item.message || ""} ${item.type || ""}`.toLowerCase();
     return text.includes("task") || text.includes("project") || text.includes("deadline") || text.includes("assign");
   };
 
   const isAttendanceNotif = (item) => {
+    if (isLeaveOrRequestNotif(item) || isTaskNotif(item)) return false;
     const text = `${item.title || ""} ${item.message || ""} ${item.type || ""}`.toLowerCase();
-    return text.includes("attendance") || text.includes("absent") || text.includes("check") || text.includes("report") || text.includes("penalty") || text.includes("sla");
-  };
-
-  const isLeaveOrRequestNotif = (item) => {
-    if (item.isLeaveNotif) return true;
-    const text = `${item.title || ""} ${item.message || ""} ${item.type || ""}`.toLowerCase();
-    return text.includes("leave") || text.includes("permission") || text.includes("regulariz");
+    return text.includes("attendance") || text.includes("absent") || text.includes("check") || text.includes("report") || text.includes("penalty") || text.includes("sla") || text.includes("shift") || text.includes("break") || text.includes("face") || text.includes("biometric");
   };
 
   const filteredNotifs = combinedNotifs.filter(item => {
@@ -1701,7 +1723,11 @@ export default function DashboardLayout({ children }) {
                                       <>
                                         <span className="bg-brand-primary text-white text-[8px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider animate-pulse">NEW</span>
                                         <button 
-                                          onClick={(e) => { e.stopPropagation(); markNotificationRead(item.id); }}
+                                          onClick={(e) => { 
+                                            e.stopPropagation(); 
+                                            setSystemNotifications(prev => prev.map(n => n.id === item.id ? { ...n, read: true } : n));
+                                            markNotificationRead(item.id); 
+                                          }}
                                           className="p-1 text-text-mut hover:text-brand-primary hover:bg-brand-primary/10 rounded transition-colors cursor-pointer"
                                           title="Mark as read"
                                         >

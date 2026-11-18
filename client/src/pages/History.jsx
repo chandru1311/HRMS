@@ -151,7 +151,15 @@ export default function History() {
     const inTime = log.checkInTime || log.check_in;
     const outTime = log.checkOutTime || log.check_out;
     if (inTime && outTime) {
-      const diff = Math.max(0, Math.floor((new Date(outTime) - new Date(inTime)) / 60000));
+      let breakMins = 0;
+      if (Array.isArray(log.breaks)) {
+        log.breaks.forEach(b => {
+          if (b.start && b.end) {
+            breakMins += Math.max(0, Math.floor((new Date(b.end) - new Date(b.start)) / 60000));
+          }
+        });
+      }
+      const diff = Math.max(0, Math.floor((new Date(outTime) - new Date(inTime)) / 60000) - breakMins);
       if (diff > 0 && diff < 24 * 60) return diff;
     }
     return 0;
@@ -173,9 +181,9 @@ export default function History() {
   // Hourly stats for last 7 logged days
   const chartData = [...filteredLogs].reverse().slice(-7).map(log => {
     const mins = getLogWorkingMinutes(log);
-    const hrs = parseFloat((mins / 60).toFixed(1));
+    const hrs = parseFloat((mins / 60).toFixed(2));
     const formattedDate = new Date(log.date).toLocaleDateString([], { month: "short", day: "numeric" });
-    return { dateLabel: formattedDate, hours: hrs };
+    return { dateLabel: formattedDate, hours: hrs, mins };
   });
 
   const maxChartHours = Math.max(8, ...chartData.map(c => c.hours));
@@ -190,7 +198,9 @@ export default function History() {
 
     const tableData = filteredLogs.map((log) => {
       const mins = getLogWorkingMinutes(log);
-      const workingHours = mins > 0 ? (mins / 60).toFixed(1) + " hrs" : "—";
+      const workingHours = mins > 0 
+        ? (mins < 60 ? `${mins} mins (${(mins / 60).toFixed(2)} hrs)` : `${(mins / 60).toFixed(2)} hrs`) 
+        : "—";
       return [
         log.date,
         log.checkInTime || "—",
@@ -249,7 +259,9 @@ export default function History() {
         "Date": log.date,
         "Check In": log.checkInTime || log.checkIn || "-",
         "Check Out": log.checkOutTime || log.checkOut || "-",
-        "Working Hours": mins > 0 ? (mins / 60).toFixed(1) + " hrs" : "-",
+        "Working Hours": mins > 0 
+          ? (mins < 60 ? `${mins} mins (${(mins / 60).toFixed(2)} hrs)` : `${(mins / 60).toFixed(2)} hrs`) 
+          : "-",
         "Status": log.status || "Present",
       };
     });
@@ -346,7 +358,9 @@ export default function History() {
           </div>
           <div>
             <span className="text-[10px] font-bold text-text-mut uppercase tracking-wider block">Total Hours</span>
-            <span className="text-2xl font-extrabold text-text-main block mt-0.5">{totalHours.toFixed(1)} hrs</span>
+            <span className="text-2xl font-extrabold text-text-main block mt-0.5">
+              {totalHours > 0 && totalHours < 1 ? `${Math.round(totalHours * 60)} mins (${totalHours.toFixed(2)} hrs)` : `${totalHours.toFixed(1)} hrs`}
+            </span>
           </div>
         </div>
 
@@ -386,11 +400,11 @@ export default function History() {
               return (
                 <div key={idx} className="flex flex-col items-center justify-end gap-1.5 group w-14 h-full">
                   <div className="opacity-0 group-hover:opacity-100 absolute transform -translate-y-12 z-10 bg-slate-900 text-white text-[9px] font-extrabold px-1.5 py-0.5 rounded shadow pointer-events-none transition-opacity duration-150">
-                    {c.hours} hours
+                    {c.mins < 60 && c.mins > 0 ? `${c.mins} mins (${c.hours} hrs)` : `${c.hours} hours`}
                   </div>
                   
                   <span className="text-[10px] font-bold text-brand-primary tracking-tight">
-                    {c.hours > 0 ? `${c.hours}h` : "0h"}
+                    {c.mins < 60 && c.mins > 0 ? `${c.mins}m` : (c.hours > 0 ? `${c.hours}h` : "0h")}
                   </span>
 
                   <div 
@@ -576,7 +590,11 @@ export default function History() {
                                   )}
                                 </td>
                                 <td className="py-3.5 px-4">
-                                  <div className="font-bold text-brand-primary">{(getLogWorkingMinutes(log) / 60).toFixed(2)} hrs</div>
+                                  <div className="font-bold text-brand-primary">
+                                    {getLogWorkingMinutes(log) < 60 && getLogWorkingMinutes(log) > 0 
+                                      ? `${getLogWorkingMinutes(log)} mins (${(getLogWorkingMinutes(log) / 60).toFixed(2)} hrs)` 
+                                      : `${(getLogWorkingMinutes(log) / 60).toFixed(2)} hrs`}
+                                  </div>
                                   <span className="text-[10px] text-text-mut">{getLogWorkingMinutes(log)} mins</span>
                                 </td>
                                 <td className="py-3.5 pl-4 text-right">

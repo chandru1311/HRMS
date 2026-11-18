@@ -1,5 +1,6 @@
 import { query } from "../config/db.js";
 import { sendRegularizationNotif } from "../services/emailService.js";
+import { sendNotificationOnce } from "../services/notificationService.js";
 
 const formatTimeHHMM = (val, defaultVal = "10:00") => {
   if (!val) return defaultVal;
@@ -169,6 +170,27 @@ export const createRegularizationRequest = async (req, res) => {
       department: user.department
     };
 
+    // Asynchronously notify company admins / managers
+    (async () => {
+      try {
+        const employeeName = user.name || "An employee";
+        const adminRes = await query(
+          "SELECT id FROM users WHERE company_id = $1 AND role IN ('admin', 'superadmin', 'manager')",
+          [companyId]
+        );
+        for (const admin of adminRes.rows) {
+          await sendNotificationOnce(admin.id, {
+            title: "Regularization Request",
+            message: `${employeeName} requested attendance regularization for ${cleanDate}.`,
+            type: "attendance",
+            link: "/admin?tab=logs&sub=regularization"
+          }).catch(() => {});
+        }
+      } catch (e) {
+        console.error("Error dispatching regularization admin notification:", e);
+      }
+    })();
+
     res.status(201).json(formatRegRow(fullRow));
   } catch (err) {
     console.error("createRegularizationRequest error:", err);
@@ -245,18 +267,32 @@ export const updateRegularizationStatus = async (req, res) => {
     const userRes = await query("SELECT name, email, department FROM users WHERE id = $1", [updated.user_id]);
     const user = userRes.rows[0] || {};
 
-    // Asynchronously dispatch regularization status notification email
-    if (user.email) {
-      sendRegularizationNotif({
-        email: user.email,
-        name: user.name || "Employee",
-        date: formatDateYYYYMMDD(updated.attendance_date),
-        requestedCheckIn: formatTimeHHMM(updated.requested_check_in, ""),
-        requestedCheckOut: formatTimeHHMM(updated.requested_check_out, ""),
-        status: updated.status,
-        managerComment: comment
-      }).catch(err => console.error("Error dispatching regularization email:", err));
-    }
+    // Asynchronously dispatch regularization status notification email and in-app notification
+    (async () => {
+      try {
+        const attDate = formatDateYYYYMMDD(updated.attendance_date);
+        if (user.email) {
+          sendRegularizationNotif({
+            email: user.email,
+            name: user.name || "Employee",
+            date: attDate,
+            requestedCheckIn: formatTimeHHMM(updated.requested_check_in, ""),
+            requestedCheckOut: formatTimeHHMM(updated.requested_check_out, ""),
+            status: updated.status,
+            managerComment: comment
+          }).catch(err => console.error("Error dispatching regularization email:", err));
+        }
+
+        await sendNotificationOnce(updated.user_id, {
+          title: `Regularization ${updated.status === "approved" ? "Approved" : "Rejected"}`,
+          message: `Your attendance regularization for ${attDate} has been ${updated.status}.`,
+          type: "attendance",
+          link: "/history"
+        }).catch(() => {});
+      } catch (e) {
+        console.error("Error dispatching regularization notification:", e);
+      }
+    })();
 
     const fullRow = {
       ...updated,

@@ -1,4 +1,5 @@
 import { query } from "../config/db.js";
+import { sendNotificationOnce } from "../services/notificationService.js";
 
 const formatDateYYYYMMDD = (val) => {
   if (!val) return "";
@@ -708,6 +709,33 @@ export const submitHourlyReport = async (req, res) => {
     if (io) {
       if (companyId) io.to(`company_${companyId}`).emit("hourly_report_submitted", reportRow);
       io.emit("hourly_report_submitted", reportRow);
+    }
+
+    // In-app notification to company admins
+    if (companyId) {
+      try {
+        const adminsRes = await query(
+          `SELECT id FROM users WHERE company_id = $1 AND role IN ('admin', 'superadmin', 'manager')`,
+          [companyId]
+        );
+        const employeeName = req.user?.name || "Employee";
+        const targetTitle = taskTitle || "Task";
+        for (const admin of adminsRes.rows) {
+          if (admin.id === userId) continue;
+          await sendNotificationOnce({
+            userId: admin.id,
+            title: "New Task Update",
+            message: `${employeeName} submitted an hourly update for "${targetTitle}".`,
+            type: "info",
+            link: "/task-management",
+            io,
+            activityType: "task_update",
+            entityId: `${reportRow.id}`
+          });
+        }
+      } catch (notifErr) {
+        console.error("Hourly report admin notification error:", notifErr);
+      }
     }
 
     res.status(201).json(reportRow);

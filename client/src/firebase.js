@@ -3,7 +3,8 @@
 // ============================================================================
 
 const PRODUCTION_API_URL = "https://attendance-cgs-production.up.railway.app/api";
-const LOCAL_API_PORTS = [5001, 5002, 5003, 5004, 5005, 3001, 8080];
+// Note: Port 5002 is dedicated to the Python Face Verification microservice, never route general API calls to 5002
+const LOCAL_API_PORTS = [5001, 5003, 5000, 3001, 8080];
 
 const buildCandidateUrls = (endpoint) => {
   const cleanEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;

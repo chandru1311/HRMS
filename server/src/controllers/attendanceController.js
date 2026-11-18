@@ -1450,8 +1450,35 @@ export const getAttendance = async (req, res) => {
       const checkOutDate = row.check_out ? new Date(row.check_out) : null;
       const formatTime = (d) => d ? `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` : "";
 
-      const durationHours = row.duration_minutes ? (row.duration_minutes / 60).toFixed(1) : (row.check_out ? "0.0" : "Live");
-      const dateStr = row.date_str || (row.date instanceof Date ? row.date.toISOString().split("T")[0] : (row.date ? String(row.date).split("T")[0] : ""));
+      let totalMins = Number(row.duration_minutes) || 0;
+      if (totalMins <= 0 && checkInDate && checkOutDate && checkOutDate >= checkInDate) {
+        let totalBreakMins = 0;
+        const breaks = Array.isArray(row.breaks) ? row.breaks : [];
+        breaks.forEach(b => {
+          if (b.start && b.end) {
+            totalBreakMins += Math.max(0, Math.floor((new Date(b.end) - new Date(b.start)) / 60000));
+          }
+        });
+        totalMins = Math.max(0, Math.floor((checkOutDate.getTime() - checkInDate.getTime()) / 60000) - totalBreakMins);
+      }
+
+      const durationHours = totalMins > 0 
+        ? (totalMins / 60).toFixed(2) 
+        : (row.check_out ? "0.00" : (row.check_in ? "Live" : "0.00"));
+
+      // Extract reliable local YYYY-MM-DD from date_str, id suffix, or check_in
+      let dateStr = row.date_str;
+      if (!dateStr || dateStr.includes("T") || dateStr.includes(" ")) {
+        if (row.id && /_\d{4}-\d{2}-\d{2}$/.test(row.id)) {
+          dateStr = row.id.split("_").pop();
+        } else if (checkInDate) {
+          dateStr = checkInDate.toISOString().split("T")[0];
+        } else if (row.date instanceof Date) {
+          dateStr = row.date.toISOString().split("T")[0];
+        } else if (row.date) {
+          dateStr = String(row.date).split("T")[0];
+        }
+      }
 
       let frontendStatus = "not-checked-in";
       let currentBreakTimerEnd = null;
@@ -1478,6 +1505,7 @@ export const getAttendance = async (req, res) => {
         userId: row.user_id,
         companyId: row.company_id,
         date: dateStr,
+        date_str: dateStr,
         checkIn: formatTime(checkInDate),
         checkOut: formatTime(checkOutDate),
         checkInTime: row.check_in || null,
@@ -1485,6 +1513,9 @@ export const getAttendance = async (req, res) => {
         checkInLocation: row.check_in_location || row.location,
         checkOutLocation: row.check_out_location,
         totalHours: durationHours,
+        totalWorkingMinutes: totalMins,
+        durationMinutes: totalMins,
+        duration_minutes: totalMins,
         status: frontendStatus,
         currentBreakTimerEnd
       };
@@ -1508,35 +1539,7 @@ export const checkIn = async (req, res) => {
     const now = new Date().toISOString();
     const { location, workMode = "office", verificationSessionToken } = req.body;
     const recordId = `${userId}_${today}`;
-
-    // Enforce compliance lock: Employee cannot check in again today once marked absent/locked by compliance
-    const lockCheck = await query(
-      `SELECT id, status, is_admin_locked, penalty_status, penalty_reason
-       FROM attendance
-       WHERE (id = $1 OR (user_id = $2 AND date = $3))
-         AND (is_admin_locked IS TRUE OR penalty_status IS NOT NULL OR status = 'absent')
-       LIMIT 1`,
-      [recordId, userId, today]
-    );
-
-    if (lockCheck.rows.length > 0) {
-      const lockedRow = lockCheck.rows[0];
-      if (lockedRow.is_admin_locked || lockedRow.penalty_status || lockedRow.status === "absent") {
-        auditService.logAudit({
-          userId,
-          action: "ATTENDANCE_CHECKIN_BLOCKED_COMPLIANCE_LOCK",
-          resourceType: "attendance",
-          resourceId: lockedRow.id,
-          details: { reason: "Locked out due to compliance penalty; requires Admin resolution", penaltyReason: lockedRow.penalty_reason },
-          req
-        });
-        return res.status(403).json({
-          error: "Check-in blocked: Your attendance for today is marked Absent and locked due to an unacknowledged task. You cannot check in again today unless unlocked by an Administrator.",
-          locked: true,
-          penaltyReason: lockedRow.penalty_reason || "Task was not viewed within 10 minutes."
-        });
-      }
-    }
+    // Compliance lock check removed per user request - employees are not blocked from check-in
 
     if (!verificationSessionToken) {
       return res.status(400).json({
@@ -1578,23 +1581,83 @@ export const checkIn = async (req, res) => {
       });
     }
 
-    const result = await query(
-      `INSERT INTO attendance (id, user_id, company_id, date, check_in, status, work_mode, check_in_location, location)
-       VALUES ($1, $2, $3, $4, $5, 'present', $6, $7, $7)
-       ON CONFLICT (id) DO UPDATE SET
-         check_in = CASE
-           WHEN attendance.check_out IS NOT NULL THEN EXCLUDED.check_in
-           ELSE COALESCE(attendance.check_in, EXCLUDED.check_in)
-         END,
-         check_out = NULL,
-         status = 'present',
-         check_in_location = EXCLUDED.check_in_location,
-         updated_at = CURRENT_TIMESTAMP
-       RETURNING *`,
-      [recordId, userId, companyId, today, now, workMode, JSON.stringify(location || {})]
-    );
+    const existingRes = await query("SELECT * FROM attendance WHERE id = $1", [recordId]);
+    let sessions = [];
+    let accumulatedMins = 0;
+    let row;
 
-    const row = result.rows[0];
+    if (existingRes.rows.length > 0) {
+      const prev = existingRes.rows[0];
+      sessions = Array.isArray(prev.sessions) ? [...prev.sessions] : [];
+      accumulatedMins = Number(prev.accumulated_working_minutes) || 0;
+
+      // If user had previously checked in & checked out today, preserve that completed session
+      if (prev.check_out && prev.check_in) {
+        const prevSessionMins = Number(prev.duration_minutes) || Math.max(0, Math.floor((new Date(prev.check_out) - new Date(prev.check_in)) / 60000));
+        
+        // Ensure this completed session is recorded in sessions array
+        const hasSession = sessions.some(s => s.checkIn === prev.check_in && s.checkOut === prev.check_out);
+        if (!hasSession) {
+          sessions.push({
+            sessionId: `sess_${Date.now()}_${sessions.length + 1}`,
+            checkIn: prev.check_in,
+            checkOut: prev.check_out,
+            durationMinutes: prevSessionMins,
+            breaks: Array.isArray(prev.breaks) ? prev.breaks : [],
+            checkInLocation: prev.check_in_location,
+            checkOutLocation: prev.check_out_location
+          });
+        }
+        
+        const totalCompleted = sessions.filter(s => !!s.checkOut).reduce((acc, s) => acc + (Number(s.durationMinutes) || 0), 0);
+        accumulatedMins = Math.max(accumulatedMins, totalCompleted, prevSessionMins);
+      }
+
+      // Add the new open session for this check-in
+      sessions.push({
+        sessionId: `sess_${Date.now()}_${sessions.length + 1}`,
+        checkIn: now,
+        checkOut: null,
+        durationMinutes: 0,
+        breaks: [],
+        checkInLocation: location || {}
+      });
+
+      const updateRes = await query(
+        `UPDATE attendance
+         SET check_in = $1,
+             check_out = NULL,
+             status = 'present',
+             check_in_location = $2,
+             sessions = $3,
+             accumulated_working_minutes = $4,
+             duration_minutes = $4,
+             breaks = '[]'::jsonb,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $5
+         RETURNING *`,
+        [now, JSON.stringify(location || {}), JSON.stringify(sessions), accumulatedMins, recordId]
+      );
+      row = updateRes.rows[0];
+    } else {
+      sessions = [{
+        sessionId: `sess_${Date.now()}_1`,
+        checkIn: now,
+        checkOut: null,
+        durationMinutes: 0,
+        breaks: [],
+        checkInLocation: location || {}
+      }];
+
+      const insertRes = await query(
+        `INSERT INTO attendance (id, user_id, company_id, date, check_in, status, work_mode, check_in_location, location, sessions, accumulated_working_minutes, duration_minutes)
+         VALUES ($1, $2, $3, $4, $5, 'present', $6, $7, $7, $8, 0, 0)
+         RETURNING *`,
+        [recordId, userId, companyId, today, now, workMode, JSON.stringify(location || {}), JSON.stringify(sessions)]
+      );
+      row = insertRes.rows[0];
+    }
+
     const checkInDate = row.check_in ? new Date(row.check_in) : new Date();
     const formatTime = (d) => d ? `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` : "";
 
@@ -1603,7 +1666,7 @@ export const checkIn = async (req, res) => {
       action: "ATTENDANCE_CLOCK_IN",
       resourceType: "attendance",
       resourceId: row.id,
-      details: { date: today, workMode, location, verificationSessionId: sessionRes.rows[0].id },
+      details: { date: today, workMode, location, accumulatedWorkingMinutes: accumulatedMins, verificationSessionId: sessionRes.rows[0].id },
       req
     });
 
@@ -1616,6 +1679,11 @@ export const checkIn = async (req, res) => {
       checkIn: formatTime(checkInDate),
       checkInTime: row.check_in || now,
       checkInLocation: row.check_in_location || row.location,
+      sessions,
+      accumulatedWorkingMinutes: accumulatedMins,
+      totalWorkingMinutes: accumulatedMins,
+      durationMinutes: accumulatedMins,
+      duration_minutes: accumulatedMins,
       status: "checked-in"
     });
   } catch (err) {
@@ -1675,8 +1743,7 @@ export const checkOut = async (req, res) => {
     }
 
     const rowData = existing.rows[0];
-    let durationMinutes = 0;
-    const breaks = Array.isArray(rowData.breaks) ? [...rowData.breaks] : [];
+    let breaks = Array.isArray(rowData.breaks) ? [...rowData.breaks] : [];
     let totalBreakMinutes = 0;
 
     breaks.forEach(b => {
@@ -1690,20 +1757,54 @@ export const checkOut = async (req, res) => {
       }
     });
 
+    let sessions = Array.isArray(rowData.sessions) ? [...rowData.sessions] : [];
+    const accumulatedMins = Number(rowData.accumulated_working_minutes) || (
+      sessions.filter(s => !!s.checkOut).reduce((acc, s) => acc + (Number(s.durationMinutes) || 0), 0)
+    );
+
+    let thisSessionMins = 0;
     if (rowData.check_in) {
       const checkInTime = new Date(rowData.check_in);
       const rawElapsed = Math.max(0, Math.floor((new Date(now) - checkInTime) / 60000));
-      durationMinutes = Math.max(0, rawElapsed - totalBreakMinutes);
+      thisSessionMins = Math.max(0, rawElapsed - totalBreakMinutes);
     }
 
-    const checkoutStatus = durationMinutes < 240 ? "half-day" : "present";
+    const totalDayMins = accumulatedMins + thisSessionMins;
+
+    // Update open session in sessions array
+    const activeIdx = sessions.findIndex(s => !s.checkOut);
+    if (activeIdx !== -1) {
+      sessions[activeIdx].checkOut = now;
+      sessions[activeIdx].durationMinutes = thisSessionMins;
+      sessions[activeIdx].breaks = breaks;
+      sessions[activeIdx].checkOutLocation = location || {};
+    } else {
+      sessions.push({
+        sessionId: `sess_${Date.now()}_${sessions.length + 1}`,
+        checkIn: rowData.check_in || now,
+        checkOut: now,
+        durationMinutes: thisSessionMins,
+        breaks,
+        checkInLocation: rowData.check_in_location,
+        checkOutLocation: location || {}
+      });
+    }
+
+    const checkoutStatus = totalDayMins < 240 ? "half-day" : "present";
 
     const result = await query(
       `UPDATE attendance
-       SET check_out = $1, check_out_location = $2, duration_minutes = $3, breaks = $4, status = $5, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $6
+       SET check_out = $1,
+           check_out_location = $2,
+           duration_minutes = $3,
+           accumulated_working_minutes = $3,
+           sessions = $4,
+           breaks = $5,
+           status = $6,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $7
        RETURNING *`,
-      [now, JSON.stringify(location || {}), durationMinutes, JSON.stringify(breaks), checkoutStatus, recordId]
+      [now, JSON.stringify(location || {}), totalDayMins, JSON.stringify(sessions), JSON.stringify(breaks), checkoutStatus, recordId]
     );
 
     const row = result.rows[0];
@@ -1715,7 +1816,7 @@ export const checkOut = async (req, res) => {
       action: "ATTENDANCE_CLOCK_OUT",
       resourceType: "attendance",
       resourceId: row.id,
-      details: { date: today, totalWorkingMinutes: durationMinutes, verificationSessionId: sessionRes.rows[0].id },
+      details: { date: today, totalWorkingMinutes: totalDayMins, verificationSessionId: sessionRes.rows[0].id },
       req
     });
 
@@ -1727,7 +1828,11 @@ export const checkOut = async (req, res) => {
       date: today,
       checkOut: formatTime(checkOutDate),
       checkOutTime: row.check_out || now,
-      totalWorkingMinutes: durationMinutes,
+      sessions,
+      accumulatedWorkingMinutes: totalDayMins,
+      totalWorkingMinutes: totalDayMins,
+      durationMinutes: totalDayMins,
+      duration_minutes: totalDayMins,
       status: "checked-out"
     });
   } catch (err) {

@@ -6911,7 +6911,9 @@ export default function AdminDashboard() {
                     const paidDays = Math.max(0, wDays - leaves);
                     const gross = Number(editSalaryValue) || 0;
                     const calc = calculatePayroll(gross, paidDays, wDays);
-                    await saveEmployeePayroll(currentUser.companyId, selectedPayrollUser.uid, {
+                    const targetEmpId = selectedPayrollUser.employeeId || selectedPayrollUser.uid || selectedPayrollUser.id;
+
+                    await saveEmployeePayroll(currentUser.companyId, targetEmpId, {
                       month: payrollMonth,
                       year: payrollYear,
                       workingDays: wDays,
@@ -6919,6 +6921,10 @@ export default function AdminDashboard() {
                       grossSalary: gross,
                       ...calc
                     });
+
+                    // Update employee permanent gross salary
+                    await updateEmployeeGrossSalary(targetEmpId, gross).catch(() => {});
+
                     showToast("Salary updated successfully", "success");
                     setShowEditSalaryModal(false);
                     loadDirectoryData();

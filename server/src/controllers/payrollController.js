@@ -216,6 +216,15 @@ export const savePayroll = async (req, res) => {
     );
 
     const row = result.rows[0];
+
+    // Synchronize employee's permanent gross_salary in users table so subsequent months and directory stay updated
+    if (numGross > 0) {
+      await query(
+        "UPDATE users SET gross_salary = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
+        [numGross, targetEmpId]
+      ).catch(e => console.warn("Failed to update users.gross_salary in savePayroll:", e.message));
+    }
+
     res.status(201).json({
       ...metadata,
       ...row,
@@ -592,13 +601,22 @@ export const getEmployeeAttendancePayrollSummary = async (req, res) => {
     const datePrefix = `${year}-${monthNumberStr}`;
     const wDays = Number(workingDays) || 30;
 
-    // 1. Fetch attendance records for this month
+    // 0. Check if a saved payroll record already exists for this employee for this month/year
+    const savedPayrollRes = await query(
+      `SELECT * FROM payroll WHERE employee_id = $1 AND month = $2 AND year = $3 LIMIT 1`,
+      [targetUserId, month, Number(year)]
+    ).catch(() => ({ rows: [] }));
+
+    const savedPayroll = savedPayrollRes.rows[0];
+
+    // 1. Fetch attendance records for this month (supporting both local date & UTC date)
     const attRes = await query(
       `SELECT id, date, status, check_in, check_out, duration_minutes 
        FROM attendance 
        WHERE user_id = $1 
          AND (
-           TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM') = $2 
+           TO_CHAR(date, 'YYYY-MM') = $2 
+           OR TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM') = $2 
            OR id LIKE $3
          )
        ORDER BY date ASC`,
@@ -612,7 +630,9 @@ export const getEmployeeAttendancePayrollSummary = async (req, res) => {
        WHERE user_id = $1 
          AND status = 'approved'
          AND (
-           TO_CHAR(start_date AT TIME ZONE 'UTC', 'YYYY-MM') = $2 
+           TO_CHAR(start_date, 'YYYY-MM') = $2 
+           OR TO_CHAR(end_date, 'YYYY-MM') = $2
+           OR TO_CHAR(start_date AT TIME ZONE 'UTC', 'YYYY-MM') = $2 
            OR TO_CHAR(end_date AT TIME ZONE 'UTC', 'YYYY-MM') = $2
          )`,
       [targetUserId, datePrefix]
@@ -620,13 +640,23 @@ export const getEmployeeAttendancePayrollSummary = async (req, res) => {
 
     const approvedLeaveDays = Number(leaveRes.rows[0]?.approved_leave_days || 0);
 
+    // Deduplicate attendance by distinct date (YYYY-MM-DD)
+    const dateMap = new Map();
+    attRes.rows.forEach(r => {
+      const dateKey = r.date ? (typeof r.date === "string" ? r.date.split("T")[0] : new Date(r.date).toISOString().split("T")[0]) : r.id;
+      const st = String(r.status || "").toLowerCase();
+      // If day was present, prioritize present over other status
+      if (!dateMap.has(dateKey) || st === "present" || st === "completed" || st === "checked-in") {
+        dateMap.set(dateKey, st);
+      }
+    });
+
     let presentDays = 0;
     let halfDays = 0;
     let absentDays = 0;
     let onLeaveDays = 0;
 
-    attRes.rows.forEach(r => {
-      const st = String(r.status || "").toLowerCase();
+    dateMap.forEach(st => {
       if (st === "present" || st === "completed" || st === "checked-in" || st === "checked-out" || st === "in-progress" || st === "on-break") {
         presentDays += 1;
       } else if (st === "half-day") {
@@ -639,9 +669,33 @@ export const getEmployeeAttendancePayrollSummary = async (req, res) => {
     });
 
     const totalApprovedLeave = onLeaveDays + approvedLeaveDays;
-    // Loss of Pay days = absent days + half of half-days
-    const lopDays = Math.round((absentDays + (halfDays * 0.5)) * 10) / 10;
-    const paidDays = Math.max(0, Math.round((wDays - lopDays) * 10) / 10);
+
+    // Calculate LOP (Loss of Pay) days
+    let lopDays;
+    let paidDays;
+
+    if (savedPayroll) {
+      // If the admin already customized/saved this payroll record, preserve the saved LOP & paid days
+      const savedMeta = (typeof savedPayroll.metadata === "object" && savedPayroll.metadata !== null) ? savedPayroll.metadata : {};
+      lopDays = (savedMeta.lopsDays !== undefined && savedMeta.lopsDays !== null)
+        ? Number(savedMeta.lopsDays)
+        : Math.max(0, wDays - Number(savedPayroll.paid_days || wDays));
+      paidDays = Number(savedPayroll.paid_days !== null ? savedPayroll.paid_days : (wDays - lopDays));
+    } else {
+      // Automatic calculation from live attendance & leaves:
+      const now = new Date();
+      const isPastMonth = Number(year) < now.getFullYear() || (Number(year) === now.getFullYear() && (mIdx !== -1 && mIdx < now.getMonth()));
+
+      const explicitLop = Math.round((absentDays + (halfDays * 0.5)) * 10) / 10;
+      if (isPastMonth && presentDays > 0) {
+        // In a past month with recorded attendance, unworked/unapproved days count as LOP
+        const accounted = presentDays + (halfDays * 0.5) + totalApprovedLeave;
+        lopDays = Math.max(explicitLop, Math.max(0, wDays - accounted));
+      } else {
+        lopDays = explicitLop;
+      }
+      paidDays = Math.max(0, Math.round((wDays - lopDays) * 10) / 10);
+    }
 
     res.json({
       userId: targetUserId,
@@ -654,6 +708,7 @@ export const getEmployeeAttendancePayrollSummary = async (req, res) => {
       absentDays,
       lopDays,
       paidDays,
+      isSaved: Boolean(savedPayroll),
       totalLogs: attRes.rows.length,
       logs: attRes.rows
     });

@@ -9,18 +9,20 @@ import { query } from "../config/db.js";
  * 4. Admin alerts (exactly 1 alert per employee absent event to admin)
  * 5. General notifications (deduplicated against existing identical title/message)
  */
-export const sendNotificationOnce = async ({
-  userId,
-  title,
-  message,
-  type = "info",
-  link = "",
-  io = null,
-  activityType = null, // "task_assigned" | "task_deadline_completed" | "absent_penalty" | "report_reminder" | "admin_absent_alert" | "general"
-  entityId = null,     // e.g. taskId, employeeId
-  taskTitle = null,    // e.g. title of task for precise matching
-  windowHours = 12
-}) => {
+export const sendNotificationOnce = async (arg1, arg2) => {
+  const options = (typeof arg1 === "string") ? { ...arg2, userId: arg1 } : { ...(arg1 || {}) };
+  const {
+    userId,
+    title,
+    message,
+    type = "info",
+    link = "",
+    io = null,
+    activityType = null, // "task_assigned" | "task_deadline_completed" | "absent_penalty" | "report_reminder" | "admin_absent_alert" | "general"
+    entityId = null,     // e.g. taskId, employeeId
+    taskTitle = null,    // e.g. title of task for precise matching
+    windowHours = 12
+  } = options;
   if (!userId || !title || !message) return null;
 
   try {

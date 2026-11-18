@@ -9,6 +9,7 @@ import { runAttendanceSessionsMigration } from "../scripts/migrate-attendance-se
 import { runFaceReenrollmentMigration } from "../scripts/migrate-face-reenrollment.js";
 import { runCleanDuplicateNotifications } from "../scripts/clean-duplicate-notifications.js";
 import { runGlobalPayrollMigration } from "../scripts/migrate-global-payroll.js";
+import { runUnlockAllAccounts } from "../scripts/unlock-all-accounts.js";
 import { startComplianceSupervisor } from "./services/complianceSupervisor.js";
 
 dotenv.config();
@@ -54,8 +55,10 @@ export { io };
 
 server.on("error", (err) => {
   if (err.code === "EADDRINUSE") {
-    console.warn(`⚠️ Port ${PORT} is in use, attempting to use port ${PORT + 1}...`);
-    PORT = PORT + 1;
+    // Port 5002 is reserved for Python Face Verification microservice, skip it
+    const nextPort = PORT === 5001 ? 5003 : PORT + 1;
+    console.warn(`⚠️ Port ${PORT} is in use, attempting to use port ${nextPort}...`);
+    PORT = nextPort;
     server.listen(PORT, () => {
       console.log(`🚀 HRMS Backend Server running on fallback port ${PORT}`);
       console.log(`📡 Health check available at: http://localhost:${PORT}/api/health`);
@@ -100,22 +103,25 @@ async function startServer() {
     console.warn(`⚠️ [FaceService] Biometric attendance operations will fail-closed (503) until the service is restored.`);
   }
 
-  // 2. Run database migrations (non-blocking)
-  try {
-    await runGeofenceDefaultsMigration();
-    await runAttendanceSessionsMigration();
-    await runFaceReenrollmentMigration();
-    await runCleanDuplicateNotifications();
-    await runGlobalPayrollMigration();
-  } catch (migErr) {
-    console.warn(`⚠️ [Migration] Migration check note: ${migErr.message}`);
-  }
+  // 2. Run database migrations (non-blocking, individual fault tolerance)
+  try { await runGeofenceDefaultsMigration(); } catch (e) { console.warn("Geofence migration note:", e.message); }
+  try { await runAttendanceSessionsMigration(); } catch (e) { console.warn("Attendance migration note:", e.message); }
+  try { await runFaceReenrollmentMigration(); } catch (e) { console.warn("Face reenrollment migration note:", e.message); }
+  try { await runCleanDuplicateNotifications(); } catch (e) { console.warn("Clean notifications note:", e.message); }
+  try { await runGlobalPayrollMigration(); } catch (e) { console.warn("Global payroll migration note:", e.message); }
+  try { await runUnlockAllAccounts(io); } catch (e) { console.warn("Auto-unlock note:", e.message); }
 
   // 3. Start Express server
-  server.listen(PORT, () => {
+  server.listen(PORT, async () => {
     console.log(`🚀 HRMS Backend Server running on port ${PORT}`);
     console.log(`📡 Health check available at: http://localhost:${PORT}/api/health`);
     startComplianceSupervisor(io);
+    // Ensure all accounts are unlocked on server ready
+    try {
+      await runUnlockAllAccounts(io);
+    } catch (e) {
+      console.warn("Post-listen auto-unlock note:", e.message);
+    }
   });
 }
 

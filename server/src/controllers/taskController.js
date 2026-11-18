@@ -591,6 +591,35 @@ export const completeTask = async (req, res) => {
       io.emit("task_completed", completedTask);
     }
 
+    // In-app notifications to company admins & task creator
+    if (completedTask.company_id) {
+      try {
+        const adminsRes = await query(
+          `SELECT id FROM users WHERE company_id = $1 AND role IN ('admin', 'superadmin', 'manager')`,
+          [completedTask.company_id]
+        );
+        const recipientIds = new Set(adminsRes.rows.map(a => a.id));
+        if (completedTask.created_by) recipientIds.add(completedTask.created_by);
+        recipientIds.delete(userId); // Do not notify the person who completed it
+
+        const employeeName = req.user?.name || "Employee";
+        for (const adminId of recipientIds) {
+          await sendNotificationOnce({
+            userId: adminId,
+            title: "Task Completed",
+            message: `${employeeName} completed the task "${completedTask.title}".`,
+            type: "success",
+            link: "/task-management",
+            io,
+            activityType: "task_completed",
+            entityId: `${completedTask.id}_${Date.now()}`
+          });
+        }
+      } catch (notifErr) {
+        console.error("Task complete admin notification error:", notifErr);
+      }
+    }
+
     auditService.logAudit({
       userId,
       action: "TASK_COMPLETE",

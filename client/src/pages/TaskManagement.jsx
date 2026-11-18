@@ -361,7 +361,7 @@ export default function TaskManagement() {
     
     // Check for overdue tasks
     const overdue = adminAllTasks.filter(t => {
-      if (t.status === "completed") return false;
+      if (t.status === "completed" || t.status === "Completed" || t.completed) return false;
       const dl = t.deadline || t.metadata?.deadlineTimestamp || t.due_date;
       if (!dl) return false;
       return new Date(dl).getTime() < now;
@@ -369,13 +369,14 @@ export default function TaskManagement() {
 
     // Check for unviewed tasks exceeding 1 hour
     const unviewedSlaBreach = adminAllTasks.filter(t => {
-      if (t.status === "completed" || t.viewed_at || t.viewedAt) return false;
+      if (t.status === "completed" || t.status === "Completed" || t.completed || t.viewed_at || t.viewedAt) return false;
       const assigned = new Date(t.assigned_at || t.created_at).getTime();
       return (now - assigned) > 60 * 60 * 1000;
     }).length;
 
     // Penalized tasks count
     const penalizedEmployees = adminAllTasks.filter(t => {
+      if (t.status === "completed" || t.status === "Completed" || t.completed) return false;
       const nr = getNextReportDue(t);
       return Boolean(t.sla_penalty_applied || t.slaPenaltyApplied || (nr && nr.isLocked));
     }).length;
@@ -399,7 +400,7 @@ export default function TaskManagement() {
         if (statusFilter === "new" && t.status !== "new" && t.status !== "pending") return false;
         if (statusFilter === "overdue") {
           const dl = t.deadline || t.metadata?.deadlineTimestamp || t.due_date;
-          if (!dl || new Date(dl).getTime() >= now || t.status === "completed") return false;
+          if (!dl || new Date(dl).getTime() >= now || t.status === "completed" || t.status === "Completed" || t.completed) return false;
         }
         if (statusFilter === "penalized") {
           const nr = getNextReportDue(t);
@@ -885,8 +886,8 @@ export default function TaskManagement() {
                   ) : (
                     filteredAdminTasks.map(t => {
                       const effectiveDeadline = getEffectiveDeadline(t);
-                      const countdown = formatCountdown(effectiveDeadline);
                       const isCompleted = t.status === "completed" || t.status === "Completed" || t.completed;
+                      const countdown = isCompleted ? null : formatCountdown(effectiveDeadline);
                       const isUnviewedSlaViolated = !isCompleted && !t.viewed_at && !t.viewedAt && (now - new Date(t.assigned_at || t.created_at).getTime()) > 60 * 60 * 1000;
                       const nextReport = isCompleted ? null : getNextReportDue(t);
                       const isAbsent = !isCompleted && Boolean(t.sla_penalty_applied || t.slaPenaltyApplied || (nextReport && nextReport.isLocked));
@@ -928,16 +929,33 @@ export default function TaskManagement() {
                             <div className="text-[11px] font-bold text-text-main mt-0.5">
                               Deadline: {effectiveDeadline ? new Date(effectiveDeadline).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' }) : (t.duration ? `${t.duration}h duration` : "None")}
                             </div>
-                            {countdown && (
+                            {isCompleted ? (
+                              <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  (t.completion_status === "completed_on_time" || t.completionStatus === "completed_on_time" || (t.completed_at && effectiveDeadline && new Date(t.completed_at) <= new Date(effectiveDeadline)))
+                                    ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20"
+                                    : "bg-amber-500/10 text-amber-500 border border-amber-500/20"
+                                }`}>
+                                  {(t.completion_status === "completed_on_time" || t.completionStatus === "completed_on_time" || (t.completed_at && effectiveDeadline && new Date(t.completed_at) <= new Date(effectiveDeadline)))
+                                    ? "✓ Finished Within Deadline"
+                                    : "Finished Overdue"}
+                                </span>
+                              </div>
+                            ) : countdown ? (
                               <div className={`text-[10px] font-bold mt-1 ${countdown.isOverdue ? "text-amber-500 font-extrabold" : "text-emerald-500"}`}>
                                 {countdown.text}
                               </div>
-                            )}
+                            ) : null}
                           </td>
 
                           {/* 1-Hour SLA Status */}
                           <td className="py-3.5 px-4">
-                            {t.viewed_at || t.viewedAt ? (
+                            {isCompleted ? (
+                              <span className="inline-flex items-center gap-1 text-emerald-600 font-bold bg-emerald-500/10 px-2 py-0.5 rounded-full text-[11px]">
+                                <CheckCircle size={12} />
+                                {t.viewed_at || t.viewedAt ? `Viewed at ${new Date(t.viewed_at || t.viewedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : "Completed"}
+                              </span>
+                            ) : t.viewed_at || t.viewedAt ? (
                               <span className="inline-flex items-center gap-1 text-emerald-600 font-bold bg-emerald-500/10 px-2 py-0.5 rounded-full text-[11px]">
                                 <Eye size={12} />
                                 Viewed at {new Date(t.viewed_at || t.viewedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -1274,11 +1292,11 @@ export default function TaskManagement() {
                         <div>
                           <h4 className="font-bold text-sm text-text-main line-through">{task.title}</h4>
                           <span className={`inline-block mt-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                            task.completionStatus === "completed_on_time" 
+                            (task.completionStatus === "completed_on_time" || task.completion_status === "completed_on_time" || (task.completed_at && task.deadline && new Date(task.completed_at) <= new Date(task.deadline)))
                               ? "bg-emerald-500/10 text-emerald-600" 
                               : "bg-amber-500/10 text-amber-600"
                           }`}>
-                            {task.completionStatus === "completed_on_time" ? "Finished Within Deadline" : "Finished Overdue"}
+                            {(task.completionStatus === "completed_on_time" || task.completion_status === "completed_on_time" || (task.completed_at && task.deadline && new Date(task.completed_at) <= new Date(task.deadline))) ? "Finished Within Deadline" : "Finished Overdue"}
                           </span>
                         </div>
 

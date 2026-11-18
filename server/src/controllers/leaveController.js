@@ -1,5 +1,6 @@
 import { query } from "../config/db.js";
 import { sendLeaveRequestNotification, sendLeaveStatusEmail } from "../services/emailService.js";
+import { sendNotificationOnce } from "../services/notificationService.js";
 
 export const getLeaveRequests = async (req, res) => {
   try {
@@ -155,7 +156,7 @@ export const createLeaveRequest = async (req, res) => {
       try {
         const employeeName = user.name || "An employee";
         const adminRes = await query(
-          "SELECT email FROM users WHERE company_id = $1 AND role IN ('admin', 'superadmin', 'manager') LIMIT 5",
+          "SELECT id, email FROM users WHERE company_id = $1 AND role IN ('admin', 'superadmin', 'manager')",
           [companyId]
         );
         for (const admin of adminRes.rows) {
@@ -168,9 +169,16 @@ export const createLeaveRequest = async (req, res) => {
             totalDays: parsedDays,
             reason
           }).catch(() => {});
+
+          await sendNotificationOnce(admin.id, {
+            title: "New Leave Request",
+            message: `${employeeName} requested ${parsedDays} day(s) ${leaveType} (${cleanStartDate} to ${cleanEndDate}).`,
+            type: "leave",
+            link: "/admin?tab=logs&sub=leaves"
+          }).catch(() => {});
         }
       } catch (e) {
-        console.error("Error dispatching leave request email:", e);
+        console.error("Error dispatching leave request notification:", e);
       }
     })();
 
@@ -299,9 +307,16 @@ export const updateLeaveStatus = async (req, res) => {
             status: updatedLeave.status,
             rejectionReason: updatedLeave.rejection_reason
           }).catch(() => {});
+
+          await sendNotificationOnce(updatedLeave.user_id, {
+            title: `Leave Request ${status.toUpperCase()}`,
+            message: `Your ${updatedLeave.leave_type || "leave"} request for ${totalDays} day(s) was ${status}.`,
+            type: "leave",
+            link: "/leaves"
+          }).catch(() => {});
         }
       } catch (e) {
-        console.error("Error dispatching leave status email:", e);
+        console.error("Error dispatching leave status email/notification:", e);
       }
     })();
 

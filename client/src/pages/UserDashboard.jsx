@@ -301,15 +301,22 @@ export default function UserDashboard() {
       accumulatedMs = completedSessions.reduce((acc, s) => acc + (Number(s.durationMinutes) || 0), 0) * 60 * 1000;
 
       // Active session (open session without checkOut)
-      const activeS = todayLog.sessions.find(s => !s.checkOut) || todayLog.sessions[todayLog.sessions.length - 1];
+      const activeS = todayLog.sessions.find(s => !s.checkOut);
       if (activeS) {
         latestCheckIn = activeS.checkIn;
         currentSessionBreaks = Array.isArray(activeS.breaks) ? activeS.breaks : [];
+      } else {
+        latestCheckIn = todayLog.latestCheckInTime || todayLog.lastCheckInTime || todayLog.checkInTime || todayLog.check_in;
+        currentSessionBreaks = Array.isArray(todayLog.breaks) ? todayLog.breaks : [];
       }
     } else {
-      accumulatedMs = (Number(todayLog.accumulatedWorkingMinutes) || 0) * 60 * 1000;
+      accumulatedMs = (Number(todayLog.accumulatedWorkingMinutes || todayLog.accumulated_working_minutes) || 0) * 60 * 1000;
       latestCheckIn = todayLog.latestCheckInTime || todayLog.lastCheckInTime || todayLog.checkInTime || todayLog.check_in;
       currentSessionBreaks = Array.isArray(todayLog.currentSessionBreaks) ? todayLog.currentSessionBreaks : (Array.isArray(todayLog.breaks) ? todayLog.breaks : []);
+    }
+
+    if (accumulatedMs === 0 && (todayLog.accumulatedWorkingMinutes || todayLog.accumulated_working_minutes)) {
+      accumulatedMs = (Number(todayLog.accumulatedWorkingMinutes || todayLog.accumulated_working_minutes) || 0) * 60 * 1000;
     }
 
     if (!latestCheckIn) return accumulatedMs;
@@ -1045,18 +1052,38 @@ export default function UserDashboard() {
       targetDate.setDate(monday.getDate() + index);
       const targetDateStr = getLocalDateString(targetDate);
 
-      const log = userLogs.find(l => l.date === targetDateStr);
-      let hrs = 0;
+      const log = userLogs.find(l => {
+        if (!l) return false;
+        const lDate = l.date_str || (typeof l.date === "string" ? l.date.split("T")[0] : "");
+        if (lDate === targetDateStr) return true;
+        if (l.check_in && getLocalDateString(new Date(l.check_in)) === targetDateStr) return true;
+        if (l.id && l.id.endsWith(`_${targetDateStr}`)) return true;
+        return false;
+      });
+
+      let mins = 0;
       if (log) {
-        if (targetDateStr === todayStr && !isCheckedOut) {
-          hrs = getElapsedWorkingMs() / (1000 * 60 * 60);
+        if (targetDateStr === todayStr && isCheckedIn) {
+          mins = Math.round(getElapsedWorkingMs() / 60000);
         } else {
-          hrs = (log.totalWorkingMinutes || 0) / 60;
+          mins = Number(log.totalWorkingMinutes ?? log.duration_minutes ?? log.durationMinutes) || 0;
+          if (mins <= 0 && log.check_in && log.check_out) {
+            mins = Math.max(0, Math.floor((new Date(log.check_out) - new Date(log.check_in)) / 60000));
+          }
+          if (targetDateStr === todayStr && mins <= 0) {
+            mins = Math.round(getElapsedWorkingMs() / 60000);
+          }
         }
+      } else if (targetDateStr === todayStr && (isCheckedIn || isCheckedOut)) {
+        mins = Math.round(getElapsedWorkingMs() / 60000);
       }
+
+      const hrs = mins / 60;
+
       return {
         label: dayName,
-        hours: parseFloat(hrs.toFixed(1)),
+        minutes: mins,
+        hours: parseFloat(hrs.toFixed(2)),
         active: targetDateStr === todayStr
       };
     });
@@ -1066,13 +1093,20 @@ export default function UserDashboard() {
     const list = [];
 
     if (todayLog) {
-      if (todayLog.checkOutTime) {
+      if (todayLog.checkOutTime || todayLog.check_out) {
+        const mins = Math.max(
+          Number(todayLog.totalWorkingMinutes ?? todayLog.duration_minutes ?? todayLog.durationMinutes) || 0,
+          Math.round(getElapsedWorkingMs() / 60000)
+        );
+        const durationText = mins < 60 && mins > 0
+          ? `Total: ${mins} mins (${(mins / 60).toFixed(2)} hrs)` 
+          : `Total: ${(mins / 60).toFixed(2)} hrs`;
         list.push({
           type: "out",
           title: "Checked Out",
-          time: new Date(todayLog.checkOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          time: new Date(todayLog.checkOutTime || todayLog.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           dateText: "Today",
-          desc: `Total: ${((todayLog.totalWorkingMinutes || 0) / 60).toFixed(2)} hrs`
+          desc: durationText
         });
       }
 
@@ -1117,12 +1151,18 @@ export default function UserDashboard() {
     historyLogs.forEach(hLog => {
       const dateText = new Date(hLog.date).toLocaleDateString([], { month: 'short', day: 'numeric' });
       if (hLog.checkOutTime || hLog.check_out) {
+        const mins = Number(hLog.totalWorkingMinutes ?? hLog.duration_minutes ?? hLog.durationMinutes) || (
+          (hLog.check_in && hLog.check_out) ? Math.max(0, Math.floor((new Date(hLog.check_out) - new Date(hLog.check_in)) / 60000)) : 0
+        );
+        const durationText = mins < 60 && mins > 0
+          ? `Total: ${mins} mins (${(mins / 60).toFixed(2)} hrs)` 
+          : `Total: ${(mins / 60).toFixed(2)} hrs`;
         list.push({
           type: "out",
           title: "Checked Out",
           time: new Date(hLog.checkOutTime || hLog.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           dateText: dateText,
-          desc: `Total: ${((hLog.totalWorkingMinutes || 0) / 60).toFixed(2)} hrs`
+          desc: durationText
         });
       }
       if (hLog.checkInTime || hLog.check_in) {
@@ -1312,28 +1352,7 @@ export default function UserDashboard() {
 
               const calc = calculatePayroll(payslip.grossSalary || 0);
 
-              
-  const handleDownloadPayslip = () => {
-    const element = document.getElementById('payslip-content');
-    const opt = {
-      margin:       0.5,
-      filename:     `Payslip_${currentUser?.name}_${selectedPayslip?.month}_${selectedPayslip?.year}.pdf`,
-      image:        { type: 'jpeg', quality: 0.98 },
-      html2canvas:  { scale: 2 },
-      jsPDF:        { unit: 'in', format: 'letter', orientation: 'portrait' }
-    };
-    html2pdf().set(opt).from(element).save();
-  };
-
-  if (!currentUser) {
-    return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="w-8 h-8 rounded-full border-2 border-brand-primary border-t-transparent animate-spin" />
-      </div>
-    );
-  }
-
-  return (
+              return (
                 <div key={idx} className="bg-bg-card border border-border-card rounded-[24px] p-6 shadow-sm flex flex-col group hover:shadow-md transition-shadow relative overflow-hidden text-left">
                   <div className="flex justify-between items-start mb-6 z-10">
                     <div className="flex items-center gap-3">
@@ -1368,7 +1387,12 @@ export default function UserDashboard() {
                   <div className="pt-6 mt-6 border-t border-border-card z-10">
                     <button 
                       onClick={() => {
-                        setSelectedPayslip({ ...calc, ...payslip });
+                        setSelectedPayslip({ 
+                          ...calc, 
+                          ...payslip, 
+                          gross: payslip.grossSalary || payslip.gross || calc.gross, 
+                          net: payslip.netSalary || payslip.net || calc.net 
+                        });
                         setShowPayslipModal(true);
                       }}
                       className="w-full flex items-center justify-center gap-2 py-2.5 bg-bg-base hover:bg-brand-primary/10 text-brand-primary font-bold text-xs rounded-[12px] transition-colors"
@@ -2699,7 +2723,18 @@ export default function UserDashboard() {
 
                 <div className="inline-flex py-2 px-4 bg-brand-success/5 border border-brand-success/20 rounded-[12px] text-xs font-bold text-brand-success gap-1.5 uppercase tracking-wide mb-5">
                   <span>Logged:</span>
-                  <strong>{((todayLog?.totalWorkingMinutes || 0) / 60).toFixed(2)} hrs</strong>
+                  <strong>
+                    {(() => {
+                      const mins = Math.max(
+                        Number(todayLog?.totalWorkingMinutes ?? todayLog?.duration_minutes ?? todayLog?.durationMinutes) || 0,
+                        Math.round(getElapsedWorkingMs() / 60000)
+                      );
+                      if (mins < 60 && mins > 0) {
+                        return `${mins} mins (${(mins / 60).toFixed(2)} hrs)`;
+                      }
+                      return `${((mins || 0) / 60).toFixed(2)} hrs`;
+                    })()}
+                  </strong>
                 </div>
 
                 {/* Re-check-in CTA */}
@@ -2754,10 +2789,18 @@ export default function UserDashboard() {
                     cursor={{ fill: '#f1f5f9', opacity: 0.1 }}
                     contentStyle={{ backgroundColor: '#0f172a', border: 'none', borderRadius: '8px', color: '#fff', fontSize: '12px', fontWeight: 'bold' }}
                     itemStyle={{ color: '#fff' }}
-                    formatter={(value) => [`${value} hrs`, 'Worked']}
+                    formatter={(value, name, item) => {
+                      const mins = item?.payload?.minutes !== undefined ? item.payload.minutes : Math.round(Number(value) * 60);
+                      if (mins < 60 && mins > 0) {
+                        return [`${mins} mins (${value} hrs)`, 'Worked'];
+                      }
+                      const h = Math.floor(mins / 60);
+                      const m = mins % 60;
+                      return [`${value} hrs (${h}h ${m}m)`, 'Worked'];
+                    }}
                     labelStyle={{ color: '#94a3b8', marginBottom: '4px' }}
                   />
-                  <Bar dataKey="hours" radius={[4, 4, 0, 0]} maxBarSize={30} isAnimationActive={false}>
+                  <Bar dataKey="hours" radius={[4, 4, 0, 0]} maxBarSize={30} isAnimationActive={false} minPointSize={6}>
                     {weeklyHoursData.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={entry.active ? '#4f46e5' : (entry.hours > 0 ? '#818cf8' : '#e2e8f0')} />
                     ))}
