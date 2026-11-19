@@ -228,35 +228,51 @@ export const runHourlyReportingComplianceCheck = async (io = null, targetCompany
             }
           });
 
-          let sessions = Array.isArray(attRecord.sessions) ? [...attRecord.sessions] : [];
-          const prevCompletedMins = sessions.filter(s => !!s.checkOut).reduce((acc, s) => acc + (Number(s.durationMinutes) || 0), 0);
-          const accumulatedMins = Math.max(Number(attRecord.accumulated_working_minutes) || 0, prevCompletedMins);
+          let rawSessions = Array.isArray(attRecord.sessions) ? [...attRecord.sessions] : [];
+          const cleanSessions = [];
+          const seenCheckIns = new Set();
+          let computedTotalDayMins = 0;
 
-          let thisSessionMins = 0;
-          const activeIdx = sessions.findIndex(s => !s.checkOut);
-          if (activeIdx !== -1) {
-            const sCheckIn = sessions[activeIdx].checkIn ? new Date(sessions[activeIdx].checkIn) : (attRecord.check_in ? new Date(attRecord.check_in) : now);
-            const rawElapsed = Math.max(0, Math.floor((now.getTime() - sCheckIn.getTime()) / 60000));
-            thisSessionMins = Math.max(0, rawElapsed - totalBreakMinutes);
-            sessions[activeIdx].checkOut = nowIso;
-            sessions[activeIdx].durationMinutes = thisSessionMins;
-            sessions[activeIdx].breaks = breaks;
-          } else if (attRecord.check_in && !attRecord.check_out) {
-            const checkInTime = new Date(attRecord.check_in);
-            const rawElapsed = Math.max(0, Math.floor((now.getTime() - checkInTime.getTime()) / 60000));
-            thisSessionMins = Math.max(0, rawElapsed - totalBreakMinutes);
-            sessions.push({
-              sessionId: `sess_${Date.now()}_${sessions.length + 1}`,
-              checkIn: attRecord.check_in,
+          rawSessions.forEach((s, idx) => {
+            if (!s || !s.checkIn) return;
+            const inMs = new Date(s.checkIn).getTime();
+            const key = Math.floor(inMs / 10000);
+            if (seenCheckIns.has(key)) return;
+            seenCheckIns.add(key);
+
+            let cOut = s.checkOut;
+            let dur = Number(s.durationMinutes) || 0;
+            if (!cOut) {
+              cOut = nowIso;
+              dur = Math.max(1, Math.floor((now.getTime() - inMs) / 60000) - totalBreakMinutes);
+            } else if (dur <= 0 && s.checkOut) {
+              dur = Math.max(1, Math.floor((new Date(s.checkOut).getTime() - inMs) / 60000));
+            }
+            cleanSessions.push({
+              ...s,
+              checkOut: cOut,
+              durationMinutes: dur
+            });
+            computedTotalDayMins += dur;
+          });
+
+          // If cleanSessions had no sessions but check_in exists, record it
+          if (cleanSessions.length === 0 && attRecord.check_in) {
+            const inMs = new Date(attRecord.check_in).getTime();
+            const dur = Math.max(1, Math.floor((now.getTime() - inMs) / 60000) - totalBreakMinutes);
+            cleanSessions.push({
+              sessionId: `sess_${inMs}_1`,
+              checkIn: new Date(attRecord.check_in).toISOString(),
               checkOut: nowIso,
-              durationMinutes: thisSessionMins,
+              durationMinutes: dur,
               breaks
             });
+            computedTotalDayMins = dur;
           }
 
-          totalDayMins = accumulatedMins + thisSessionMins;
-          finalSessions = sessions;
-          finalCheckout = attRecord.check_out || nowIso;
+          totalDayMins = computedTotalDayMins;
+          finalSessions = cleanSessions;
+          finalCheckout = nowIso;
 
           await query(
             `UPDATE attendance

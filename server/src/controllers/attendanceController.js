@@ -1658,40 +1658,73 @@ export const checkIn = async (req, res) => {
         });
       }
 
-      sessions = Array.isArray(prev.sessions) ? [...prev.sessions] : [];
-      accumulatedMins = Number(prev.accumulated_working_minutes) || 0;
+      // 1. Ensure any previous sessions are closed and deduplicated
+      let rawSessions = Array.isArray(prev.sessions) ? [...prev.sessions] : [];
+      const cleanSessions = [];
+      const seenCheckIns = new Set();
 
-      // If user had previously checked in & checked out today, preserve that completed session
-      if (prev.check_out && prev.check_in) {
-        const prevSessionMins = Number(prev.duration_minutes) || Math.max(0, Math.floor((new Date(prev.check_out) - new Date(prev.check_in)) / 60000));
-        
-        // Ensure this completed session is recorded in sessions array
-        const hasSession = sessions.some(s => s.checkIn === prev.check_in && s.checkOut === prev.check_out);
-        if (!hasSession) {
-          sessions.push({
-            sessionId: `sess_${Date.now()}_${sessions.length + 1}`,
-            checkIn: prev.check_in,
-            checkOut: prev.check_out,
-            durationMinutes: prevSessionMins,
+      rawSessions.forEach((s, idx) => {
+        if (!s || !s.checkIn) return;
+        const inMs = new Date(s.checkIn).getTime();
+        const key = Math.floor(inMs / 10000);
+        if (seenCheckIns.has(key)) return;
+        seenCheckIns.add(key);
+
+        const outMs = s.checkOut ? new Date(s.checkOut).getTime() : 0;
+        let dur = Number(s.durationMinutes) || 0;
+        let cOut = s.checkOut;
+
+        // If this previous session was never closed, close it at prev.check_out or now
+        if (!cOut) {
+          const effectiveOut = prev.check_out ? new Date(prev.check_out) : new Date(now);
+          cOut = effectiveOut.toISOString();
+          dur = Math.max(1, Math.floor((effectiveOut.getTime() - inMs) / 60000));
+        } else if (dur <= 0 && outMs > inMs) {
+          dur = Math.max(1, Math.floor((outMs - inMs) / 60000));
+        }
+
+        cleanSessions.push({
+          sessionId: s.sessionId || `sess_${inMs}_${idx + 1}`,
+          checkIn: new Date(s.checkIn).toISOString(),
+          checkOut: cOut,
+          durationMinutes: dur,
+          breaks: Array.isArray(s.breaks) ? s.breaks : [],
+          checkInLocation: s.checkInLocation || {},
+          checkOutLocation: s.checkOutLocation || {}
+        });
+      });
+
+      // If prev had check_in & check_out not present in sessions, add it
+      if (prev.check_in && prev.check_out) {
+        const pInMs = new Date(prev.check_in).getTime();
+        const pOutMs = new Date(prev.check_out).getTime();
+        const pKey = Math.floor(pInMs / 10000);
+        if (!seenCheckIns.has(pKey) && pOutMs >= pInMs) {
+          const pDur = Math.max(1, Math.floor((pOutMs - pInMs) / 60000));
+          cleanSessions.push({
+            sessionId: `sess_${pInMs}_prev`,
+            checkIn: new Date(prev.check_in).toISOString(),
+            checkOut: new Date(prev.check_out).toISOString(),
+            durationMinutes: pDur,
             breaks: Array.isArray(prev.breaks) ? prev.breaks : [],
-            checkInLocation: prev.check_in_location,
-            checkOutLocation: prev.check_out_location
+            checkInLocation: prev.check_in_location || {},
+            checkOutLocation: prev.check_out_location || {}
           });
         }
-        
-        const totalCompleted = sessions.filter(s => !!s.checkOut).reduce((acc, s) => acc + (Number(s.durationMinutes) || 0), 0);
-        accumulatedMins = Math.max(accumulatedMins, totalCompleted, prevSessionMins);
       }
 
-      // Add the new open session for this check-in
-      sessions.push({
-        sessionId: `sess_${Date.now()}_${sessions.length + 1}`,
+      accumulatedMins = cleanSessions.reduce((acc, s) => acc + (Number(s.durationMinutes) || 0), 0);
+
+      // 2. Append the single new active session for this check-in
+      cleanSessions.push({
+        sessionId: `sess_${Date.now()}_${cleanSessions.length + 1}`,
         checkIn: now,
         checkOut: null,
         durationMinutes: 0,
         breaks: [],
         checkInLocation: location || {}
       });
+      sessions = cleanSessions;
 
       const updateRes = await query(
         `UPDATE attendance

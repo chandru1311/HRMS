@@ -300,15 +300,27 @@ export default function UserDashboard() {
     let currentSessionBreaks = [];
 
     if (Array.isArray(todayLog.sessions) && todayLog.sessions.length > 0) {
-      // Completed sessions
-      const completedSessions = todayLog.sessions.filter(s => !!s.checkOut);
-      accumulatedMs = completedSessions.reduce((acc, s) => acc + (Number(s.durationMinutes) || 0), 0) * 60 * 1000;
+      // Completed sessions (deduplicated by checkIn timestamp)
+      const uniqueCompleted = [];
+      const seenCheckIns = new Set();
+      todayLog.sessions.filter(s => !!s.checkOut).forEach(s => {
+        if (!s.checkIn) return;
+        const key = Math.floor(new Date(s.checkIn).getTime() / 10000);
+        if (!seenCheckIns.has(key)) {
+          seenCheckIns.add(key);
+          uniqueCompleted.push(s);
+        }
+      });
+      accumulatedMs = uniqueCompleted.reduce((acc, s) => acc + (Number(s.durationMinutes) || 0), 0) * 60 * 1000;
 
-      // Active session (open session without checkOut)
-      const activeS = todayLog.sessions.find(s => !s.checkOut);
+      // Active session (the latest session without checkOut)
+      const activeS = [...todayLog.sessions].reverse().find(s => !s.checkOut);
       if (activeS) {
-        latestCheckIn = activeS.checkIn;
+        latestCheckIn = todayLog.check_in || activeS.checkIn;
         currentSessionBreaks = Array.isArray(activeS.breaks) ? activeS.breaks : [];
+      } else if (todayLog.check_in && !todayLog.check_out) {
+        latestCheckIn = todayLog.check_in;
+        currentSessionBreaks = Array.isArray(todayLog.breaks) ? todayLog.breaks : [];
       } else {
         return accumulatedMs;
       }
