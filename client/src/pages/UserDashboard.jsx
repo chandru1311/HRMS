@@ -448,8 +448,10 @@ export default function UserDashboard() {
         if (log.check_in && new Date(log.check_in).toDateString() === new Date().toDateString()) return true;
         return false;
       });
-      // Prioritize active session without check_out over completed sessions
-      const today = todayLogs.find(l => Boolean(l.check_in) && !l.check_out) || todayLogs[0] || null;
+      // If user attendance is locked or marked absent, prioritize locked record so dashboard immediately freezes and displays locked state
+      const lockedLog = todayLogs.find(l => l.is_admin_locked === true || l.status === "absent" || Boolean(l.penalty_status));
+      const activeLog = todayLogs.find(l => Boolean(l.check_in) && !l.check_out && !l.is_admin_locked && l.status !== "absent");
+      const today = lockedLog || activeLog || todayLogs[0] || null;
       setTodayLog(today);
       setLoading(false);
     });

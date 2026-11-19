@@ -800,10 +800,14 @@ export const adminRevertPenalty = async (req, res) => {
            penalized_by_task_id = NULL,
            auto_checked_out = FALSE,
            updated_at = NOW()
-       WHERE id = $1
+       WHERE id = $1 OR (user_id = $2 AND date = $3)
        RETURNING *`,
-      [record.id]
+      [record.id, record.user_id, record.date]
     );
+    await query(
+      "DELETE FROM attendance WHERE user_id = $1 AND date = $2 AND id != $3",
+      [record.user_id, record.date, record.id]
+    ).catch(() => {});
     const updatedAttendance = attRes.rows[0];
     const updated = updatedAttendance || record;
 
@@ -1634,13 +1638,19 @@ export const checkIn = async (req, res) => {
       });
     }
 
-    const existingRes = await query("SELECT * FROM attendance WHERE id = $1", [recordId]);
+    const existingRes = await query(
+      `SELECT * FROM attendance 
+       WHERE (id = $1 OR (user_id = $2 AND date = $3))
+       ORDER BY check_in DESC NULLS LAST, created_at DESC LIMIT 1`,
+      [recordId, userId, today]
+    );
     let sessions = [];
     let accumulatedMins = 0;
     let row;
 
     if (existingRes.rows.length > 0) {
       const prev = existingRes.rows[0];
+      const targetId = prev.id || recordId;
 
       if (prev.is_admin_locked) {
         return res.status(403).json({
@@ -1685,7 +1695,8 @@ export const checkIn = async (req, res) => {
 
       const updateRes = await query(
         `UPDATE attendance
-         SET check_in = $1,
+         SET id = $5,
+             check_in = $1,
              check_out = NULL,
              status = 'present',
              check_in_location = $2,
@@ -1699,11 +1710,17 @@ export const checkIn = async (req, res) => {
              penalized_by_task_id = NULL,
              auto_checked_out = FALSE,
              updated_at = CURRENT_TIMESTAMP
-         WHERE id = $5
+         WHERE id = $6 OR id = $5
          RETURNING *`,
-        [now, JSON.stringify(location || {}), JSON.stringify(sessions), accumulatedMins, recordId]
+        [now, JSON.stringify(location || {}), JSON.stringify(sessions), accumulatedMins, recordId, targetId]
       );
       row = updateRes.rows[0];
+
+      // Remove any extra duplicates for this user and day
+      await query(
+        `DELETE FROM attendance WHERE user_id = $1 AND date = $2 AND id != $3`,
+        [userId, today, recordId]
+      ).catch(() => {});
     } else {
       sessions = [{
         sessionId: `sess_${Date.now()}_1`,
@@ -1717,6 +1734,17 @@ export const checkIn = async (req, res) => {
       const insertRes = await query(
         `INSERT INTO attendance (id, user_id, company_id, date, check_in, status, work_mode, check_in_location, location, sessions, accumulated_working_minutes, duration_minutes)
          VALUES ($1, $2, $3, $4, $5, 'present', $6, $7, $7, $8, 0, 0)
+         ON CONFLICT (id) DO UPDATE SET
+           check_in = EXCLUDED.check_in,
+           check_out = NULL,
+           status = 'present',
+           check_in_location = EXCLUDED.check_in_location,
+           sessions = EXCLUDED.sessions,
+           is_admin_locked = FALSE,
+           penalty_status = NULL,
+           penalty_reason = NULL,
+           auto_checked_out = FALSE,
+           updated_at = CURRENT_TIMESTAMP
          RETURNING *`,
         [recordId, userId, companyId, today, now, workMode, JSON.stringify(location || {}), JSON.stringify(sessions)]
       );

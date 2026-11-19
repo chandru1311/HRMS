@@ -197,85 +197,94 @@ export const runHourlyReportingComplianceCheck = async (io = null, targetCompany
         const attRes = await query(
           `SELECT id, status, is_admin_locked, penalty_status, check_in, check_out, breaks, sessions, accumulated_working_minutes, duration_minutes 
            FROM attendance 
-           WHERE user_id = $1 AND date = $2 LIMIT 1`,
+           WHERE user_id = $1 AND date = $2
+           ORDER BY check_in DESC NULLS LAST, created_at DESC LIMIT 1`,
           [task.assigned_to, today]
         );
 
         let attRecord = attRes.rows[0];
         const penaltyReason = `Missed required progress report on task "${task.task_title}" for > 10 minutes after due time.`;
-        let attId = attRecord?.id;
+        let attId = attRecord?.id || `${task.assigned_to}_${today}`;
         const now = new Date();
         const nowIso = now.toISOString();
 
+        let totalDayMins = 0;
+        let finalSessions = [];
+        let finalCheckout = nowIso;
+
         if (attRecord) {
-          if (attRecord.status !== "absent" || !attRecord.is_admin_locked) {
-            penaltyCount++;
+          penaltyCount++;
 
-            let breaks = Array.isArray(attRecord.breaks) ? [...attRecord.breaks] : [];
-            let totalBreakMinutes = 0;
-            breaks.forEach(b => {
-              if (b.start && b.end) {
-                totalBreakMinutes += Math.max(0, Math.floor((new Date(b.end) - new Date(b.start)) / 60000));
-              } else if (b.start && !b.end) {
-                b.end = nowIso;
-                const dur = Math.max(0, Math.floor((now.getTime() - new Date(b.start).getTime()) / 60000));
-                b.durationMinutes = dur;
-                totalBreakMinutes += dur;
-              }
+          let breaks = Array.isArray(attRecord.breaks) ? [...attRecord.breaks] : [];
+          let totalBreakMinutes = 0;
+          breaks.forEach(b => {
+            if (b.start && b.end) {
+              totalBreakMinutes += Math.max(0, Math.floor((new Date(b.end) - new Date(b.start)) / 60000));
+            } else if (b.start && !b.end) {
+              b.end = nowIso;
+              const dur = Math.max(0, Math.floor((now.getTime() - new Date(b.start).getTime()) / 60000));
+              b.durationMinutes = dur;
+              totalBreakMinutes += dur;
+            }
+          });
+
+          let sessions = Array.isArray(attRecord.sessions) ? [...attRecord.sessions] : [];
+          const prevCompletedMins = sessions.filter(s => !!s.checkOut).reduce((acc, s) => acc + (Number(s.durationMinutes) || 0), 0);
+          const accumulatedMins = Math.max(Number(attRecord.accumulated_working_minutes) || 0, prevCompletedMins);
+
+          let thisSessionMins = 0;
+          const activeIdx = sessions.findIndex(s => !s.checkOut);
+          if (activeIdx !== -1) {
+            const sCheckIn = sessions[activeIdx].checkIn ? new Date(sessions[activeIdx].checkIn) : (attRecord.check_in ? new Date(attRecord.check_in) : now);
+            const rawElapsed = Math.max(0, Math.floor((now.getTime() - sCheckIn.getTime()) / 60000));
+            thisSessionMins = Math.max(0, rawElapsed - totalBreakMinutes);
+            sessions[activeIdx].checkOut = nowIso;
+            sessions[activeIdx].durationMinutes = thisSessionMins;
+            sessions[activeIdx].breaks = breaks;
+          } else if (attRecord.check_in && !attRecord.check_out) {
+            const checkInTime = new Date(attRecord.check_in);
+            const rawElapsed = Math.max(0, Math.floor((now.getTime() - checkInTime.getTime()) / 60000));
+            thisSessionMins = Math.max(0, rawElapsed - totalBreakMinutes);
+            sessions.push({
+              sessionId: `sess_${Date.now()}_${sessions.length + 1}`,
+              checkIn: attRecord.check_in,
+              checkOut: nowIso,
+              durationMinutes: thisSessionMins,
+              breaks
             });
-
-            let sessions = Array.isArray(attRecord.sessions) ? [...attRecord.sessions] : [];
-            const accumulatedMins = Number(attRecord.accumulated_working_minutes) || (
-              sessions.filter(s => !!s.checkOut).reduce((acc, s) => acc + (Number(s.durationMinutes) || 0), 0)
-            );
-
-            let thisSessionMins = 0;
-            if (attRecord.check_in && !attRecord.check_out) {
-              const checkInTime = new Date(attRecord.check_in);
-              const rawElapsed = Math.max(0, Math.floor((now.getTime() - checkInTime.getTime()) / 60000));
-              thisSessionMins = Math.max(0, rawElapsed - totalBreakMinutes);
-            }
-
-            const totalDayMins = accumulatedMins + thisSessionMins;
-
-            // Close the active open session in sessions array if present
-            const activeIdx = sessions.findIndex(s => !s.checkOut);
-            if (activeIdx !== -1) {
-              sessions[activeIdx].checkOut = nowIso;
-              sessions[activeIdx].durationMinutes = thisSessionMins;
-              sessions[activeIdx].breaks = breaks;
-            } else if (attRecord.check_in && !attRecord.check_out) {
-              sessions.push({
-                sessionId: `sess_${Date.now()}_${sessions.length + 1}`,
-                checkIn: attRecord.check_in,
-                checkOut: nowIso,
-                durationMinutes: thisSessionMins,
-                breaks
-              });
-            }
-
-            await query(
-              `UPDATE attendance
-               SET status = 'absent',
-                   check_out = COALESCE(check_out, NOW()),
-                   auto_checked_out = TRUE,
-                   penalty_status = COALESCE(penalty_status, 'missed_hourly_report_penalty'),
-                   is_admin_locked = TRUE,
-                   penalty_applied_at = NOW(),
-                   penalty_reason = COALESCE(penalty_reason, $1),
-                   penalized_by_task_id = COALESCE(penalized_by_task_id, $2),
-                   duration_minutes = $3,
-                   accumulated_working_minutes = $3,
-                   sessions = $4,
-                   breaks = $5,
-                   updated_at = NOW()
-               WHERE id = $6`,
-              [penaltyReason, task.task_id, totalDayMins, JSON.stringify(sessions), JSON.stringify(breaks), attId]
-            );
           }
+
+          totalDayMins = accumulatedMins + thisSessionMins;
+          finalSessions = sessions;
+          finalCheckout = attRecord.check_out || nowIso;
+
+          await query(
+            `UPDATE attendance
+             SET status = 'absent',
+                 check_out = $1,
+                 auto_checked_out = TRUE,
+                 penalty_status = COALESCE(penalty_status, 'missed_hourly_report_penalty'),
+                 is_admin_locked = TRUE,
+                 penalty_applied_at = NOW(),
+                 penalty_reason = COALESCE(penalty_reason, $2),
+                 penalized_by_task_id = COALESCE(penalized_by_task_id, $3),
+                 duration_minutes = $4,
+                 accumulated_working_minutes = $4,
+                 sessions = $5,
+                 breaks = $6,
+                 updated_at = NOW()
+             WHERE id = $7`,
+            [finalCheckout, penaltyReason, task.task_id, totalDayMins, JSON.stringify(sessions), JSON.stringify(breaks), attId]
+          );
+
+          // Clean up any extra duplicate rows for this user on this day
+          await query(
+            `DELETE FROM attendance WHERE user_id = $1 AND date = $2 AND id != $3`,
+            [task.assigned_to, today, attId]
+          ).catch(() => {});
         } else {
           penaltyCount++;
-          attId = "att_" + Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
+          attId = `${task.assigned_to}_${today}`;
           await query(
             `INSERT INTO attendance (
               id, user_id, company_id, date, status, check_out, auto_checked_out, penalty_status,
@@ -283,7 +292,17 @@ export const runHourlyReportingComplianceCheck = async (io = null, targetCompany
               duration_minutes, accumulated_working_minutes, sessions, breaks,
               created_at, updated_at
             )
-            VALUES ($1, $2, $3, $4, 'absent', NOW(), TRUE, 'missed_hourly_report_penalty', TRUE, NOW(), $5, $6, 0, 0, '[]'::jsonb, '[]'::jsonb, NOW(), NOW())`,
+            VALUES ($1, $2, $3, $4, 'absent', NOW(), TRUE, 'missed_hourly_report_penalty', TRUE, NOW(), $5, $6, 0, 0, '[]'::jsonb, '[]'::jsonb, NOW(), NOW())
+            ON CONFLICT (id) DO UPDATE SET
+              status = 'absent',
+              check_out = COALESCE(attendance.check_out, NOW()),
+              auto_checked_out = TRUE,
+              penalty_status = 'missed_hourly_report_penalty',
+              is_admin_locked = TRUE,
+              penalty_applied_at = NOW(),
+              penalty_reason = EXCLUDED.penalty_reason,
+              penalized_by_task_id = EXCLUDED.penalized_by_task_id,
+              updated_at = NOW()`,
             [attId, task.assigned_to, task.company_id, today, penaltyReason, task.task_id]
           );
         }
@@ -335,8 +354,16 @@ export const runHourlyReportingComplianceCheck = async (io = null, targetCompany
               is_admin_locked: true,
               isAttendanceLocked: true,
               auto_checked_out: true,
-              check_out: nowIso,
-              checkOutTime: nowIso,
+              check_out: finalCheckout,
+              checkOutTime: finalCheckout,
+              check_in: attRecord?.check_in || null,
+              checkInTime: attRecord?.check_in || null,
+              sessions: finalSessions,
+              totalWorkingMinutes: totalDayMins,
+              durationMinutes: totalDayMins,
+              duration_minutes: totalDayMins,
+              accumulated_working_minutes: totalDayMins,
+              accumulatedWorkingMinutes: totalDayMins,
               penaltyType: "missed_hourly_report_penalty",
               penalty_status: "missed_hourly_report_penalty",
               penaltyReason,
