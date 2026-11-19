@@ -7,8 +7,8 @@ import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 import { useModal } from "../context/ModalContext";
-import { 
-  getAllRegisteredUsers, 
+import {
+  getAllRegisteredUsers,
   subscribeToAdminDashboard,
   updateUserRecord,
   updateUserAccountStatus,
@@ -48,17 +48,17 @@ import {
   getEmployeeAttendancePayrollSummary
 } from "../firebase";
 
-import { 
-  Shield, 
+import {
+  Shield,
   ShieldAlert,
-  Users, 
-  Clock, 
-  Coffee, 
-  MapPin, 
-  Search, 
-  Download, 
-  FileText, 
-  Calendar, 
+  Users,
+  Clock,
+  Coffee,
+  MapPin,
+  Search,
+  Download,
+  FileText,
+  Calendar,
   AlertCircle,
   Edit,
   Trash2,
@@ -109,11 +109,11 @@ import FaceEnrollmentPanel from "../components/FaceEnrollmentPanel";
 import GlobalPayrollPanel from "../components/GlobalPayroll/GlobalPayrollPanel";
 import { usePermissions } from "../hooks/usePermissions";
 import { subscribeToRoles } from "../firebase";
-import { 
-  getLocationDisplayName, 
-  formatGpsCoords, 
-  getGoogleMapsUrl, 
-  resolveLocationName 
+import {
+  getLocationDisplayName,
+  formatGpsCoords,
+  getGoogleMapsUrl,
+  resolveLocationName
 } from "../utils/locationHelper";
 const getBase64ImageFromUrl = async (imageUrl) => {
   const res = await fetch(imageUrl);
@@ -167,10 +167,10 @@ const getOverlapInfo = (s1, e1, s2, e2) => {
   const end1 = new Date(e1).setHours(23, 59, 59, 999);
   const start2 = new Date(s2).setHours(0, 0, 0, 0);
   const end2 = new Date(e2).setHours(23, 59, 59, 999);
-  
+
   const overlapStart = Math.max(start1, start2);
   const overlapEnd = Math.min(end1, end2);
-  
+
   if (overlapStart <= overlapEnd) {
     const diffTime = Math.abs(overlapEnd - overlapStart);
     return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
@@ -242,7 +242,7 @@ export default function AdminDashboard() {
   // Sync activeTab with sidebar parameters: 'live' | 'logs' | 'users' | 'analytics'
   const activeTabParam = searchParams.get("tab");
   let defaultTab = "live";
-  
+
   if (!activeTabParam && !isAdminUser) {
     if (can("read", "Dashboard")) defaultTab = "analytics";
     else if (can("read", "LiveActivity")) defaultTab = "live";
@@ -267,9 +267,6 @@ export default function AdminDashboard() {
   const [companyPayrollSettings, setCompanyPayrollSettings] = useState({
     pf: true,
     esi: true,
-    pt: true,
-    insurance: false,
-    insuranceAmount: 0,
     workingDays: 30,
     basicPercentage: 50,
     otherAllowancePercentage: 30
@@ -285,28 +282,18 @@ export default function AdminDashboard() {
 
     const basic = Math.round((gross * (basicPct / 100)) * 100) / 100;
     const otherAllowance = Math.round((gross * (otherPct / 100)) * 100) / 100;
-    
+
     const actualBasic = Math.round((actualGross * (basicPct / 100)) * 100) / 100;
     const actualOtherAllowance = Math.round((actualGross * (otherPct / 100)) * 100) / 100;
 
     const pf = companyPayrollSettings?.pf ? Math.round((actualBasic * 0.12) * 100) / 100 : 0;
     const esi = (companyPayrollSettings?.esi && actualGross <= 21000) ? Math.round((actualGross * 0.0075) * 100) / 100 : 0;
-    
-    const getPTDeduction = (g) => {
-      if (companyPayrollSettings && !companyPayrollSettings.pt) return 0;
-      if (g <= 21000) return 0;
-      if (g <= 30000) return Math.round((180 / 6) * 100) / 100;
-      if (g <= 45000) return Math.round((425 / 6) * 100) / 100;
-      if (g <= 60000) return Math.round((930 / 6) * 100) / 100;
-      if (g <= 75000) return Math.round((1025 / 6) * 100) / 100;
-      return Math.round((1250 / 6) * 100) / 100;
-    };
-    const pt = getPTDeduction(actualGross);
-    const insurance = companyPayrollSettings?.insurance ? Number(companyPayrollSettings.insuranceAmount || 0) : 0;
 
-    const tds = actualGross > 50000 ? Math.round(((actualGross - pf - pt - insurance) * 0.05) * 100) / 100 : 0;
-    const totalDeductions = Math.round((pf + esi + pt + tds + insurance + lopAmount) * 100) / 100;
-    const net = Math.max(0, Math.round((actualGross - (pf + esi + pt + tds + insurance)) * 100) / 100);
+    const pt = 0;
+    const insurance = 0;
+    const tds = 0;
+    const totalDeductions = Math.round((pf + esi + lopAmount) * 100) / 100;
+    const net = Math.max(0, Math.round((actualGross - (pf + esi)) * 100) / 100);
     return {
       basic,
       hra: 0,
@@ -343,7 +330,7 @@ export default function AdminDashboard() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
-  
+
   // Add Employee Form Fields
   const [newName, setNewName] = useState("");
   const [newEmail, setNewEmail] = useState("");
@@ -355,7 +342,7 @@ export default function AdminDashboard() {
   const [newAnnual, setNewAnnual] = useState(25);
   const [newSick, setNewSick] = useState(10);
   const [newCasual, setNewCasual] = useState(6);
-  
+
   const [newDob, setNewDob] = useState("");
   const [newJoiningDate, setNewJoiningDate] = useState("");
   const [newProject, setNewProject] = useState("");
@@ -443,13 +430,13 @@ export default function AdminDashboard() {
 
   // Detail Modal State
   const [showDetailModal, setShowDetailModal] = useState(false);
-  
+
   // Location Details Modal State
   const [locationModalData, setLocationModalData] = useState(null);
   const [selectedLocationFilter, setSelectedLocationFilter] = useState("all");
   const [, setLocationCacheVersion] = useState(0);
   const [liveViewMode, setLiveViewMode] = useState("live"); // 'live' | 'all-logs'
-  
+
   // Action state loader
   const [actionLoading, setActionLoading] = useState(false);
 
@@ -543,12 +530,12 @@ export default function AdminDashboard() {
   const [assignAssetsLoading, setAssignAssetsLoading] = useState(false);
 
   // Chat Monitor states
-  const [chatMessages, setChatMessages]       = useState([]);
-  const [chatChannels, setChatChannels]       = useState([]);
-  const [chatDmThreads, setChatDmThreads]     = useState([]);
-  const [chatLoading, setChatLoading]         = useState(false);
-  const [chatFilter, setChatFilter]           = useState(""); // search
-  const [chatTypeFilter, setChatTypeFilter]   = useState("all"); // 'all' | 'channel' | 'dm'
+  const [chatMessages, setChatMessages] = useState([]);
+  const [chatChannels, setChatChannels] = useState([]);
+  const [chatDmThreads, setChatDmThreads] = useState([]);
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatFilter, setChatFilter] = useState(""); // search
+  const [chatTypeFilter, setChatTypeFilter] = useState("all"); // 'all' | 'channel' | 'dm'
   const [chatThreadFilter, setChatThreadFilter] = useState("all"); // specific thread id or 'all'
   const [chatStatusFilter, setChatStatusFilter] = useState("all"); // 'all' | 'deleted' | 'active'
   const [chatPage, setChatPage] = useState(1);
@@ -598,7 +585,7 @@ export default function AdminDashboard() {
   useEffect(() => {
     if (currentUser?.companyId) {
       const unsub = listenToCompany(currentUser.companyId, (data) => {
-        if(data) {
+        if (data) {
           setCompanyName(data.name || "ZUNA HRMS");
           setCompanyLogo(data.logoBase64 || "");
           setCompanyAddress(data.address || "");
@@ -634,9 +621,9 @@ export default function AdminDashboard() {
     }
   }, [activeTab, payrollMonth, payrollYear, currentUser?.companyId, currentUser?.role]);
 
-    const numberToWords = (num) => {
-    const a = ['','one ','two ','three ','four ', 'five ','six ','seven ','eight ','nine ','ten ','eleven ','twelve ','thirteen ','fourteen ','fifteen ','sixteen ','seventeen ','eighteen ','nineteen '];
-    const b = ['', '', 'twenty','thirty','forty','fifty', 'sixty','seventy','eighty','ninety'];
+  const numberToWords = (num) => {
+    const a = ['', 'one ', 'two ', 'three ', 'four ', 'five ', 'six ', 'seven ', 'eight ', 'nine ', 'ten ', 'eleven ', 'twelve ', 'thirteen ', 'fourteen ', 'fifteen ', 'sixteen ', 'seventeen ', 'eighteen ', 'nineteen '];
+    const b = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
     num = Math.round(Number(num));
     if ((num = num.toString()).length > 9) return 'overflow';
     const n = ('000000000' + num).substr(-9).match(/^(\d{2})(\d{2})(\d{2})(\d{1})(\d{2})$/);
@@ -723,7 +710,7 @@ export default function AdminDashboard() {
     ]).then(([msgs, dms]) => {
       setChatMessages(msgs || []);
       setChatDmThreads(dms || []);
-    }).catch(() => {}).finally(() => setChatLoading(false));
+    }).catch(() => { }).finally(() => setChatLoading(false));
 
     const unsubCh = subscribeToChannels(currentUser.companyId, setChatChannels);
     return unsubCh;
@@ -810,8 +797,8 @@ export default function AdminDashboard() {
     const inGps = formatGpsCoords(log.checkInLocation);
     const outGps = formatGpsCoords(log.checkOutLocation);
 
-    const matchesSearch = 
-      (log.userName || "").toLowerCase().includes(searchQuery.toLowerCase()) || 
+    const matchesSearch =
+      (log.userName || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
       (user.email || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
       (log.date || "").includes(searchQuery) ||
       inLocName.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -821,10 +808,10 @@ export default function AdminDashboard() {
 
     const matchesDept = !selectedDept || log.userDept === selectedDept;
     const matchesDate = !selectedDate || log.date === selectedDate;
-    const matchesLocation = selectedLocationFilter === "all" || 
-      inLocName.toLowerCase().includes(selectedLocationFilter.toLowerCase()) || 
+    const matchesLocation = selectedLocationFilter === "all" ||
+      inLocName.toLowerCase().includes(selectedLocationFilter.toLowerCase()) ||
       outLocName.toLowerCase().includes(selectedLocationFilter.toLowerCase());
-    
+
     return matchesSearch && matchesDept && matchesDate && matchesLocation;
   });
 
@@ -842,8 +829,8 @@ export default function AdminDashboard() {
     const inGps = formatGpsCoords(item.log?.checkInLocation);
     const outGps = formatGpsCoords(item.log?.checkOutLocation);
 
-    const matchesSearch = 
-      (item.user.name || "").toLowerCase().includes(searchQuery.toLowerCase()) || 
+    const matchesSearch =
+      (item.user.name || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
       (item.user.email || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
       (item.user.role || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
       inLocName.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -852,29 +839,29 @@ export default function AdminDashboard() {
       outGps.toLowerCase().includes(searchQuery.toLowerCase());
 
     const matchesDept = !selectedDept || item.user.department === selectedDept;
-    const matchesLocation = selectedLocationFilter === "all" || 
-      inLocName.toLowerCase().includes(selectedLocationFilter.toLowerCase()) || 
+    const matchesLocation = selectedLocationFilter === "all" ||
+      inLocName.toLowerCase().includes(selectedLocationFilter.toLowerCase()) ||
       outLocName.toLowerCase().includes(selectedLocationFilter.toLowerCase());
-    
+
     return matchesSearch && matchesDept && matchesLocation;
   });
 
   // Distinct detected location names for location filter dropdown
   const detectedLocations = [...new Set([
     ...logs.map(l => [
-      getLocationDisplayName(l.checkInLocation), 
+      getLocationDisplayName(l.checkInLocation),
       getLocationDisplayName(l.checkOutLocation)
     ]).flat()
   ])].filter(name => name && name !== "—" && !name.includes("Unknown"));
 
   // Filter user profiles
   const filteredProfiles = staffUsers.filter((u) => {
-    const matchesSearch = 
-      (u.name || "").toLowerCase().includes(searchQuery.toLowerCase()) || 
+    const matchesSearch =
+      (u.name || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
       (u.email || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
       (u.role || "").toLowerCase().includes(searchQuery.toLowerCase());
     const matchesDept = !selectedDept || u.department === selectedDept;
-    
+
     let matchesStatus = true;
     if (selectedStatus) {
       const userToday = getLiveUserStatus(u);
@@ -885,7 +872,7 @@ export default function AdminDashboard() {
         matchesStatus = !isWorking;
       }
     }
-    
+
     let matchesShift = true;
     if (selectedShiftFilter) {
       const start = u.shiftStart || "10:00";
@@ -893,7 +880,7 @@ export default function AdminDashboard() {
       if (selectedShiftFilter === "morning") matchesShift = !isNight;
       else if (selectedShiftFilter === "night") matchesShift = isNight;
     }
-    
+
     return matchesSearch && matchesDept && matchesStatus && matchesShift;
   });
 
@@ -920,10 +907,10 @@ export default function AdminDashboard() {
     }));
 
     const combined = [...leaveHistory, ...regHistory];
-    
+
     return combined.filter(item => {
       const searchLower = historySearch.toLowerCase();
-      const matchesSearch = !historySearch || 
+      const matchesSearch = !historySearch ||
         (item.userName || "").toLowerCase().includes(searchLower) ||
         (item.reason || "").toLowerCase().includes(searchLower) ||
         (item.details || "").toLowerCase().includes(searchLower);
@@ -1089,23 +1076,23 @@ export default function AdminDashboard() {
 
   const canEditAsset = (asset) => {
     if (!currentUser) return false;
-    
+
     // Super Admin (main admin) can always edit everything
     if (currentUser.role === "superadmin" || currentUser.email === "admin@teamcarrezza.com" || (currentUser.name || "").toLowerCase().includes("super admin")) {
       return true;
     }
-    
+
     // System Admins can edit assets globally
     if ((currentUser.name || "").toLowerCase().includes("system admin") || currentUser.role === "admin") {
       return true;
     }
-    
+
     // If the asset has an assigning authority set:
     if (asset.assigningAuthorityId) {
       // Only that specific authority can edit it, along with the admins above.
       return currentUser.uid === asset.assigningAuthorityId;
     }
-    
+
     return false;
   };
 
@@ -1130,7 +1117,7 @@ export default function AdminDashboard() {
     setIsEditingAsset(true);
     setSelectedAssetId(asset.id);
     setAssetFormName(asset.name || "");
-    
+
     // Support category as both string (existing data) and array (new multi-select model)
     const rawCat = asset.category;
     let initialCategories = ["Laptop"];
@@ -1140,7 +1127,7 @@ export default function AdminDashboard() {
       initialCategories = rawCat.split(",").map(c => c.trim());
     }
     setAssetFormCategory(initialCategories);
-    
+
     setAssetFormSerial(asset.serialNumber || "");
     setAssetFormStatus(asset.status || "Available");
     setAssetFormAssignedUser(asset.assignedUserId || "");
@@ -1158,7 +1145,7 @@ export default function AdminDashboard() {
     if (assetFormCategory.length === 0) {
       return showToast("Please select at least one category.", "warning");
     }
-    
+
     // Find assigned user details if set
     let assignedUserName = "";
     if (assetFormAssignedUser) {
@@ -1272,36 +1259,36 @@ export default function AdminDashboard() {
 
     const headers = ["Asset Details", "Category", "Serial Number", "Status", "Assigned To", "Date Assigned", "Authority"];
     const colWidths = [45, 30, 40, 25, 45, 35, 45];
-    
+
     doc.setFillColor(0, 97, 224);
     doc.rect(14, currentY - 5, 266, 7, "F");
-    
+
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8.5);
     doc.setTextColor(255, 255, 255);
-    
+
     let xOffset = 14;
     headers.forEach((h, idx) => {
       doc.text(h, xOffset + 2, currentY - 0.5);
       xOffset += colWidths[idx];
     });
-    
+
     currentY += 6;
     doc.setFont("helvetica", "normal");
     doc.setTextColor(15, 23, 42);
-    
+
     assets.forEach((asset, index) => {
       if (currentY > 185) {
         doc.addPage();
         currentY = 25;
-        
+
         doc.setFillColor(0, 97, 224);
         doc.rect(14, currentY - 5, 266, 7, "F");
-        
+
         doc.setFont("helvetica", "bold");
         doc.setFontSize(8.5);
         doc.setTextColor(255, 255, 255);
-        
+
         xOffset = 14;
         headers.forEach((h, idx) => {
           doc.text(h, xOffset + 2, currentY - 0.5);
@@ -1311,12 +1298,12 @@ export default function AdminDashboard() {
         doc.setFont("helvetica", "normal");
         doc.setTextColor(15, 23, 42);
       }
-      
+
       if (index % 2 === 0) {
         doc.setFillColor(248, 250, 252);
         doc.rect(14, currentY - 4.5, 266, 6, "F");
       }
-      
+
       const nameVal = asset.name || "—";
       const catVal = Array.isArray(asset.category) ? asset.category.join(", ") : (asset.category || "—");
       const serialVal = asset.serialNumber || "—";
@@ -1324,32 +1311,32 @@ export default function AdminDashboard() {
       const assignedVal = asset.assignedUserName || "Unassigned";
       const dateVal = asset.assignedDate ? new Date(asset.assignedDate).toLocaleDateString() : "—";
       const authVal = asset.assigningAuthorityName || "—";
-      
+
       xOffset = 14;
-      
+
       doc.text(nameVal.substring(0, 24), xOffset + 2, currentY);
       xOffset += colWidths[0];
-      
+
       doc.text(catVal, xOffset + 2, currentY);
       xOffset += colWidths[1];
-      
+
       doc.text(serialVal.substring(0, 20), xOffset + 2, currentY);
       xOffset += colWidths[2];
-      
+
       doc.text(statusVal, xOffset + 2, currentY);
       xOffset += colWidths[3];
-      
+
       doc.text(assignedVal.substring(0, 24), xOffset + 2, currentY);
       xOffset += colWidths[4];
-      
+
       doc.text(dateVal, xOffset + 2, currentY);
       xOffset += colWidths[5];
-      
+
       doc.text(authVal.substring(0, 24), xOffset + 2, currentY);
-      
+
       currentY += 6;
     });
-    
+
     addPDFFooter(doc);
     doc.save(`Assets_Inventory_Report_${new Date().toISOString().split("T")[0]}.pdf`);
     showToast("PDF report downloaded successfully.", "success");
@@ -1371,10 +1358,10 @@ export default function AdminDashboard() {
 
   const handleProcessPayroll = async () => {
     if (payrollData.length === 0) return showToast("No employees to process.", "warning");
-    
+
     setActionLoading(true);
     try {
-      const promises = payrollData.map(user => 
+      const promises = payrollData.map(user =>
         saveEmployeePayroll(currentUser.companyId, user.uid, {
           month: payrollMonth,
           year: payrollYear,
@@ -1410,7 +1397,7 @@ export default function AdminDashboard() {
     staffUsers.forEach(u => {
       wsData.push([u.email, u.grossSalary || 0, u.paidDays || 30]);
     });
-    
+
     const ws = XLSX.utils.aoa_to_sheet(wsData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Payroll Template");
@@ -1439,25 +1426,15 @@ export default function AdminDashboard() {
         const basic = gross * 0.5;
         const hra = basic * 0.4;
         const special = gross - basic - hra;
-        
+
         const actualBasic = actualGross * 0.5;
         const pf = companyPayrollSettings?.pf ? actualBasic * 0.12 : 0;
         const esi = (companyPayrollSettings?.esi && actualGross <= 21000) ? actualGross * 0.0075 : 0;
-        
-        const getPTDeduction = (g) => {
-          if (companyPayrollSettings && !companyPayrollSettings.pt) return 0;
-          if (g <= 21000) return 0;
-          if (g <= 30000) return Math.round((180 / 6) * 100) / 100;
-          if (g <= 45000) return Math.round((425 / 6) * 100) / 100;
-          if (g <= 60000) return Math.round((930 / 6) * 100) / 100;
-          if (g <= 75000) return Math.round((1025 / 6) * 100) / 100;
-          return Math.round((1250 / 6) * 100) / 100;
-        };
-        const pt = getPTDeduction(actualGross);
-        const insurance = companyPayrollSettings?.insurance ? Number(companyPayrollSettings.insuranceAmount || 0) : 0;
 
-        const tds = actualGross > 50000 ? (actualGross - pf - pt - insurance) * 0.05 : 0;
-        const net = actualGross - (pf + esi + pt + tds + insurance);
+        const pt = 0;
+        const insurance = 0;
+        const tds = 0;
+        const net = Math.max(0, actualGross - (pf + esi));
         return { basic, hra, special, pf, esi, pt, tds, insurance, net, actualGross, lopAmount, lopsDays };
       };
 
@@ -1466,7 +1443,7 @@ export default function AdminDashboard() {
         const email = row["Email"];
         const grossStr = row["Gross Salary"];
         const paidStr = row["Paid Days"];
-        
+
         if (!email) continue;
         const user = staffUsers.find(u => u.email.toLowerCase() === email.toLowerCase());
         if (!user) continue;
@@ -1489,8 +1466,8 @@ export default function AdminDashboard() {
 
         promises.push(saveEmployeePayroll(currentUser.companyId, user.uid, payrollRecord));
       }
-      
-      if(promises.length === 0) {
+
+      if (promises.length === 0) {
         showToast("No valid rows found to import.", "warning");
       } else {
         await Promise.all(promises);
@@ -1511,13 +1488,13 @@ export default function AdminDashboard() {
     setActionLoading(true);
     const element = document.getElementById('bulk-payslip-content');
     const opt = {
-      margin:       0,
-      filename:     `Bulk_Payslips_${payrollMonth}_${payrollYear}.pdf`,
-      image:        { type: 'jpeg', quality: 0.98 },
-      html2canvas:  { scale: 2, useCORS: true },
-      jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
+      margin: 0,
+      filename: `Bulk_Payslips_${payrollMonth}_${payrollYear}.pdf`,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2, useCORS: true },
+      jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
     };
-    
+
     html2pdf().set(opt).from(element).save().then(() => {
       showToast("Bulk Payslips Exported!", "success");
       setActionLoading(false);
@@ -1600,19 +1577,19 @@ export default function AdminDashboard() {
       [`Generated On: ${new Date().toLocaleString()}`],
       [], // Blank row
       [
-        "Date", 
-        "Employee Name", 
-        "Department", 
-        "Program Type", 
-        "Check-In Time", 
+        "Date",
+        "Employee Name",
+        "Department",
+        "Program Type",
+        "Check-In Time",
         "Check-In Location (Name)",
         "Check-In GPS",
-        "Check-Out Time", 
+        "Check-Out Time",
         "Check-Out Location (Name)",
         "Check-Out GPS",
-        "Break 1", 
-        "Break 2", 
-        "Active Minutes", 
+        "Break 1",
+        "Break 2",
+        "Active Minutes",
         "Active Hours"
       ]
     ];
@@ -1641,7 +1618,7 @@ export default function AdminDashboard() {
     const ws = XLSX.utils.aoa_to_sheet(aoaData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Attendance Registry");
-    
+
     // Auto-fit columns
     const max_len = {};
     aoaData.forEach((row) => {
@@ -1665,42 +1642,42 @@ export default function AdminDashboard() {
     const titleText = "Corporate Attendance & Location Registry Report";
     const subtitleText = `Generated: ${new Date().toLocaleString()} | Filtered Count: ${filteredLogs.length} record(s)`;
     let currentY = await addStandardPDFHeader(doc, titleText, subtitleText, true);
-    
+
     // Table Headers
     const headers = ["Date", "Name", "Dept", "Check In", "In Location", "Check Out", "Out Location", "Hours"];
     const colWidths = [24, 38, 28, 22, 54, 22, 54, 24];
-    
+
     // Print header background band
     doc.setFillColor(0, 97, 224);
     doc.rect(14, currentY - 5, 266, 7, "F");
-    
+
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8.5);
     doc.setTextColor(255, 255, 255);
-    
+
     let xOffset = 14;
     headers.forEach((h, idx) => {
       doc.text(h, xOffset + 2, currentY - 0.5);
       xOffset += colWidths[idx];
     });
-    
+
     currentY += 6;
     doc.setFont("helvetica", "normal");
     doc.setTextColor(15, 23, 42);
-    
+
     filteredLogs.forEach((log, index) => {
       if (currentY > 185) {
         doc.addPage();
         currentY = 25;
-        
+
         // Print headers on new page
         doc.setFillColor(0, 97, 224);
         doc.rect(14, currentY - 5, 266, 7, "F");
-        
+
         doc.setFont("helvetica", "bold");
         doc.setFontSize(8.5);
         doc.setTextColor(255, 255, 255);
-        
+
         xOffset = 14;
         headers.forEach((h, idx) => {
           doc.text(h, xOffset + 2, currentY - 0.5);
@@ -1710,16 +1687,16 @@ export default function AdminDashboard() {
         doc.setFont("helvetica", "normal");
         doc.setTextColor(15, 23, 42);
       }
-      
+
       // Zebra striping
       if (index % 2 === 0) {
         doc.setFillColor(248, 250, 252);
         doc.rect(14, currentY - 4.5, 266, 6, "F");
       }
-      
+
       const checkInStr = log.checkInTime ? new Date(log.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "—";
       const checkOutStr = log.checkOutTime ? new Date(log.checkOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "—";
-      
+
       const inLoc = getLocationDisplayName(log.checkInLocation);
       const outLoc = getLocationDisplayName(log.checkOutLocation);
       const inLocTruncated = inLoc.length > 25 ? inLoc.substring(0, 23) + ".." : inLoc;
@@ -1730,31 +1707,31 @@ export default function AdminDashboard() {
       xOffset = 14;
       doc.text(log.date || "—", xOffset + 2, currentY);
       xOffset += colWidths[0];
-      
+
       const truncatedName = log.userName.length > 18 ? log.userName.substring(0, 16) + ".." : log.userName;
       doc.text(truncatedName, xOffset + 2, currentY);
       xOffset += colWidths[1];
-      
+
       const truncatedDept = (log.userDept || "").length > 13 ? log.userDept.substring(0, 11) + ".." : (log.userDept || "—");
       doc.text(truncatedDept, xOffset + 2, currentY);
       xOffset += colWidths[2];
-      
+
       doc.text(checkInStr, xOffset + 2, currentY);
       xOffset += colWidths[3];
-      
+
       doc.text(inLocTruncated, xOffset + 2, currentY);
       xOffset += colWidths[4];
-      
+
       doc.text(checkOutStr, xOffset + 2, currentY);
       xOffset += colWidths[5];
-      
+
       doc.text(outLocTruncated, xOffset + 2, currentY);
       xOffset += colWidths[6];
-      
+
       doc.setFont("helvetica", "bold");
       doc.text(hrsStr, xOffset + 2, currentY);
       doc.setFont("helvetica", "normal");
-      
+
       currentY += 6;
     });
 
@@ -1776,16 +1753,16 @@ export default function AdminDashboard() {
       [`Generated On: ${new Date().toLocaleString()}`],
       [], // Blank row
       [
-        "Date", 
-        "Check-In Time", 
+        "Date",
+        "Check-In Time",
         "Check-In Location (Name)",
         "Check-In GPS",
-        "Check-Out Time", 
+        "Check-Out Time",
         "Check-Out Location (Name)",
         "Check-Out GPS",
-        "Break 1", 
-        "Break 2", 
-        "Active Minutes", 
+        "Break 1",
+        "Break 2",
+        "Active Minutes",
         "Active Hours"
       ]
     ];
@@ -1811,7 +1788,7 @@ export default function AdminDashboard() {
     const ws = XLSX.utils.aoa_to_sheet(aoaData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Attendance Report");
-    
+
     // Auto-fit columns
     const max_len = {};
     aoaData.forEach((row) => {
@@ -1836,42 +1813,42 @@ export default function AdminDashboard() {
     const titleText = `Individual Attendance & Location History for ${user.name} (${user.email})`;
     const subtitleText = `Department: ${user.department || "N/A"} | Generated: ${new Date().toLocaleString()}`;
     let currentY = await addStandardPDFHeader(doc, titleText, subtitleText, true);
-    
+
     // Table Headers
     const headers = ["Date", "Check In", "In Location", "Check Out", "Out Location", "Breaks", "Hours"];
     const colWidths = [28, 24, 60, 24, 60, 45, 25];
-    
+
     // Print header backgrounds
     doc.setFillColor(0, 97, 224);
     doc.rect(14, currentY - 5, 266, 7, "F");
-    
+
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8.5);
     doc.setTextColor(255, 255, 255);
-    
+
     let xOffset = 14;
     headers.forEach((h, idx) => {
       doc.text(h, xOffset + 2, currentY - 0.5);
       xOffset += colWidths[idx];
     });
-    
+
     currentY += 6;
     doc.setFont("helvetica", "normal");
     doc.setTextColor(15, 23, 42); // Slate 900
-    
+
     userLogs.forEach((log, index) => {
       if (currentY > 185) {
         doc.addPage();
         currentY = 25;
-        
+
         // Print headers on new page
         doc.setFillColor(0, 97, 224);
         doc.rect(14, currentY - 5, 266, 7, "F");
-        
+
         doc.setFont("helvetica", "bold");
         doc.setFontSize(8.5);
         doc.setTextColor(255, 255, 255);
-        
+
         xOffset = 14;
         headers.forEach((h, idx) => {
           doc.text(h, xOffset + 2, currentY - 0.5);
@@ -1881,16 +1858,16 @@ export default function AdminDashboard() {
         doc.setFont("helvetica", "normal");
         doc.setTextColor(15, 23, 42);
       }
-      
+
       // Zebra striping
       if (index % 2 === 0) {
         doc.setFillColor(248, 250, 252); // light slate 50
         doc.rect(14, currentY - 4.5, 266, 6, "F");
       }
-      
+
       const checkInStr = log.checkInTime ? new Date(log.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "—";
       const checkOutStr = log.checkOutTime ? new Date(log.checkOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "—";
-      
+
       const inLoc = getLocationDisplayName(log.checkInLocation);
       const outLoc = getLocationDisplayName(log.checkOutLocation);
       const inLocTrunc = inLoc.length > 28 ? inLoc.substring(0, 26) + ".." : inLoc;
@@ -1899,32 +1876,32 @@ export default function AdminDashboard() {
       const shorts = log.breaks?.filter(b => b.type === "short").length || 0;
       const longs = log.breaks?.filter(b => b.type === "long").length || 0;
       const breaksStr = `${shorts} short, ${longs} long`;
-      
+
       const hrsStr = `${((log.totalWorkingMinutes || 0) / 60).toFixed(2)} hrs`;
 
       xOffset = 14;
       doc.text(log.date || "—", xOffset + 2, currentY);
       xOffset += colWidths[0];
-      
+
       doc.text(checkInStr, xOffset + 2, currentY);
       xOffset += colWidths[1];
-      
+
       doc.text(inLocTrunc, xOffset + 2, currentY);
       xOffset += colWidths[2];
 
       doc.text(checkOutStr, xOffset + 2, currentY);
       xOffset += colWidths[3];
-      
+
       doc.text(outLocTrunc, xOffset + 2, currentY);
       xOffset += colWidths[4];
-      
+
       doc.text(breaksStr, xOffset + 2, currentY);
       xOffset += colWidths[5];
-      
+
       doc.setFont("helvetica", "bold");
       doc.text(hrsStr, xOffset + 2, currentY);
       doc.setFont("helvetica", "normal");
-      
+
       currentY += 6;
     });
 
@@ -1958,7 +1935,7 @@ export default function AdminDashboard() {
       d.setDate(d.getDate() - i);
       datesList.push(d.toISOString().split("T")[0]);
     }
-    
+
     return datesList.map(dateStr => {
       const count = logs.filter(l => l.date === dateStr && l.checkInTime).length;
       const formattedDate = new Date(dateStr).toLocaleDateString([], { month: "short", day: "numeric" });
@@ -1969,7 +1946,7 @@ export default function AdminDashboard() {
   const getDeptAttendanceRates = () => {
     const todayStr = new Date().toISOString().split("T")[0];
     const depts = departments.length > 0 ? departments : ["Engineering", "HR", "Marketing", "Design"];
-    
+
     return depts.map(dept => {
       const totalUsersInDept = staffUsers.filter(u => u.department === dept).length;
       const checkedInToday = logs.filter(l => l.date === todayStr && l.userDept === dept && l.checkInTime).length;
@@ -1989,7 +1966,7 @@ export default function AdminDashboard() {
         userHrs[l.userId].count += 1;
       }
     });
-    
+
     return Object.values(userHrs).map(u => {
       const avgMins = u.count > 0 ? u.totalMins / u.count : 0;
       return { name: u.name, avgHours: parseFloat((avgMins / 60).toFixed(1)) };
@@ -2010,7 +1987,7 @@ export default function AdminDashboard() {
     try {
       const roleStr = newRole === "Admin" ? "admin" : (newRole === "System Admin" ? "system admin" : "employee");
       const isPm = newRole === "Project Manager" || newRole === "Admin" || newRole === "System Admin";
-      
+
       const additionalData = {
         firstName: newFirstName, lastName: newLastName, personalEmail: newPersonalEmail,
         personalMobileNumber: newPersonalMobileNumber, gender: newGender, maritalStatus: newMaritalStatus,
@@ -2021,7 +1998,7 @@ export default function AdminDashboard() {
         dateOfExit: newDateOfExit, photo: newPhoto, age: newAge, employeeId: newEmployeeId,
         location: newLocation, unit: newUnit, grade: newGrade, costCenter: newCostCenter, pfNo: newPfNo
       };
-      
+
       await createEmployee({
         name: fullName,
         email: newEmail.toLowerCase().trim(),
@@ -2045,7 +2022,7 @@ export default function AdminDashboard() {
 
       showToast(`Employee ${fullName} registered successfully. Default password is 'Welcome@123'.`, "success");
       setShowAddModal(false);
-      
+
       // Reset fields
       setNewName("");
       setNewEmail("");
@@ -2069,7 +2046,7 @@ export default function AdminDashboard() {
       setNewSpecialization(""); setNewInstituteName(""); setNewYearOfCompletion(""); setNewDateOfExit("");
       setNewLocation(""); setNewUnit(""); setNewGrade(""); setNewCostCenter(""); setNewPfNo("");
       setNewEmployeeId(""); setNewPhoto(""); setNewAge(""); setNewAddTab("Personal");
-      
+
       // Refresh list
       loadDirectoryData();
     } catch (err) {
@@ -2125,7 +2102,7 @@ export default function AdminDashboard() {
     setEditPfNo(user.pfNo || "");
     setEditAllowManualCheckIn(user.allowManualCheckIn || false);
     setEditTab("Personal");
-    
+
     let currentRole = "Employee";
     if (user.role === "admin") currentRole = "Admin";
     else if (user.role === "system admin" || user.role === "systemadmin") currentRole = "System Admin";
@@ -2147,18 +2124,18 @@ export default function AdminDashboard() {
     const currentStatus = user.status;
     const newStatus = (currentStatus === "inactive") ? "offline" : "inactive";
     const newEmployeeStatus = (currentStatus === "inactive") ? "Active" : "Inactive";
-    
+
     setActionLoading(true);
     try {
       await updateUserAccountStatus(user.uid, newStatus);
       await updateUserRecord(user.uid, user.name, user.department, user.programType, user.shiftStart, user.shiftEnd, user.annualLeaves, user.sickLeaves, user.casualLeaves, undefined, user.dob, user.joiningDate, user.projects, user.tasks, user.jobType, user.designation, user.isProjectManager, user.employeeId, { employeeStatus: newEmployeeStatus });
-      
+
       setUsers(prev => prev.map(u => u.uid === user.uid ? {
         ...u,
         status: newStatus,
         employeeStatus: newEmployeeStatus
       } : u));
-      
+
       showToast(`${user.name} is now ${newEmployeeStatus}.`, "success");
     } catch (err) {
       showToast(err.message || "Failed to update status.", "error");
@@ -2172,7 +2149,7 @@ export default function AdminDashboard() {
     if (!editName || !editDept || !editShiftStart || !editShiftEnd) {
       return showToast("Please fill in all fields.", "warning");
     }
-    
+
     setActionLoading(true);
     try {
       const additionalData = {
@@ -2195,11 +2172,11 @@ export default function AdminDashboard() {
       }
 
       await updateUserRecord(
-        selectedUser.uid, 
-        editName, 
-        editDept, 
-        editProgram, 
-        editShiftStart, 
+        selectedUser.uid,
+        editName,
+        editDept,
+        editProgram,
+        editShiftStart,
         editShiftEnd,
         editAnnual,
         editSick,
@@ -2207,7 +2184,7 @@ export default function AdminDashboard() {
         undefined, // avatar
         editDob,
         editJoiningDate,
-        editProject.split(',').map(s=>s.trim()).filter(Boolean),
+        editProject.split(',').map(s => s.trim()).filter(Boolean),
         editTasks,
         editJobType,
         editDesignation,
@@ -2215,7 +2192,7 @@ export default function AdminDashboard() {
         editEmployeeId,
         additionalData
       );
-      
+
       setUsers(prev => prev.map(u => u.uid === selectedUser.uid ? {
         ...u,
         name: editName,
@@ -2228,7 +2205,7 @@ export default function AdminDashboard() {
         casualLeaves: editCasual,
         dob: editDob,
         joiningDate: editJoiningDate,
-        projects: editProject.split(',').map(s=>s.trim()).filter(Boolean),
+        projects: editProject.split(',').map(s => s.trim()).filter(Boolean),
         tasks: editTasks,
         jobType: editJobType,
         designation: editDesignation,
@@ -2237,7 +2214,7 @@ export default function AdminDashboard() {
         status: (editEmployeeStatus === "Inactive" || editEmployeeStatus === "Terminated") ? "inactive" : (u.status === "inactive" ? "offline" : u.status),
         ...additionalData
       } : u));
-      
+
       showToast("User profile updated successfully.", "success");
       setShowEditModal(false);
       setSelectedUser(null);
@@ -2250,7 +2227,7 @@ export default function AdminDashboard() {
 
   const handleConfirmDeleteUser = async () => {
     if (!selectedUser) return;
-    
+
     setActionLoading(true);
     try {
       await deleteUserRecord(selectedUser.uid);
@@ -2293,7 +2270,7 @@ export default function AdminDashboard() {
 
   return (
     <div className="space-y-5 sm:space-y-8 w-full max-w-[1400px] mx-auto text-left">
-      
+
       {/* ------------------ VIEW 1: ADMIN PANEL / LIVE MONITORING ------------------ */}
       {(activeTab === "live" && (isAdminUser || can("read", "LiveActivity"))) && (() => {
         const liveStartIndex = (livePage - 1) * rowsPerPage;
@@ -2303,593 +2280,590 @@ export default function AdminDashboard() {
         return (
           <>
             {/* Header Description */}
-          <div className="mb-4 sm:mb-6">
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-text-main tracking-tight">Admin Monitoring Dashboard</h1>
-            <p className="text-sm text-text-sec mt-1">Real-time workforce intelligence and management.</p>
-          </div>
-
-          {/* Stats Widgets */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            <div className="bg-bg-card border border-border-card rounded-[20px] p-5 flex flex-col justify-between shadow-sm min-h-[130px]">
-              <div className="flex items-start justify-between w-full">
-                <div className="w-12 h-12 rounded-[14px] bg-brand-primary/10 text-brand-primary flex items-center justify-center">
-                  <Users size={22} />
-                </div>
-                <span className="bg-emerald-500/10 text-emerald-500 px-2.5 py-1 rounded-full text-[10px] font-bold">
-                  {staffUsers.filter(u => new Date(u.createdAt) >= new Date(new Date().setDate(new Date().getDate() - 30))).length} New This Month
-                </span>
-              </div>
-              <div className="mt-4">
-                <span className="text-[10px] font-bold text-text-mut uppercase tracking-wider block">TOTAL EMPLOYEES</span>
-                <span className="text-3xl font-extrabold text-text-main block mt-1">{totalRegistered}</span>
-              </div>
+            <div className="mb-4 sm:mb-6">
+              <h1 className="text-2xl sm:text-3xl font-extrabold text-text-main tracking-tight">Admin Monitoring Dashboard</h1>
+              <p className="text-sm text-text-sec mt-1">Real-time workforce intelligence and management.</p>
             </div>
 
-            <div className="bg-bg-card border border-border-card rounded-[20px] p-5 flex flex-col justify-between shadow-sm min-h-[130px] border-l-4 border-l-brand-primary">
-              <div className="flex items-start justify-between w-full">
-                <div className="w-12 h-12 rounded-[14px] bg-brand-primary/10 text-brand-primary flex items-center justify-center">
-                  <Users size={22} />
-                </div>
-                <span className="bg-brand-primary/10 text-brand-primary px-2.5 py-1 rounded-full text-[10px] font-bold">
-                  {totalRegistered > 0 ? Math.round((presentCount / totalRegistered) * 100) : 0}% Active
-                </span>
-              </div>
-              <div className="mt-4">
-                <span className="text-[10px] font-bold text-text-mut uppercase tracking-wider block">CURRENTLY PRESENT</span>
-                <span className="text-3xl font-extrabold text-text-main block mt-1">{presentCount}</span>
-              </div>
-            </div>
-
-            <div className="bg-bg-card border border-border-card rounded-[20px] p-5 flex flex-col justify-between shadow-sm min-h-[130px]">
-              <div className="flex items-start justify-between w-full">
-                <div className="w-12 h-12 rounded-[14px] bg-brand-warning/10 text-brand-warning flex items-center justify-center">
-                  <Clock size={22} />
-                </div>
-                <span className="bg-red-500/10 text-red-500 px-2.5 py-1 rounded-full text-[10px] font-bold">
-                  Today
-                </span>
-              </div>
-              <div className="mt-4">
-                <span className="text-[10px] font-bold text-text-mut uppercase tracking-wider block">LATE ARRIVALS</span>
-                <span className="text-3xl font-extrabold text-text-main block mt-1">{lateArrivalsCount}</span>
-              </div>
-            </div>
-
-            <div className="bg-bg-card border border-border-card rounded-[20px] p-5 flex flex-col justify-between shadow-sm min-h-[130px]">
-              <div className="flex items-start justify-between w-full">
-                <div className="w-12 h-12 rounded-[14px] bg-brand-danger/10 text-brand-danger flex items-center justify-center">
-                  <AlertCircle size={22} />
-                </div>
-                <span className="bg-slate-500/10 text-text-sec px-2.5 py-1 rounded-full text-[10px] font-bold">
-                  Leave: {allRequests.filter(lr => lr.status === "approved" && lr.startDate <= new Date().toISOString().split('T')[0] && lr.endDate >= new Date().toISOString().split('T')[0]).length}
-                </span>
-              </div>
-              <div className="mt-4">
-                <span className="text-[10px] font-bold text-text-mut uppercase tracking-wider block">ABSENT</span>
-                <span className="text-3xl font-extrabold text-text-main block mt-1">{absentCount}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Double Columns: Live Attendance list vs Leave Requests list */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            {/* Live Attendance Table */}
-            <div className="lg:col-span-2 bg-bg-card border border-border-card rounded-[24px] p-6 shadow-sm flex flex-col justify-between">
-              <div>
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5">
-                  <div>
-                    <h3 className="font-extrabold text-base text-text-main tracking-tight flex items-center gap-2">
-                      <span>Live Attendance & Location Logs</span>
-                      <span className="flex h-2 w-2 relative">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                      </span>
-                    </h3>
-                    <p className="text-xs text-text-sec mt-0.5">Real-time GPS coordinates and resolved geocoded locations.</p>
+            {/* Stats Widgets */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+              <div className="bg-bg-card border border-border-card rounded-[20px] p-5 flex flex-col justify-between shadow-sm min-h-[130px]">
+                <div className="flex items-start justify-between w-full">
+                  <div className="w-12 h-12 rounded-[14px] bg-brand-primary/10 text-brand-primary flex items-center justify-center">
+                    <Users size={22} />
                   </div>
+                  <span className="bg-emerald-500/10 text-emerald-500 px-2.5 py-1 rounded-full text-[10px] font-bold">
+                    {staffUsers.filter(u => new Date(u.createdAt) >= new Date(new Date().setDate(new Date().getDate() - 30))).length} New This Month
+                  </span>
+                </div>
+                <div className="mt-4">
+                  <span className="text-[10px] font-bold text-text-mut uppercase tracking-wider block">TOTAL EMPLOYEES</span>
+                  <span className="text-3xl font-extrabold text-text-main block mt-1">{totalRegistered}</span>
+                </div>
+              </div>
 
-                  <div className="flex items-center gap-2 flex-wrap">
-                    {/* View Switcher: Live vs All Logs */}
-                    <div className="inline-flex p-1 bg-bg-base/80 border border-border-card rounded-[12px]">
+              <div className="bg-bg-card border border-border-card rounded-[20px] p-5 flex flex-col justify-between shadow-sm min-h-[130px] border-l-4 border-l-brand-primary">
+                <div className="flex items-start justify-between w-full">
+                  <div className="w-12 h-12 rounded-[14px] bg-brand-primary/10 text-brand-primary flex items-center justify-center">
+                    <Users size={22} />
+                  </div>
+                  <span className="bg-brand-primary/10 text-brand-primary px-2.5 py-1 rounded-full text-[10px] font-bold">
+                    {totalRegistered > 0 ? Math.round((presentCount / totalRegistered) * 100) : 0}% Active
+                  </span>
+                </div>
+                <div className="mt-4">
+                  <span className="text-[10px] font-bold text-text-mut uppercase tracking-wider block">CURRENTLY PRESENT</span>
+                  <span className="text-3xl font-extrabold text-text-main block mt-1">{presentCount}</span>
+                </div>
+              </div>
+
+              <div className="bg-bg-card border border-border-card rounded-[20px] p-5 flex flex-col justify-between shadow-sm min-h-[130px]">
+                <div className="flex items-start justify-between w-full">
+                  <div className="w-12 h-12 rounded-[14px] bg-brand-warning/10 text-brand-warning flex items-center justify-center">
+                    <Clock size={22} />
+                  </div>
+                  <span className="bg-red-500/10 text-red-500 px-2.5 py-1 rounded-full text-[10px] font-bold">
+                    Today
+                  </span>
+                </div>
+                <div className="mt-4">
+                  <span className="text-[10px] font-bold text-text-mut uppercase tracking-wider block">LATE ARRIVALS</span>
+                  <span className="text-3xl font-extrabold text-text-main block mt-1">{lateArrivalsCount}</span>
+                </div>
+              </div>
+
+              <div className="bg-bg-card border border-border-card rounded-[20px] p-5 flex flex-col justify-between shadow-sm min-h-[130px]">
+                <div className="flex items-start justify-between w-full">
+                  <div className="w-12 h-12 rounded-[14px] bg-brand-danger/10 text-brand-danger flex items-center justify-center">
+                    <AlertCircle size={22} />
+                  </div>
+                  <span className="bg-slate-500/10 text-text-sec px-2.5 py-1 rounded-full text-[10px] font-bold">
+                    Leave: {allRequests.filter(lr => lr.status === "approved" && lr.startDate <= new Date().toISOString().split('T')[0] && lr.endDate >= new Date().toISOString().split('T')[0]).length}
+                  </span>
+                </div>
+                <div className="mt-4">
+                  <span className="text-[10px] font-bold text-text-mut uppercase tracking-wider block">ABSENT</span>
+                  <span className="text-3xl font-extrabold text-text-main block mt-1">{absentCount}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Double Columns: Live Attendance list vs Leave Requests list */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              {/* Live Attendance Table */}
+              <div className="lg:col-span-2 bg-bg-card border border-border-card rounded-[24px] p-6 shadow-sm flex flex-col justify-between">
+                <div>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5">
+                    <div>
+                      <h3 className="font-extrabold text-base text-text-main tracking-tight flex items-center gap-2">
+                        <span>Live Attendance & Location Logs</span>
+                        <span className="flex h-2 w-2 relative">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                        </span>
+                      </h3>
+                      <p className="text-xs text-text-sec mt-0.5">Real-time GPS coordinates and resolved geocoded locations.</p>
+                    </div>
+
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {/* View Switcher: Live vs All Logs */}
+                      <div className="inline-flex p-1 bg-bg-base/80 border border-border-card rounded-[12px]">
+                        <button
+                          type="button"
+                          onClick={() => setLiveViewMode("live")}
+                          className={`px-3 py-1.5 rounded-[9px] text-xs font-bold transition-all cursor-pointer ${liveViewMode === "live"
+                              ? "bg-brand-primary text-white shadow-sm"
+                              : "text-text-sec hover:text-text-main"
+                            }`}
+                        >
+                          Today's Live
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setLiveViewMode("all-logs")}
+                          className={`px-3 py-1.5 rounded-[9px] text-xs font-bold transition-all cursor-pointer ${liveViewMode === "all-logs"
+                              ? "bg-brand-primary text-white shadow-sm"
+                              : "text-text-sec hover:text-text-main"
+                            }`}
+                        >
+                          All Registry Logs
+                        </button>
+                      </div>
+
+                      {/* Export Dropdown / Buttons */}
                       <button
-                        type="button"
-                        onClick={() => setLiveViewMode("live")}
-                        className={`px-3 py-1.5 rounded-[9px] text-xs font-bold transition-all cursor-pointer ${
-                          liveViewMode === "live"
-                            ? "bg-brand-primary text-white shadow-sm"
-                            : "text-text-sec hover:text-text-main"
-                        }`}
+                        onClick={handleExportExcel}
+                        className="px-2.5 py-1.5 border border-border-card hover:bg-bg-base rounded-[10px] text-xs font-bold text-text-sec hover:text-text-main transition-colors cursor-pointer flex items-center gap-1.5 shadow-sm"
+                        title="Export Excel with Location Details"
                       >
-                        Today's Live
+                        <Download size={13} className="text-emerald-500" />
+                        <span>Excel</span>
                       </button>
                       <button
-                        type="button"
-                        onClick={() => setLiveViewMode("all-logs")}
-                        className={`px-3 py-1.5 rounded-[9px] text-xs font-bold transition-all cursor-pointer ${
-                          liveViewMode === "all-logs"
-                            ? "bg-brand-primary text-white shadow-sm"
-                            : "text-text-sec hover:text-text-main"
-                        }`}
+                        onClick={handleExportPDF}
+                        className="px-2.5 py-1.5 border border-border-card hover:bg-bg-base rounded-[10px] text-xs font-bold text-text-sec hover:text-text-main transition-colors cursor-pointer flex items-center gap-1.5 shadow-sm"
+                        title="Export PDF with Location Details"
                       >
-                        All Registry Logs
+                        <FileText size={13} className="text-rose-500" />
+                        <span>PDF</span>
                       </button>
                     </div>
-
-                    {/* Export Dropdown / Buttons */}
-                    <button 
-                      onClick={handleExportExcel}
-                      className="px-2.5 py-1.5 border border-border-card hover:bg-bg-base rounded-[10px] text-xs font-bold text-text-sec hover:text-text-main transition-colors cursor-pointer flex items-center gap-1.5 shadow-sm"
-                      title="Export Excel with Location Details"
-                    >
-                      <Download size={13} className="text-emerald-500" />
-                      <span>Excel</span>
-                    </button>
-                    <button 
-                      onClick={handleExportPDF}
-                      className="px-2.5 py-1.5 border border-border-card hover:bg-bg-base rounded-[10px] text-xs font-bold text-text-sec hover:text-text-main transition-colors cursor-pointer flex items-center gap-1.5 shadow-sm"
-                      title="Export PDF with Location Details"
-                    >
-                      <FileText size={13} className="text-rose-500" />
-                      <span>PDF</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Filter Controls Bar */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5 p-3 rounded-[16px] bg-bg-base/40 border border-border-card">
-                  {/* Search Input */}
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-text-mut" size={14} />
-                    <input
-                      type="text"
-                      placeholder="Search name, location, GPS..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className="w-full pl-9 pr-3 py-2 bg-bg-card border border-border-card rounded-[10px] text-xs text-text-main placeholder:text-text-mut focus:outline-none focus:border-brand-primary font-medium"
-                    />
                   </div>
 
-                  {/* Location Filter Dropdown */}
-                  <div className="relative">
-                    <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-text-mut" size={14} />
-                    <select
-                      value={selectedLocationFilter}
-                      onChange={(e) => setSelectedLocationFilter(e.target.value)}
-                      className="w-full pl-9 pr-3 py-2 bg-bg-card border border-border-card rounded-[10px] text-xs font-bold text-text-sec focus:outline-none focus:border-brand-primary cursor-pointer appearance-none truncate"
-                    >
-                      <option value="all">📍 All Locations ({detectedLocations.length > 0 ? detectedLocations.length : "GPS"})</option>
-                      {detectedLocations.map((locName, idx) => (
-                        <option key={idx} value={locName}>
-                          📍 {locName}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                  {/* Filter Controls Bar */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5 p-3 rounded-[16px] bg-bg-base/40 border border-border-card">
+                    {/* Search Input */}
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-text-mut" size={14} />
+                      <input
+                        type="text"
+                        placeholder="Search name, location, GPS..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="w-full pl-9 pr-3 py-2 bg-bg-card border border-border-card rounded-[10px] text-xs text-text-main placeholder:text-text-mut focus:outline-none focus:border-brand-primary font-medium"
+                      />
+                    </div>
 
-                  {/* Department Filter */}
-                  <div className="flex items-center gap-2">
-                    <select
-                      value={selectedDept}
-                      onChange={(e) => setSelectedDept(e.target.value)}
-                      className="w-full px-3 py-2 bg-bg-card border border-border-card rounded-[10px] text-xs font-bold text-text-sec focus:outline-none focus:border-brand-primary cursor-pointer appearance-none truncate"
-                    >
-                      <option value="">🏢 All Departments</option>
-                      {departments.map((dept, idx) => (
-                        <option key={idx} value={dept}>{dept}</option>
-                      ))}
-                    </select>
-
-                    {(searchQuery || selectedLocationFilter !== "all" || selectedDept) && (
-                      <button
-                        onClick={() => { setSearchQuery(""); setSelectedLocationFilter("all"); setSelectedDept(""); }}
-                        className="px-2.5 py-2 rounded-[10px] bg-red-500/10 hover:bg-red-500/20 text-red-500 text-xs font-bold transition-colors cursor-pointer flex-shrink-0"
-                        title="Clear Filters"
+                    {/* Location Filter Dropdown */}
+                    <div className="relative">
+                      <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-text-mut" size={14} />
+                      <select
+                        value={selectedLocationFilter}
+                        onChange={(e) => setSelectedLocationFilter(e.target.value)}
+                        className="w-full pl-9 pr-3 py-2 bg-bg-card border border-border-card rounded-[10px] text-xs font-bold text-text-sec focus:outline-none focus:border-brand-primary cursor-pointer appearance-none truncate"
                       >
-                        Reset
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Table Content */}
-                {liveViewMode === "live" ? (
-                  liveStatusList.length === 0 ? (
-                    <div className="text-center py-16 text-text-mut text-sm">
-                      <MapPin size={36} className="mx-auto mb-2 opacity-30 text-text-mut" />
-                      No employee check logs found matching current filters today.
-                    </div>
-                  ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left border-collapse">
-                        <thead>
-                          <tr className="border-b border-border-card text-[10px] font-bold text-text-mut uppercase tracking-wider">
-                            <th className="pb-3 pr-4">Staff Member</th>
-                            <th className="pb-3 px-3">Department</th>
-                            <th className="pb-3 px-3">Check-In & Location</th>
-                            <th className="pb-3 px-3">Check-Out & Location</th>
-                            <th className="pb-3 px-3 text-center">Breaks</th>
-                            <th className="pb-3 px-3 text-center">Hours</th>
-                            <th className="pb-3 pl-3 text-right">Status</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-border-card text-xs text-text-main font-semibold">
-                          {paginatedLiveStatus.map(({ user, status, log }) => {
-                            const inTime = log?.checkInTime 
-                              ? new Date(log.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                              : "—";
-                            const outTime = log?.checkOutTime
-                              ? new Date(log.checkOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                              : "—";
-
-                            const inLocDisplayName = getLocationDisplayName(log?.checkInLocation);
-                            const outLocDisplayName = getLocationDisplayName(log?.checkOutLocation);
-
-                            let totalHrsStr = "—";
-                            let shortTaken = 0;
-                            let longTaken = 0;
-                            let bioTaken = 0;
-                            
-                            if (log) {
-                              if (log.breaks) {
-                                log.breaks.forEach(b => {
-                                  const bStart = new Date(b.startTime).getTime();
-                                  const bEnd = b.resumeTime ? new Date(b.resumeTime).getTime() : new Date().getTime();
-                                  const mins = Math.round((bEnd - bStart) / 60000);
-                                  if (b.type === "short") shortTaken += mins;
-                                  else if (b.type === "long") longTaken += mins;
-                                  else if (b.type === "bio") bioTaken += mins;
-                                });
-                              }
-                              
-                              if (log.totalWorkingMinutes !== undefined) {
-                                totalHrsStr = (log.totalWorkingMinutes / 60).toFixed(2) + "h";
-                              } else if (log.checkInTime) {
-                                const start = new Date(log.checkInTime).getTime();
-                                const now = new Date().getTime();
-                                const end = log.checkOutTime ? new Date(log.checkOutTime).getTime() : now;
-                                
-                                const breakMinutes = log.breaks?.reduce((acc, b) => {
-                                  const bStart = new Date(b.startTime).getTime();
-                                  const bEnd = b.resumeTime ? new Date(b.resumeTime).getTime() : new Date().getTime();
-                                  return acc + ((bEnd - bStart) / 60000);
-                                }, 0) || 0;
-                                
-                                const elapsedMins = Math.max(0, ((end - start) / 60000) - breakMinutes);
-                                totalHrsStr = (elapsedMins / 60).toFixed(2) + "h";
-                              }
-                            }
-
-                            return (
-                              <tr key={user.uid} className="hover:bg-bg-base/30 transition-colors">
-                                <td 
-                                  className="py-3.5 pr-4 flex items-center gap-3 cursor-pointer hover:bg-bg-base/50 rounded-lg transition-colors"
-                                  onClick={() => { setSelectedUser(user); setShowDetailModal(true); }}
-                                  title="View Records"
-                                >
-                                  <div className="w-8 h-8 rounded-full bg-brand-primary/15 text-brand-primary border border-brand-primary/30 flex items-center justify-center font-extrabold text-xs uppercase shadow-sm flex-shrink-0 overflow-hidden">
-                                    {user.avatar ? <img src={user.avatar} alt={user.name} className="w-full h-full object-cover" /> : (user.name ? getInitials(user.name) : "U")}
-                                  </div>
-                                  <div className="flex flex-col">
-                                    <span className="font-bold text-text-main truncate max-w-[130px] hover:text-brand-primary transition-colors">{user.name}</span>
-                                    <span className="text-[10px] text-text-mut truncate max-w-[130px] font-normal">{user.email}</span>
-                                  </div>
-                                </td>
-                                <td className="py-3.5 px-3 text-text-sec">{user.department || "Engineering"}</td>
-                                
-                                {/* Check-In Time & Resolved Location */}
-                                <td className="py-3.5 px-3">
-                                  <div className="text-brand-primary font-bold text-xs">{inTime}</div>
-                                  {log?.checkInLocation ? (
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setLocationModalData({
-                                          isOpen: true,
-                                          title: "Check-In Location Details",
-                                          employeeName: user.name,
-                                          userAvatar: user.avatar,
-                                          type: "Check-In",
-                                          time: inTime,
-                                          date: log?.date || "Today",
-                                          location: log.checkInLocation
-                                        });
-                                      }}
-                                      className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-full bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 text-[10px] font-bold border border-blue-500/20 transition-all cursor-pointer group max-w-[150px] truncate"
-                                      title={`📍 ${inLocDisplayName}\nGPS: ${formatGpsCoords(log.checkInLocation)}\nClick to view map & details`}
-                                    >
-                                      <MapPin size={10} className="flex-shrink-0 text-blue-500 group-hover:scale-110 transition-transform" />
-                                      <span className="truncate">{inLocDisplayName}</span>
-                                    </button>
-                                  ) : (
-                                    <span className="text-[10px] text-text-mut block mt-0.5">—</span>
-                                  )}
-                                </td>
-
-                                {/* Check-Out Time & Resolved Location */}
-                                <td className="py-3.5 px-3">
-                                  <div className="text-text-sec font-bold text-xs">{outTime}</div>
-                                  {log?.checkOutLocation ? (
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setLocationModalData({
-                                          isOpen: true,
-                                          title: "Check-Out Location Details",
-                                          employeeName: user.name,
-                                          userAvatar: user.avatar,
-                                          type: "Check-Out",
-                                          time: outTime,
-                                          date: log?.date || "Today",
-                                          location: log.checkOutLocation
-                                        });
-                                      }}
-                                      className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-full bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 text-[10px] font-bold border border-amber-500/20 transition-all cursor-pointer group max-w-[150px] truncate"
-                                      title={`📍 ${outLocDisplayName}\nGPS: ${formatGpsCoords(log.checkOutLocation)}\nClick to view map & details`}
-                                    >
-                                      <MapPin size={10} className="flex-shrink-0 text-amber-500 group-hover:scale-110 transition-transform" />
-                                      <span className="truncate">{outLocDisplayName}</span>
-                                    </button>
-                                  ) : (
-                                    <span className="text-[10px] text-text-mut block mt-0.5">—</span>
-                                  )}
-                                </td>
-
-                                <td className="py-3.5 px-3 text-center">
-                                  {(shortTaken > 0 || longTaken > 0 || bioTaken > 0) ? (
-                                    <div className="flex flex-col gap-1 items-center text-[9px] font-extrabold uppercase">
-                                      {shortTaken > 0 && <span className="text-brand-warning bg-brand-warning/10 px-1.5 py-0.5 rounded shadow-sm">B1: {shortTaken}m</span>}
-                                      {longTaken > 0 && <span className="text-brand-warning bg-brand-warning/10 px-1.5 py-0.5 rounded shadow-sm">B2: {longTaken}m</span>}
-                                      {bioTaken > 0 && <span className="text-brand-success bg-brand-success/10 px-1.5 py-0.5 rounded shadow-sm">Bio: {bioTaken}m</span>}
-                                    </div>
-                                  ) : (
-                                    <span className="text-text-mut font-semibold">—</span>
-                                  )}
-                                </td>
-                                <td className="py-3.5 px-3 text-brand-primary font-bold text-center">{totalHrsStr}</td>
-                                <td className="py-3.5 pl-3 text-right flex justify-end items-center">{getStatusBadge(status)}</td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  )
-                ) : (
-                  /* All Logs Registry View */
-                  filteredLogs.length === 0 ? (
-                    <div className="text-center py-16 text-text-mut text-sm">
-                      <MapPin size={36} className="mx-auto mb-2 opacity-30 text-text-mut" />
-                      No attendance registry records match the selected filters.
-                    </div>
-                  ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left border-collapse">
-                        <thead>
-                          <tr className="border-b border-border-card text-[10px] font-bold text-text-mut uppercase tracking-wider">
-                            <th className="pb-3 pr-3">Date</th>
-                            <th className="pb-3 px-3">Employee</th>
-                            <th className="pb-3 px-3">Department</th>
-                            <th className="pb-3 px-3">Check-In & Location</th>
-                            <th className="pb-3 px-3">Check-Out & Location</th>
-                            <th className="pb-3 px-3 text-center">Active Hours</th>
-                            <th className="pb-3 pl-3 text-right">Status</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-border-card text-xs text-text-main font-semibold">
-                          {filteredLogs.slice((livePage - 1) * rowsPerPage, livePage * rowsPerPage).map((log, idx) => {
-                            const checkInTimeStr = log.checkInTime 
-                              ? new Date(log.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                              : "—";
-                            const checkOutTimeStr = log.checkOutTime
-                              ? new Date(log.checkOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                              : "—";
-
-                            const inLocDisplayName = getLocationDisplayName(log.checkInLocation);
-                            const outLocDisplayName = getLocationDisplayName(log.checkOutLocation);
-                            const hrs = log.totalWorkingMinutes ? ((log.totalWorkingMinutes / 60).toFixed(2) + "h") : "—";
-
-                            return (
-                              <tr key={log.id || idx} className="hover:bg-bg-base/30 transition-colors">
-                                <td className="py-3.5 pr-3 font-mono font-bold text-text-sec text-xs">{log.date || "—"}</td>
-                                <td className="py-3.5 px-3">
-                                  <span className="font-bold text-text-main block">{log.userName}</span>
-                                </td>
-                                <td className="py-3.5 px-3 text-text-sec">{log.userDept || "—"}</td>
-
-                                {/* Check In Location */}
-                                <td className="py-3.5 px-3">
-                                  <div className="text-brand-primary font-bold text-xs">{checkInTimeStr}</div>
-                                  {log.checkInLocation ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setLocationModalData({
-                                          isOpen: true,
-                                          title: "Check-In Location Details",
-                                          employeeName: log.userName,
-                                          type: "Check-In",
-                                          time: checkInTimeStr,
-                                          date: log.date,
-                                          location: log.checkInLocation
-                                        });
-                                      }}
-                                      className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-full bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 text-[10px] font-bold border border-blue-500/20 transition-all cursor-pointer max-w-[150px] truncate"
-                                      title={`📍 ${inLocDisplayName}\nGPS: ${formatGpsCoords(log.checkInLocation)}`}
-                                    >
-                                      <MapPin size={10} className="flex-shrink-0 text-blue-500" />
-                                      <span className="truncate">{inLocDisplayName}</span>
-                                    </button>
-                                  ) : (
-                                    <span className="text-[10px] text-text-mut block mt-0.5">—</span>
-                                  )}
-                                </td>
-
-                                {/* Check Out Location */}
-                                <td className="py-3.5 px-3">
-                                  <div className="text-text-sec font-bold text-xs">{checkOutTimeStr}</div>
-                                  {log.checkOutLocation ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setLocationModalData({
-                                          isOpen: true,
-                                          title: "Check-Out Location Details",
-                                          employeeName: log.userName,
-                                          type: "Check-Out",
-                                          time: checkOutTimeStr,
-                                          date: log.date,
-                                          location: log.checkOutLocation
-                                        });
-                                      }}
-                                      className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-full bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 text-[10px] font-bold border border-amber-500/20 transition-all cursor-pointer max-w-[150px] truncate"
-                                      title={`📍 ${outLocDisplayName}\nGPS: ${formatGpsCoords(log.checkOutLocation)}`}
-                                    >
-                                      <MapPin size={10} className="flex-shrink-0 text-amber-500" />
-                                      <span className="truncate">{outLocDisplayName}</span>
-                                    </button>
-                                  ) : (
-                                    <span className="text-[10px] text-text-mut block mt-0.5">—</span>
-                                  )}
-                                </td>
-
-                                <td className="py-3.5 px-3 text-brand-primary font-bold text-center">{hrs}</td>
-                                <td className="py-3.5 pl-3 text-right flex justify-end items-center">{getStatusBadge(log.status || (log.checkOutTime ? "checked-out" : "working"))}</td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  )
-                )}
-              </div>
-
-              {/* Dynamic Pagination Bar */}
-              {(() => {
-                const totalItems = liveViewMode === "live" ? liveStatusList.length : filteredLogs.length;
-                const totalPages = Math.ceil(totalItems / rowsPerPage) || 1;
-                const startIndex = (livePage - 1) * rowsPerPage;
-
-                if (totalItems <= 10) return null;
-
-                return (
-                  <div className="flex justify-between items-center mt-6 pt-4 border-t border-border-card text-xs flex-wrap gap-4">
-                    <div className="flex items-center gap-4">
-                      <span className="text-text-mut font-semibold">
-                        Showing {startIndex + 1} to {Math.min(totalItems, startIndex + rowsPerPage)} of {totalItems} entries
-                      </span>
-                      <select 
-                        value={rowsPerPage} 
-                        onChange={(e) => {
-                          setRowsPerPage(Number(e.target.value));
-                          setLivePage(1); setUsersPage(1); setLeavesPendingPage(1); setRegsPendingPage(1); setHistoryPage(1); setAssetsPage(1);
-                        }}
-                        className="px-2 py-1 bg-bg-card border border-border-card rounded-[6px] text-xs font-bold text-text-sec cursor-pointer outline-none focus:border-brand-primary"
-                      >
-                        <option value={10}>10 / page</option>
-                        <option value={20}>20 / page</option>
-                        <option value={50}>50 / page</option>
-                        <option value={100}>100 / page</option>
+                        <option value="all">📍 All Locations ({detectedLocations.length > 0 ? detectedLocations.length : "GPS"})</option>
+                        {detectedLocations.map((locName, idx) => (
+                          <option key={idx} value={locName}>
+                            📍 {locName}
+                          </option>
+                        ))}
                       </select>
                     </div>
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={() => setLivePage(prev => Math.max(1, prev - 1))}
-                        disabled={livePage === 1}
-                        className="px-3 py-1.5 border border-border-card rounded-[8px] bg-bg-card hover:bg-bg-base text-text-sec disabled:opacity-40 disabled:hover:bg-bg-card cursor-pointer font-bold transition-all"
+
+                    {/* Department Filter */}
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={selectedDept}
+                        onChange={(e) => setSelectedDept(e.target.value)}
+                        className="w-full px-3 py-2 bg-bg-card border border-border-card rounded-[10px] text-xs font-bold text-text-sec focus:outline-none focus:border-brand-primary cursor-pointer appearance-none truncate"
                       >
-                        Prev
-                      </button>
-                      {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => {
-                        if (totalPages > 5 && p !== 1 && p !== totalPages && Math.abs(p - livePage) > 1) {
-                          if (p === 2 || p === totalPages - 1) {
-                            return <span key={p} className="px-1 text-text-mut font-bold">...</span>;
-                          }
-                          return null;
-                        }
-                        return (
-                          <button
-                            key={p}
-                            onClick={() => setLivePage(p)}
-                            className={`w-8 h-8 rounded-[8px] border transition-all cursor-pointer font-bold ${
-                              livePage === p
-                                ? "bg-brand-primary border-brand-primary text-white"
-                                : "border-border-card bg-bg-card text-text-sec hover:bg-bg-base"
-                            }`}
-                          >
-                            {p}
-                          </button>
-                        );
-                      })}
-                      <button
-                        onClick={() => setLivePage(prev => Math.min(totalPages, prev + 1))}
-                        disabled={livePage === totalPages}
-                        className="px-3 py-1.5 border border-border-card rounded-[8px] bg-bg-card hover:bg-bg-base text-text-sec disabled:opacity-40 disabled:hover:bg-bg-card cursor-pointer font-bold transition-all"
-                      >
-                        Next
-                      </button>
+                        <option value="">🏢 All Departments</option>
+                        {departments.map((dept, idx) => (
+                          <option key={idx} value={dept}>{dept}</option>
+                        ))}
+                      </select>
+
+                      {(searchQuery || selectedLocationFilter !== "all" || selectedDept) && (
+                        <button
+                          onClick={() => { setSearchQuery(""); setSelectedLocationFilter("all"); setSelectedDept(""); }}
+                          className="px-2.5 py-2 rounded-[10px] bg-red-500/10 hover:bg-red-500/20 text-red-500 text-xs font-bold transition-colors cursor-pointer flex-shrink-0"
+                          title="Clear Filters"
+                        >
+                          Reset
+                        </button>
+                      )}
                     </div>
                   </div>
-                );
-              })()}
-            </div>
 
-            {/* Leave Requests Panel */}
-            <div className="bg-bg-card border border-border-card rounded-[24px] p-6 shadow-sm flex flex-col">
-              <h3 className="font-extrabold text-base text-text-main tracking-tight mb-2">Leave Requests</h3>
-              <span className="text-[10px] text-text-mut font-bold uppercase tracking-wider block mb-6">
-                {leaveRequests.length} Pending Review
-              </span>
-
-              {leaveRequests.length === 0 ? (
-                <div className="my-auto text-center text-text-mut text-xs py-8">No pending leave requests.</div>
-              ) : (
-                <div className="space-y-4 flex-grow">
-                  {leaveRequests.map((req) => (
-                    <div key={req.id} className="p-4 border border-border-card rounded-[16px] bg-bg-base/30 space-y-4">
-                      <div className="flex items-center justify-between">
-                        <div 
-                          className="flex items-center gap-3 cursor-pointer hover:bg-bg-base/50 p-1.5 -ml-1.5 rounded-lg transition-colors"
-                          onClick={() => {
-                            const u = staffUsers.find(su => su.uid === req.userId);
-                            if (u) { setSelectedUser(u); setShowDetailModal(true); }
-                          }}
-                          title="View Records"
-                        >
-                          <div className="w-8 h-8 rounded-full bg-brand-primary/15 text-brand-primary border border-brand-primary/30 flex items-center justify-center font-extrabold text-xs uppercase shadow-sm flex-shrink-0 overflow-hidden">{(users.find(u => u.uid === req.userId)?.avatar) ? <img src={users.find(u => u.uid === req.userId).avatar} alt={req.userName} className="w-full h-full object-cover" /> : (req.userName ? getInitials(req.userName) : "U")}</div>
-                          <div>
-                            <span className="font-extrabold text-xs text-text-main block hover:text-brand-primary transition-colors">{req.userName || req.name}</span>
-                            <span className="text-[10px] text-text-mut font-semibold">{req.type} • {req.duration}</span>
-                          </div>
-                        </div>
-                        <button className="text-text-mut hover:text-brand-primary">
-                          <Info size={14} />
-                        </button>
+                  {/* Table Content */}
+                  {liveViewMode === "live" ? (
+                    liveStatusList.length === 0 ? (
+                      <div className="text-center py-16 text-text-mut text-sm">
+                        <MapPin size={36} className="mx-auto mb-2 opacity-30 text-text-mut" />
+                        No employee check logs found matching current filters today.
                       </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                          <thead>
+                            <tr className="border-b border-border-card text-[10px] font-bold text-text-mut uppercase tracking-wider">
+                              <th className="pb-3 pr-4">Staff Member</th>
+                              <th className="pb-3 px-3">Department</th>
+                              <th className="pb-3 px-3">Check-In & Location</th>
+                              <th className="pb-3 px-3">Check-Out & Location</th>
+                              <th className="pb-3 px-3 text-center">Breaks</th>
+                              <th className="pb-3 px-3 text-center">Hours</th>
+                              <th className="pb-3 pl-3 text-right">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-border-card text-xs text-text-main font-semibold">
+                            {paginatedLiveStatus.map(({ user, status, log }) => {
+                              const inTime = log?.checkInTime
+                                ? new Date(log.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                                : "—";
+                              const outTime = log?.checkOutTime
+                                ? new Date(log.checkOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                                : "—";
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <button
-                          onClick={() => handleApproveLeave(req.id, req.userName || req.name)}
-                          className="py-1.5 px-3 bg-brand-primary hover:bg-brand-hover text-white text-[10px] font-bold rounded-[8px] cursor-pointer"
+                              const inLocDisplayName = getLocationDisplayName(log?.checkInLocation);
+                              const outLocDisplayName = getLocationDisplayName(log?.checkOutLocation);
+
+                              let totalHrsStr = "—";
+                              let shortTaken = 0;
+                              let longTaken = 0;
+                              let bioTaken = 0;
+
+                              if (log) {
+                                if (log.breaks) {
+                                  log.breaks.forEach(b => {
+                                    const bStart = new Date(b.startTime).getTime();
+                                    const bEnd = b.resumeTime ? new Date(b.resumeTime).getTime() : new Date().getTime();
+                                    const mins = Math.round((bEnd - bStart) / 60000);
+                                    if (b.type === "short") shortTaken += mins;
+                                    else if (b.type === "long") longTaken += mins;
+                                    else if (b.type === "bio") bioTaken += mins;
+                                  });
+                                }
+
+                                if (log.totalWorkingMinutes !== undefined) {
+                                  totalHrsStr = (log.totalWorkingMinutes / 60).toFixed(2) + "h";
+                                } else if (log.checkInTime) {
+                                  const start = new Date(log.checkInTime).getTime();
+                                  const now = new Date().getTime();
+                                  const end = log.checkOutTime ? new Date(log.checkOutTime).getTime() : now;
+
+                                  const breakMinutes = log.breaks?.reduce((acc, b) => {
+                                    const bStart = new Date(b.startTime).getTime();
+                                    const bEnd = b.resumeTime ? new Date(b.resumeTime).getTime() : new Date().getTime();
+                                    return acc + ((bEnd - bStart) / 60000);
+                                  }, 0) || 0;
+
+                                  const elapsedMins = Math.max(0, ((end - start) / 60000) - breakMinutes);
+                                  totalHrsStr = (elapsedMins / 60).toFixed(2) + "h";
+                                }
+                              }
+
+                              return (
+                                <tr key={user.uid} className="hover:bg-bg-base/30 transition-colors">
+                                  <td
+                                    className="py-3.5 pr-4 flex items-center gap-3 cursor-pointer hover:bg-bg-base/50 rounded-lg transition-colors"
+                                    onClick={() => { setSelectedUser(user); setShowDetailModal(true); }}
+                                    title="View Records"
+                                  >
+                                    <div className="w-8 h-8 rounded-full bg-brand-primary/15 text-brand-primary border border-brand-primary/30 flex items-center justify-center font-extrabold text-xs uppercase shadow-sm flex-shrink-0 overflow-hidden">
+                                      {user.avatar ? <img src={user.avatar} alt={user.name} className="w-full h-full object-cover" /> : (user.name ? getInitials(user.name) : "U")}
+                                    </div>
+                                    <div className="flex flex-col">
+                                      <span className="font-bold text-text-main truncate max-w-[130px] hover:text-brand-primary transition-colors">{user.name}</span>
+                                      <span className="text-[10px] text-text-mut truncate max-w-[130px] font-normal">{user.email}</span>
+                                    </div>
+                                  </td>
+                                  <td className="py-3.5 px-3 text-text-sec">{user.department || "Engineering"}</td>
+
+                                  {/* Check-In Time & Resolved Location */}
+                                  <td className="py-3.5 px-3">
+                                    <div className="text-brand-primary font-bold text-xs">{inTime}</div>
+                                    {log?.checkInLocation ? (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setLocationModalData({
+                                            isOpen: true,
+                                            title: "Check-In Location Details",
+                                            employeeName: user.name,
+                                            userAvatar: user.avatar,
+                                            type: "Check-In",
+                                            time: inTime,
+                                            date: log?.date || "Today",
+                                            location: log.checkInLocation
+                                          });
+                                        }}
+                                        className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-full bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 text-[10px] font-bold border border-blue-500/20 transition-all cursor-pointer group max-w-[150px] truncate"
+                                        title={`📍 ${inLocDisplayName}\nGPS: ${formatGpsCoords(log.checkInLocation)}\nClick to view map & details`}
+                                      >
+                                        <MapPin size={10} className="flex-shrink-0 text-blue-500 group-hover:scale-110 transition-transform" />
+                                        <span className="truncate">{inLocDisplayName}</span>
+                                      </button>
+                                    ) : (
+                                      <span className="text-[10px] text-text-mut block mt-0.5">—</span>
+                                    )}
+                                  </td>
+
+                                  {/* Check-Out Time & Resolved Location */}
+                                  <td className="py-3.5 px-3">
+                                    <div className="text-text-sec font-bold text-xs">{outTime}</div>
+                                    {log?.checkOutLocation ? (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setLocationModalData({
+                                            isOpen: true,
+                                            title: "Check-Out Location Details",
+                                            employeeName: user.name,
+                                            userAvatar: user.avatar,
+                                            type: "Check-Out",
+                                            time: outTime,
+                                            date: log?.date || "Today",
+                                            location: log.checkOutLocation
+                                          });
+                                        }}
+                                        className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-full bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 text-[10px] font-bold border border-amber-500/20 transition-all cursor-pointer group max-w-[150px] truncate"
+                                        title={`📍 ${outLocDisplayName}\nGPS: ${formatGpsCoords(log.checkOutLocation)}\nClick to view map & details`}
+                                      >
+                                        <MapPin size={10} className="flex-shrink-0 text-amber-500 group-hover:scale-110 transition-transform" />
+                                        <span className="truncate">{outLocDisplayName}</span>
+                                      </button>
+                                    ) : (
+                                      <span className="text-[10px] text-text-mut block mt-0.5">—</span>
+                                    )}
+                                  </td>
+
+                                  <td className="py-3.5 px-3 text-center">
+                                    {(shortTaken > 0 || longTaken > 0 || bioTaken > 0) ? (
+                                      <div className="flex flex-col gap-1 items-center text-[9px] font-extrabold uppercase">
+                                        {shortTaken > 0 && <span className="text-brand-warning bg-brand-warning/10 px-1.5 py-0.5 rounded shadow-sm">B1: {shortTaken}m</span>}
+                                        {longTaken > 0 && <span className="text-brand-warning bg-brand-warning/10 px-1.5 py-0.5 rounded shadow-sm">B2: {longTaken}m</span>}
+                                        {bioTaken > 0 && <span className="text-brand-success bg-brand-success/10 px-1.5 py-0.5 rounded shadow-sm">Bio: {bioTaken}m</span>}
+                                      </div>
+                                    ) : (
+                                      <span className="text-text-mut font-semibold">—</span>
+                                    )}
+                                  </td>
+                                  <td className="py-3.5 px-3 text-brand-primary font-bold text-center">{totalHrsStr}</td>
+                                  <td className="py-3.5 pl-3 text-right flex justify-end items-center">{getStatusBadge(status)}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )
+                  ) : (
+                    /* All Logs Registry View */
+                    filteredLogs.length === 0 ? (
+                      <div className="text-center py-16 text-text-mut text-sm">
+                        <MapPin size={36} className="mx-auto mb-2 opacity-30 text-text-mut" />
+                        No attendance registry records match the selected filters.
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                          <thead>
+                            <tr className="border-b border-border-card text-[10px] font-bold text-text-mut uppercase tracking-wider">
+                              <th className="pb-3 pr-3">Date</th>
+                              <th className="pb-3 px-3">Employee</th>
+                              <th className="pb-3 px-3">Department</th>
+                              <th className="pb-3 px-3">Check-In & Location</th>
+                              <th className="pb-3 px-3">Check-Out & Location</th>
+                              <th className="pb-3 px-3 text-center">Active Hours</th>
+                              <th className="pb-3 pl-3 text-right">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-border-card text-xs text-text-main font-semibold">
+                            {filteredLogs.slice((livePage - 1) * rowsPerPage, livePage * rowsPerPage).map((log, idx) => {
+                              const checkInTimeStr = log.checkInTime
+                                ? new Date(log.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                                : "—";
+                              const checkOutTimeStr = log.checkOutTime
+                                ? new Date(log.checkOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                                : "—";
+
+                              const inLocDisplayName = getLocationDisplayName(log.checkInLocation);
+                              const outLocDisplayName = getLocationDisplayName(log.checkOutLocation);
+                              const hrs = log.totalWorkingMinutes ? ((log.totalWorkingMinutes / 60).toFixed(2) + "h") : "—";
+
+                              return (
+                                <tr key={log.id || idx} className="hover:bg-bg-base/30 transition-colors">
+                                  <td className="py-3.5 pr-3 font-mono font-bold text-text-sec text-xs">{log.date || "—"}</td>
+                                  <td className="py-3.5 px-3">
+                                    <span className="font-bold text-text-main block">{log.userName}</span>
+                                  </td>
+                                  <td className="py-3.5 px-3 text-text-sec">{log.userDept || "—"}</td>
+
+                                  {/* Check In Location */}
+                                  <td className="py-3.5 px-3">
+                                    <div className="text-brand-primary font-bold text-xs">{checkInTimeStr}</div>
+                                    {log.checkInLocation ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setLocationModalData({
+                                            isOpen: true,
+                                            title: "Check-In Location Details",
+                                            employeeName: log.userName,
+                                            type: "Check-In",
+                                            time: checkInTimeStr,
+                                            date: log.date,
+                                            location: log.checkInLocation
+                                          });
+                                        }}
+                                        className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-full bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 text-[10px] font-bold border border-blue-500/20 transition-all cursor-pointer max-w-[150px] truncate"
+                                        title={`📍 ${inLocDisplayName}\nGPS: ${formatGpsCoords(log.checkInLocation)}`}
+                                      >
+                                        <MapPin size={10} className="flex-shrink-0 text-blue-500" />
+                                        <span className="truncate">{inLocDisplayName}</span>
+                                      </button>
+                                    ) : (
+                                      <span className="text-[10px] text-text-mut block mt-0.5">—</span>
+                                    )}
+                                  </td>
+
+                                  {/* Check Out Location */}
+                                  <td className="py-3.5 px-3">
+                                    <div className="text-text-sec font-bold text-xs">{checkOutTimeStr}</div>
+                                    {log.checkOutLocation ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setLocationModalData({
+                                            isOpen: true,
+                                            title: "Check-Out Location Details",
+                                            employeeName: log.userName,
+                                            type: "Check-Out",
+                                            time: checkOutTimeStr,
+                                            date: log.date,
+                                            location: log.checkOutLocation
+                                          });
+                                        }}
+                                        className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-full bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 text-[10px] font-bold border border-amber-500/20 transition-all cursor-pointer max-w-[150px] truncate"
+                                        title={`📍 ${outLocDisplayName}\nGPS: ${formatGpsCoords(log.checkOutLocation)}`}
+                                      >
+                                        <MapPin size={10} className="flex-shrink-0 text-amber-500" />
+                                        <span className="truncate">{outLocDisplayName}</span>
+                                      </button>
+                                    ) : (
+                                      <span className="text-[10px] text-text-mut block mt-0.5">—</span>
+                                    )}
+                                  </td>
+
+                                  <td className="py-3.5 px-3 text-brand-primary font-bold text-center">{hrs}</td>
+                                  <td className="py-3.5 pl-3 text-right flex justify-end items-center">{getStatusBadge(log.status || (log.checkOutTime ? "checked-out" : "working"))}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )
+                  )}
+                </div>
+
+                {/* Dynamic Pagination Bar */}
+                {(() => {
+                  const totalItems = liveViewMode === "live" ? liveStatusList.length : filteredLogs.length;
+                  const totalPages = Math.ceil(totalItems / rowsPerPage) || 1;
+                  const startIndex = (livePage - 1) * rowsPerPage;
+
+                  if (totalItems <= 10) return null;
+
+                  return (
+                    <div className="flex justify-between items-center mt-6 pt-4 border-t border-border-card text-xs flex-wrap gap-4">
+                      <div className="flex items-center gap-4">
+                        <span className="text-text-mut font-semibold">
+                          Showing {startIndex + 1} to {Math.min(totalItems, startIndex + rowsPerPage)} of {totalItems} entries
+                        </span>
+                        <select
+                          value={rowsPerPage}
+                          onChange={(e) => {
+                            setRowsPerPage(Number(e.target.value));
+                            setLivePage(1); setUsersPage(1); setLeavesPendingPage(1); setRegsPendingPage(1); setHistoryPage(1); setAssetsPage(1);
+                          }}
+                          className="px-2 py-1 bg-bg-card border border-border-card rounded-[6px] text-xs font-bold text-text-sec cursor-pointer outline-none focus:border-brand-primary"
                         >
-                          Approve
+                          <option value={10}>10 / page</option>
+                          <option value={20}>20 / page</option>
+                          <option value={50}>50 / page</option>
+                          <option value={100}>100 / page</option>
+                        </select>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => setLivePage(prev => Math.max(1, prev - 1))}
+                          disabled={livePage === 1}
+                          className="px-3 py-1.5 border border-border-card rounded-[8px] bg-bg-card hover:bg-bg-base text-text-sec disabled:opacity-40 disabled:hover:bg-bg-card cursor-pointer font-bold transition-all"
+                        >
+                          Prev
                         </button>
+                        {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => {
+                          if (totalPages > 5 && p !== 1 && p !== totalPages && Math.abs(p - livePage) > 1) {
+                            if (p === 2 || p === totalPages - 1) {
+                              return <span key={p} className="px-1 text-text-mut font-bold">...</span>;
+                            }
+                            return null;
+                          }
+                          return (
+                            <button
+                              key={p}
+                              onClick={() => setLivePage(p)}
+                              className={`w-8 h-8 rounded-[8px] border transition-all cursor-pointer font-bold ${livePage === p
+                                  ? "bg-brand-primary border-brand-primary text-white"
+                                  : "border-border-card bg-bg-card text-text-sec hover:bg-bg-base"
+                                }`}
+                            >
+                              {p}
+                            </button>
+                          );
+                        })}
                         <button
-                          onClick={() => handleRejectLeave(req.id, req.userName || req.name)}
-                          className="py-1.5 px-3 border border-border-card text-text-sec hover:bg-bg-base text-[10px] font-bold rounded-[8px] cursor-pointer"
+                          onClick={() => setLivePage(prev => Math.min(totalPages, prev + 1))}
+                          disabled={livePage === totalPages}
+                          className="px-3 py-1.5 border border-border-card rounded-[8px] bg-bg-card hover:bg-bg-base text-text-sec disabled:opacity-40 disabled:hover:bg-bg-card cursor-pointer font-bold transition-all"
                         >
-                          Reject
+                          Next
                         </button>
                       </div>
                     </div>
-                  ))}
-                </div>
-              )}
+                  );
+                })()}
+              </div>
+
+              {/* Leave Requests Panel */}
+              <div className="bg-bg-card border border-border-card rounded-[24px] p-6 shadow-sm flex flex-col">
+                <h3 className="font-extrabold text-base text-text-main tracking-tight mb-2">Leave Requests</h3>
+                <span className="text-[10px] text-text-mut font-bold uppercase tracking-wider block mb-6">
+                  {leaveRequests.length} Pending Review
+                </span>
+
+                {leaveRequests.length === 0 ? (
+                  <div className="my-auto text-center text-text-mut text-xs py-8">No pending leave requests.</div>
+                ) : (
+                  <div className="space-y-4 flex-grow">
+                    {leaveRequests.map((req) => (
+                      <div key={req.id} className="p-4 border border-border-card rounded-[16px] bg-bg-base/30 space-y-4">
+                        <div className="flex items-center justify-between">
+                          <div
+                            className="flex items-center gap-3 cursor-pointer hover:bg-bg-base/50 p-1.5 -ml-1.5 rounded-lg transition-colors"
+                            onClick={() => {
+                              const u = staffUsers.find(su => su.uid === req.userId);
+                              if (u) { setSelectedUser(u); setShowDetailModal(true); }
+                            }}
+                            title="View Records"
+                          >
+                            <div className="w-8 h-8 rounded-full bg-brand-primary/15 text-brand-primary border border-brand-primary/30 flex items-center justify-center font-extrabold text-xs uppercase shadow-sm flex-shrink-0 overflow-hidden">{(users.find(u => u.uid === req.userId)?.avatar) ? <img src={users.find(u => u.uid === req.userId).avatar} alt={req.userName} className="w-full h-full object-cover" /> : (req.userName ? getInitials(req.userName) : "U")}</div>
+                            <div>
+                              <span className="font-extrabold text-xs text-text-main block hover:text-brand-primary transition-colors">{req.userName || req.name}</span>
+                              <span className="text-[10px] text-text-mut font-semibold">{req.type} • {req.duration}</span>
+                            </div>
+                          </div>
+                          <button className="text-text-mut hover:text-brand-primary">
+                            <Info size={14} />
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          <button
+                            onClick={() => handleApproveLeave(req.id, req.userName || req.name)}
+                            className="py-1.5 px-3 bg-brand-primary hover:bg-brand-hover text-white text-[10px] font-bold rounded-[8px] cursor-pointer"
+                          >
+                            Approve
+                          </button>
+                          <button
+                            onClick={() => handleRejectLeave(req.id, req.userName || req.name)}
+                            className="py-1.5 px-3 border border-border-card text-text-sec hover:bg-bg-base text-[10px] font-bold rounded-[8px] cursor-pointer"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        </>
+          </>
         );
       })()}
 
@@ -2901,356 +2875,355 @@ export default function AdminDashboard() {
 
         return (
           <>
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-            <div>
-              <h1 className="text-2xl sm:text-3xl font-extrabold text-text-main tracking-tight">Staff Directory</h1>
-              <p className="text-sm text-text-sec mt-1">Manage employee profiles, roles, and real-time attendance metrics across all departments.</p>
-            </div>
-            
-            <div className="flex gap-4 items-end flex-wrap w-full md:w-auto">
-              {can("create", "EmployeeManagement") && (
-                <button
-                  onClick={() => setShowAddModal(true)}
-                  className="py-3 px-5 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-[12px] flex items-center gap-2 shadow-md shadow-brand-primary/10 cursor-pointer"
-                >
-                  <UserPlus size={16} />
-                  <span>Add Employee</span>
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Directory Stats cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            <div className="bg-bg-card border border-border-card rounded-[20px] p-5 flex items-center justify-between shadow-sm">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
               <div>
-                <span className="text-[10px] font-bold text-text-mut uppercase tracking-wider block">TOTAL EMPLOYEES</span>
-                <span className="text-3xl font-extrabold text-text-main block mt-1.5">{totalRegistered}</span>
-              </div>
-              <span className="bg-emerald-500/10 text-emerald-500 px-2 py-0.5 rounded-full text-[9px] font-bold">Total</span>
-            </div>
-
-            <div className="bg-bg-card border border-border-card rounded-[20px] p-5 flex items-center justify-between shadow-sm">
-              <div>
-                <span className="text-[10px] font-bold text-text-mut uppercase tracking-wider block">PRESENT TODAY</span>
-                <span className="text-3xl font-extrabold text-text-main block mt-1.5">{presentCount}</span>
-              </div>
-              <span className="bg-brand-primary/10 text-brand-primary px-2 py-0.5 rounded-full text-[9px] font-bold">{Math.round((presentCount / (totalRegistered || 1)) * 100)}% Active</span>
-            </div>
-
-            <div className="bg-bg-card border border-border-card rounded-[20px] p-5 flex items-center justify-between shadow-sm">
-              <div>
-                <span className="text-[10px] font-bold text-text-mut uppercase tracking-wider block">LATE ARRIVALS</span>
-                <span className="text-3xl font-extrabold text-text-main block mt-1.5">{lateArrivalsCount}</span>
-              </div>
-              <span className="bg-amber-500/10 text-amber-500 px-2 py-0.5 rounded-full text-[9px] font-bold">{Math.round((lateArrivalsCount / (presentCount || 1)) * 100)}% Late</span>
-            </div>
-
-            <div className="bg-bg-card border border-border-card rounded-[20px] p-5 flex items-center justify-between shadow-sm">
-              <div>
-                <span className="text-[10px] font-bold text-text-mut uppercase tracking-wider block">OFFLINE</span>
-                <span className="text-3xl font-extrabold text-text-main block mt-1.5">{absentCount}</span>
-              </div>
-              <span className="bg-slate-200 dark:bg-slate-800 text-text-sec px-2 py-0.5 rounded-full text-[9px] font-bold">{Math.round((absentCount / (totalRegistered || 1)) * 100)}% Offline</span>
-            </div>
-          </div>
-
-          {/* Directory Filters */}
-          <div className="bg-bg-card border border-border-card rounded-[24px] p-6 shadow-sm">
-            <div className="flex flex-col lg:flex-row gap-4 items-stretch lg:items-end">
-              {/* Search box */}
-              <div className="flex flex-col gap-1.5 flex-grow">
-                <label className="text-[10px] font-bold text-text-mut uppercase tracking-wider" htmlFor="search-input">Search Profile</label>
-                <div className="relative">
-                  <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-text-mut" />
-                  <input
-                    id="search-input"
-                    type="text"
-                    className="w-full pl-10 pr-4 py-2.5 border border-border-card rounded-[12px] bg-bg-base/40 text-xs text-text-main outline-none focus:bg-bg-card focus:border-brand-primary transition-all placeholder-text-mut"
-                    placeholder="Filter by name, email, or role..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                  />
-                </div>
+                <h1 className="text-2xl sm:text-3xl font-extrabold text-text-main tracking-tight">Staff Directory</h1>
+                <p className="text-sm text-text-sec mt-1">Manage employee profiles, roles, and real-time attendance metrics across all departments.</p>
               </div>
 
-              {/* Department drop down */}
-              <div className="flex flex-col gap-1.5 min-w-[200px]">
-                <label className="text-[10px] font-bold text-text-mut uppercase tracking-wider" htmlFor="dept-filter">Department</label>
-                <select
-                  id="dept-filter"
-                  className="w-full px-4 py-2.5 border border-border-card rounded-[12px] bg-bg-base/40 text-xs text-text-main outline-none focus:bg-bg-card focus:border-brand-primary transition-all appearance-none"
-                  value={selectedDept}
-                  onChange={(e) => setSelectedDept(e.target.value)}
-                >
-                  <option value="">All Departments</option>
-                  {departments.map((dept, idx) => (
-                    <option key={idx} value={dept}>{dept}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Status */}
-              <div className="flex flex-col gap-1.5 min-w-[150px]">
-                <label className="text-[10px] font-bold text-text-mut uppercase tracking-wider" htmlFor="status-filter">Status</label>
-                <select
-                  id="status-filter"
-                  className="w-full px-4 py-2.5 border border-border-card rounded-[12px] bg-bg-base/40 text-xs text-text-main outline-none focus:bg-bg-card focus:border-brand-primary transition-all appearance-none"
-                  value={selectedStatus}
-                  onChange={(e) => setSelectedStatus(e.target.value)}
-                >
-                  <option value="">All Status</option>
-                  <option value="active">Active</option>
-                  <option value="offline">Offline</option>
-                </select>
-              </div>
-
-              {/* Shift */}
-              <div className="flex flex-col gap-1.5 min-w-[150px]">
-                <label className="text-[10px] font-bold text-text-mut uppercase tracking-wider" htmlFor="shift-filter">Shift</label>
-                <select
-                  id="shift-filter"
-                  className="w-full px-4 py-2.5 border border-border-card rounded-[12px] bg-bg-base/40 text-xs text-text-main outline-none focus:bg-bg-card focus:border-brand-primary transition-all appearance-none"
-                  value={selectedShiftFilter}
-                  onChange={(e) => setSelectedShiftFilter(e.target.value)}
-                >
-                  <option value="">All Shifts</option>
-                  <option value="morning">Morning Shift</option>
-                  <option value="night">Night Shift</option>
-                </select>
-              </div>
-
-              {/* Action resets */}
-              <button 
-                onClick={() => { setSearchQuery(""); setSelectedDept(""); setSelectedStatus(""); setSelectedShiftFilter(""); }}
-                className="py-2.5 px-5 border border-border-card rounded-[12px] hover:bg-bg-base text-xs font-bold text-text-sec cursor-pointer"
-              >
-                Clear Filters
-              </button>
-            </div>
-          </div>
-
-          {/* Directory list card */}
-          <div className="bg-bg-card border border-border-card rounded-[24px] p-6 shadow-sm">
-            {filteredProfiles.length === 0 ? (
-              <div className="text-center py-16 text-text-mut text-sm">No registered staff users found.</div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="border-b border-border-card text-[10px] font-bold text-text-mut uppercase tracking-wider">
-                      <th className="pb-3 pr-4">Employee</th>
-                      <th className="pb-3 px-4">Department</th>
-                      <th className="pb-3 px-4">Role</th>
-                      <th className="pb-3 px-4">Attendance</th>
-                      <th className="pb-3 px-4">Status</th>
-                      <th className="pb-3 pl-4 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border-card text-xs text-text-main font-semibold">
-                    {paginatedProfiles.map((user) => {
-                      const userToday = getLiveUserStatus(user);
-                      const isWorking = userToday.status === "checked-in" || userToday.status === "on-break";
-                      
-                      // Calculate mock/dynamic attendance rate bar
-                      const userLogsCount = logs.filter(l => l.userId === user.uid).length;
-                      const attendanceRate = user.role === "admin" ? 100 : Math.min(100, Math.max(65, 80 + userLogsCount * 3));
-
-                      return (
-                        <tr key={user.uid} className="hover:bg-bg-base/30">
-                          <td 
-                            className="py-3.5 pr-4 flex items-center gap-3 cursor-pointer hover:bg-bg-base/50 rounded-lg transition-colors"
-                            onClick={() => { setSelectedUser(user); setShowDetailModal(true); }}
-                            title="View Details"
-                          >
-                            <div className="w-8 h-8 rounded-full bg-brand-primary/15 text-brand-primary border border-brand-primary/30 flex items-center justify-center font-extrabold text-xs uppercase shadow-sm flex-shrink-0 overflow-hidden">{user.avatar ? <img src={user.avatar} alt={user.name} className="w-full h-full object-cover" /> : (user.name ? getInitials(user.name) : "U")}</div>
-                            <div className="flex flex-col text-left">
-                              <span className="font-extrabold text-text-main hover:text-brand-primary transition-colors">{user.name}</span>
-                              <span className="text-[10px] text-text-mut font-semibold mt-0.5">{user.email}</span>
-                            </div>
-                          </td>
-                          <td className="py-3.5 px-4 text-text-sec">{user.department || "—"}</td>
-                          <td className="py-3.5 px-4 text-text-sec capitalize">{user.role}</td>
-                          <td className="py-3.5 px-4">
-                            <div className="flex items-center gap-3 min-w-[120px]">
-                              <div className="w-full bg-slate-200 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
-                                <div 
-                                  className={`h-full rounded-full ${attendanceRate > 85 ? "bg-brand-success" : "bg-brand-warning"}`} 
-                                  style={{ width: `${attendanceRate}%` }}
-                                />
-                              </div>
-                              <span className="text-[10px] font-bold text-text-main whitespace-nowrap">{attendanceRate}%</span>
-                            </div>
-                          </td>
-                          <td className="py-3.5 px-4">
-                            {user.role === "admin" ? (
-                              <span className="bg-brand-primary/10 text-brand-primary border border-brand-primary/20 text-[9px] px-2 py-0.5 rounded-full font-bold uppercase">
-                                admin
-                              </span>
-                            ) : user.status === "inactive" ? (
-                              <button onClick={(e) => handleToggleUserStatus(user, e)} className="bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white border border-red-500/20 text-[9px] px-2 py-0.5 rounded-full font-bold uppercase transition-colors cursor-pointer" title="Click to activate user">
-                                inactive
-                              </button>
-                            ) : isWorking ? (
-                              <button onClick={(e) => handleToggleUserStatus(user, e)} className="bg-emerald-500/10 text-emerald-500 hover:bg-red-500 hover:text-white border border-emerald-500/20 text-[9px] px-2 py-0.5 rounded-full font-bold uppercase transition-colors cursor-pointer" title="Click to deactivate user">
-                                active
-                              </button>
-                            ) : (
-                              <button onClick={(e) => handleToggleUserStatus(user, e)} className="bg-amber-500/10 text-amber-500 hover:bg-red-500 hover:text-white border border-amber-500/20 text-[9px] px-2 py-0.5 rounded-full font-bold uppercase transition-colors cursor-pointer" title="Click to deactivate user">
-                                offline
-                              </button>
-                            )}
-                          </td>
-                          <td className="py-3.5 pl-4 text-right">
-                            <div className="flex gap-2 justify-end">
-                              <button 
-                                onClick={() => {
-                                  setSelectedUser(user);
-                                  setShowDetailModal(true);
-                                }} 
-                                className="w-7 h-7 flex items-center justify-center border border-border-card rounded-[8px] bg-bg-card hover:bg-bg-base text-text-sec hover:text-brand-primary transition-colors cursor-pointer" 
-                                title="View User Details"
-                              >
-                                <Eye size={13} />
-                              </button>
-                              {(isAdminUser || can("update", "EmployeeManagement")) && (
-                                <button 
-                                  onClick={() => {
-                                    const uid = user.uid || user.id;
-                                    setSearchParams({ tab: "biometrics", userId: uid });
-                                  }} 
-                                  className="w-7 h-7 flex items-center justify-center border border-border-card rounded-[8px] bg-bg-card hover:bg-bg-base text-text-sec hover:text-brand-primary hover:border-brand-primary/30 transition-colors cursor-pointer" 
-                                  title="Face Biometrics / Enroll Face"
-                                >
-                                  <Camera size={13} />
-                                </button>
-                              )}
-                              {can("update", "EmployeeManagement") && (
-                                <button 
-                                  onClick={() => openEditModal(user)} 
-                                  className="w-7 h-7 flex items-center justify-center border border-border-card rounded-[8px] bg-bg-card hover:bg-bg-base text-text-sec hover:text-brand-primary transition-colors cursor-pointer" 
-                                  title="Edit User"
-                                >
-                                  <Edit size={13} />
-                                </button>
-                              )}
-                              <button 
-                                onClick={() => exportSingleUserExcel(user)} 
-                                className="w-7 h-7 flex items-center justify-center border border-border-card rounded-[8px] bg-bg-card hover:bg-bg-base text-text-sec hover:text-emerald-500 hover:border-emerald-500/30 transition-colors cursor-pointer" 
-                                title="Download Excel Report"
-                              >
-                                <Download size={13} />
-                              </button>
-                              <button 
-                                onClick={() => exportSingleUserPDF(user)} 
-                                className="w-7 h-7 flex items-center justify-center border border-border-card rounded-[8px] bg-bg-card hover:bg-bg-base text-text-sec hover:text-red-500 hover:border-red-500/30 transition-colors cursor-pointer" 
-                                title="Download PDF Report"
-                              >
-                                <FileText size={13} />
-                              </button>
-                              {can("update", "EmployeeManagement") && user.role !== "admin" && (
-                                <button
-                                  onClick={async () => {
-                                    if (window.confirm(`Are you sure you want to change the status of ${user.name} to ${user.status === 'inactive' ? 'Active' : 'Inactive'}?`)) {
-                                      try {
-                                        await updateUserRecord(
-                                          user.uid, user.name, user.department, user.programType,
-                                          user.shiftStart, user.shiftEnd, user.annualLeaves, user.sickLeaves, user.casualLeaves,
-                                          user.avatar, user.dob, user.joiningDate, user.projects, user.tasks, user.jobType, user.designation, user.isProjectManager, user.employeeId,
-                                          { status: user.status === 'inactive' ? 'active' : 'inactive' }
-                                        );
-                                        showToast(`${user.name} is now ${user.status === 'inactive' ? 'Active' : 'Inactive'}.`, "success");
-                                      } catch (err) {
-                                        showToast("Failed to update status", "error");
-                                      }
-                                    }
-                                  }}
-                                  className={`w-7 h-7 flex items-center justify-center border border-border-card rounded-[8px] bg-bg-card hover:bg-bg-base transition-colors cursor-pointer ${user.status === 'inactive' ? 'text-red-500 hover:text-emerald-500' : 'text-text-sec hover:text-red-500'}`}
-                                  title={user.status === "inactive" ? "Mark as Active" : "Mark as Inactive"}
-                                >
-                                  {user.status === "inactive" ? <UserCheck size={13} /> : <UserX size={13} />}
-                                </button>
-                              )}
-                              {user.role !== "admin" && can("delete", "EmployeeManagement") && (
-                                <button 
-                                  onClick={() => openDeleteConfirm(user)} 
-                                  className="w-7 h-7 flex items-center justify-center border border-red-500/20 rounded-[8px] bg-red-500/5 hover:bg-red-500 text-red-500 hover:text-white transition-colors cursor-pointer" 
-                                  title="Delete User"
-                                >
-                                  <Trash2 size={13} />
-                                </button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            {filteredProfiles.length > 10 && (
-              <div className="flex justify-between items-center mt-6 pt-4 border-t border-border-card text-xs flex-wrap gap-4">
-                <div className="flex items-center gap-4">
-                  <span className="text-text-mut font-semibold">
-                    Showing {usersStartIndex + 1} to {Math.min(filteredProfiles.length, usersStartIndex + rowsPerPage)} of {filteredProfiles.length} entries
-                  </span>
-                  <select 
-                    value={rowsPerPage} 
-                    onChange={(e) => {
-                      setRowsPerPage(Number(e.target.value));
-                      setLivePage(1); setUsersPage(1); setLeavesPendingPage(1); setRegsPendingPage(1); setHistoryPage(1); setAssetsPage(1);
-                    }}
-                    className="px-2 py-1 bg-bg-card border border-border-card rounded-[6px] text-xs font-bold text-text-sec cursor-pointer outline-none focus:border-brand-primary"
+              <div className="flex gap-4 items-end flex-wrap w-full md:w-auto">
+                {can("create", "EmployeeManagement") && (
+                  <button
+                    onClick={() => setShowAddModal(true)}
+                    className="py-3 px-5 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-[12px] flex items-center gap-2 shadow-md shadow-brand-primary/10 cursor-pointer"
                   >
-                    <option value={10}>10 / page</option>
-                    <option value={20}>20 / page</option>
-                    <option value={50}>50 / page</option>
-                    <option value={100}>100 / page</option>
+                    <UserPlus size={16} />
+                    <span>Add Employee</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Directory Stats cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+              <div className="bg-bg-card border border-border-card rounded-[20px] p-5 flex items-center justify-between shadow-sm">
+                <div>
+                  <span className="text-[10px] font-bold text-text-mut uppercase tracking-wider block">TOTAL EMPLOYEES</span>
+                  <span className="text-3xl font-extrabold text-text-main block mt-1.5">{totalRegistered}</span>
+                </div>
+                <span className="bg-emerald-500/10 text-emerald-500 px-2 py-0.5 rounded-full text-[9px] font-bold">Total</span>
+              </div>
+
+              <div className="bg-bg-card border border-border-card rounded-[20px] p-5 flex items-center justify-between shadow-sm">
+                <div>
+                  <span className="text-[10px] font-bold text-text-mut uppercase tracking-wider block">PRESENT TODAY</span>
+                  <span className="text-3xl font-extrabold text-text-main block mt-1.5">{presentCount}</span>
+                </div>
+                <span className="bg-brand-primary/10 text-brand-primary px-2 py-0.5 rounded-full text-[9px] font-bold">{Math.round((presentCount / (totalRegistered || 1)) * 100)}% Active</span>
+              </div>
+
+              <div className="bg-bg-card border border-border-card rounded-[20px] p-5 flex items-center justify-between shadow-sm">
+                <div>
+                  <span className="text-[10px] font-bold text-text-mut uppercase tracking-wider block">LATE ARRIVALS</span>
+                  <span className="text-3xl font-extrabold text-text-main block mt-1.5">{lateArrivalsCount}</span>
+                </div>
+                <span className="bg-amber-500/10 text-amber-500 px-2 py-0.5 rounded-full text-[9px] font-bold">{Math.round((lateArrivalsCount / (presentCount || 1)) * 100)}% Late</span>
+              </div>
+
+              <div className="bg-bg-card border border-border-card rounded-[20px] p-5 flex items-center justify-between shadow-sm">
+                <div>
+                  <span className="text-[10px] font-bold text-text-mut uppercase tracking-wider block">OFFLINE</span>
+                  <span className="text-3xl font-extrabold text-text-main block mt-1.5">{absentCount}</span>
+                </div>
+                <span className="bg-slate-200 dark:bg-slate-800 text-text-sec px-2 py-0.5 rounded-full text-[9px] font-bold">{Math.round((absentCount / (totalRegistered || 1)) * 100)}% Offline</span>
+              </div>
+            </div>
+
+            {/* Directory Filters */}
+            <div className="bg-bg-card border border-border-card rounded-[24px] p-6 shadow-sm">
+              <div className="flex flex-col lg:flex-row gap-4 items-stretch lg:items-end">
+                {/* Search box */}
+                <div className="flex flex-col gap-1.5 flex-grow">
+                  <label className="text-[10px] font-bold text-text-mut uppercase tracking-wider" htmlFor="search-input">Search Profile</label>
+                  <div className="relative">
+                    <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-text-mut" />
+                    <input
+                      id="search-input"
+                      type="text"
+                      className="w-full pl-10 pr-4 py-2.5 border border-border-card rounded-[12px] bg-bg-base/40 text-xs text-text-main outline-none focus:bg-bg-card focus:border-brand-primary transition-all placeholder-text-mut"
+                      placeholder="Filter by name, email, or role..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                {/* Department drop down */}
+                <div className="flex flex-col gap-1.5 min-w-[200px]">
+                  <label className="text-[10px] font-bold text-text-mut uppercase tracking-wider" htmlFor="dept-filter">Department</label>
+                  <select
+                    id="dept-filter"
+                    className="w-full px-4 py-2.5 border border-border-card rounded-[12px] bg-bg-base/40 text-xs text-text-main outline-none focus:bg-bg-card focus:border-brand-primary transition-all appearance-none"
+                    value={selectedDept}
+                    onChange={(e) => setSelectedDept(e.target.value)}
+                  >
+                    <option value="">All Departments</option>
+                    {departments.map((dept, idx) => (
+                      <option key={idx} value={dept}>{dept}</option>
+                    ))}
                   </select>
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    onClick={() => setUsersPage(prev => Math.max(1, prev - 1))}
-                    disabled={usersPage === 1}
-                    className="px-3 py-1.5 border border-border-card rounded-[8px] bg-bg-card hover:bg-bg-base text-text-sec disabled:opacity-40 disabled:hover:bg-bg-card cursor-pointer font-bold transition-all"
+
+                {/* Status */}
+                <div className="flex flex-col gap-1.5 min-w-[150px]">
+                  <label className="text-[10px] font-bold text-text-mut uppercase tracking-wider" htmlFor="status-filter">Status</label>
+                  <select
+                    id="status-filter"
+                    className="w-full px-4 py-2.5 border border-border-card rounded-[12px] bg-bg-base/40 text-xs text-text-main outline-none focus:bg-bg-card focus:border-brand-primary transition-all appearance-none"
+                    value={selectedStatus}
+                    onChange={(e) => setSelectedStatus(e.target.value)}
                   >
-                    Prev
-                  </button>
-                  {Array.from({ length: usersTotalPages }, (_, i) => i + 1).map((p) => {
-                    if (usersTotalPages > 5 && p !== 1 && p !== usersTotalPages && Math.abs(p - usersPage) > 1) {
-                      if (p === 2 || p === usersTotalPages - 1) {
-                        return <span key={p} className="px-1 text-text-mut font-bold">...</span>;
-                      }
-                      return null;
-                    }
-                    return (
-                      <button
-                        key={p}
-                        onClick={() => setUsersPage(p)}
-                        className={`w-8 h-8 rounded-[8px] border transition-all cursor-pointer font-bold ${
-                          usersPage === p
-                            ? "bg-brand-primary border-brand-primary text-white"
-                            : "border-border-card bg-bg-card text-text-sec hover:bg-bg-base"
-                        }`}
-                      >
-                        {p}
-                      </button>
-                    );
-                  })}
-                  <button
-                    onClick={() => setUsersPage(prev => Math.min(usersTotalPages, prev + 1))}
-                    disabled={usersPage === usersTotalPages}
-                    className="px-3 py-1.5 border border-border-card rounded-[8px] bg-bg-card hover:bg-bg-base text-text-sec disabled:opacity-40 disabled:hover:bg-bg-card cursor-pointer font-bold transition-all"
-                  >
-                    Next
-                  </button>
+                    <option value="">All Status</option>
+                    <option value="active">Active</option>
+                    <option value="offline">Offline</option>
+                  </select>
                 </div>
+
+                {/* Shift */}
+                <div className="flex flex-col gap-1.5 min-w-[150px]">
+                  <label className="text-[10px] font-bold text-text-mut uppercase tracking-wider" htmlFor="shift-filter">Shift</label>
+                  <select
+                    id="shift-filter"
+                    className="w-full px-4 py-2.5 border border-border-card rounded-[12px] bg-bg-base/40 text-xs text-text-main outline-none focus:bg-bg-card focus:border-brand-primary transition-all appearance-none"
+                    value={selectedShiftFilter}
+                    onChange={(e) => setSelectedShiftFilter(e.target.value)}
+                  >
+                    <option value="">All Shifts</option>
+                    <option value="morning">Morning Shift</option>
+                    <option value="night">Night Shift</option>
+                  </select>
+                </div>
+
+                {/* Action resets */}
+                <button
+                  onClick={() => { setSearchQuery(""); setSelectedDept(""); setSelectedStatus(""); setSelectedShiftFilter(""); }}
+                  className="py-2.5 px-5 border border-border-card rounded-[12px] hover:bg-bg-base text-xs font-bold text-text-sec cursor-pointer"
+                >
+                  Clear Filters
+                </button>
               </div>
-            )}
-          </div>
-        </>
+            </div>
+
+            {/* Directory list card */}
+            <div className="bg-bg-card border border-border-card rounded-[24px] p-6 shadow-sm">
+              {filteredProfiles.length === 0 ? (
+                <div className="text-center py-16 text-text-mut text-sm">No registered staff users found.</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-border-card text-[10px] font-bold text-text-mut uppercase tracking-wider">
+                        <th className="pb-3 pr-4">Employee</th>
+                        <th className="pb-3 px-4">Department</th>
+                        <th className="pb-3 px-4">Role</th>
+                        <th className="pb-3 px-4">Attendance</th>
+                        <th className="pb-3 px-4">Status</th>
+                        <th className="pb-3 pl-4 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border-card text-xs text-text-main font-semibold">
+                      {paginatedProfiles.map((user) => {
+                        const userToday = getLiveUserStatus(user);
+                        const isWorking = userToday.status === "checked-in" || userToday.status === "on-break";
+
+                        // Calculate mock/dynamic attendance rate bar
+                        const userLogsCount = logs.filter(l => l.userId === user.uid).length;
+                        const attendanceRate = user.role === "admin" ? 100 : Math.min(100, Math.max(65, 80 + userLogsCount * 3));
+
+                        return (
+                          <tr key={user.uid} className="hover:bg-bg-base/30">
+                            <td
+                              className="py-3.5 pr-4 flex items-center gap-3 cursor-pointer hover:bg-bg-base/50 rounded-lg transition-colors"
+                              onClick={() => { setSelectedUser(user); setShowDetailModal(true); }}
+                              title="View Details"
+                            >
+                              <div className="w-8 h-8 rounded-full bg-brand-primary/15 text-brand-primary border border-brand-primary/30 flex items-center justify-center font-extrabold text-xs uppercase shadow-sm flex-shrink-0 overflow-hidden">{user.avatar ? <img src={user.avatar} alt={user.name} className="w-full h-full object-cover" /> : (user.name ? getInitials(user.name) : "U")}</div>
+                              <div className="flex flex-col text-left">
+                                <span className="font-extrabold text-text-main hover:text-brand-primary transition-colors">{user.name}</span>
+                                <span className="text-[10px] text-text-mut font-semibold mt-0.5">{user.email}</span>
+                              </div>
+                            </td>
+                            <td className="py-3.5 px-4 text-text-sec">{user.department || "—"}</td>
+                            <td className="py-3.5 px-4 text-text-sec capitalize">{user.role}</td>
+                            <td className="py-3.5 px-4">
+                              <div className="flex items-center gap-3 min-w-[120px]">
+                                <div className="w-full bg-slate-200 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+                                  <div
+                                    className={`h-full rounded-full ${attendanceRate > 85 ? "bg-brand-success" : "bg-brand-warning"}`}
+                                    style={{ width: `${attendanceRate}%` }}
+                                  />
+                                </div>
+                                <span className="text-[10px] font-bold text-text-main whitespace-nowrap">{attendanceRate}%</span>
+                              </div>
+                            </td>
+                            <td className="py-3.5 px-4">
+                              {user.role === "admin" ? (
+                                <span className="bg-brand-primary/10 text-brand-primary border border-brand-primary/20 text-[9px] px-2 py-0.5 rounded-full font-bold uppercase">
+                                  admin
+                                </span>
+                              ) : user.status === "inactive" ? (
+                                <button onClick={(e) => handleToggleUserStatus(user, e)} className="bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white border border-red-500/20 text-[9px] px-2 py-0.5 rounded-full font-bold uppercase transition-colors cursor-pointer" title="Click to activate user">
+                                  inactive
+                                </button>
+                              ) : isWorking ? (
+                                <button onClick={(e) => handleToggleUserStatus(user, e)} className="bg-emerald-500/10 text-emerald-500 hover:bg-red-500 hover:text-white border border-emerald-500/20 text-[9px] px-2 py-0.5 rounded-full font-bold uppercase transition-colors cursor-pointer" title="Click to deactivate user">
+                                  active
+                                </button>
+                              ) : (
+                                <button onClick={(e) => handleToggleUserStatus(user, e)} className="bg-amber-500/10 text-amber-500 hover:bg-red-500 hover:text-white border border-amber-500/20 text-[9px] px-2 py-0.5 rounded-full font-bold uppercase transition-colors cursor-pointer" title="Click to deactivate user">
+                                  offline
+                                </button>
+                              )}
+                            </td>
+                            <td className="py-3.5 pl-4 text-right">
+                              <div className="flex gap-2 justify-end">
+                                <button
+                                  onClick={() => {
+                                    setSelectedUser(user);
+                                    setShowDetailModal(true);
+                                  }}
+                                  className="w-7 h-7 flex items-center justify-center border border-border-card rounded-[8px] bg-bg-card hover:bg-bg-base text-text-sec hover:text-brand-primary transition-colors cursor-pointer"
+                                  title="View User Details"
+                                >
+                                  <Eye size={13} />
+                                </button>
+                                {(isAdminUser || can("update", "EmployeeManagement")) && (
+                                  <button
+                                    onClick={() => {
+                                      const uid = user.uid || user.id;
+                                      setSearchParams({ tab: "biometrics", userId: uid });
+                                    }}
+                                    className="w-7 h-7 flex items-center justify-center border border-border-card rounded-[8px] bg-bg-card hover:bg-bg-base text-text-sec hover:text-brand-primary hover:border-brand-primary/30 transition-colors cursor-pointer"
+                                    title="Face Biometrics / Enroll Face"
+                                  >
+                                    <Camera size={13} />
+                                  </button>
+                                )}
+                                {can("update", "EmployeeManagement") && (
+                                  <button
+                                    onClick={() => openEditModal(user)}
+                                    className="w-7 h-7 flex items-center justify-center border border-border-card rounded-[8px] bg-bg-card hover:bg-bg-base text-text-sec hover:text-brand-primary transition-colors cursor-pointer"
+                                    title="Edit User"
+                                  >
+                                    <Edit size={13} />
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => exportSingleUserExcel(user)}
+                                  className="w-7 h-7 flex items-center justify-center border border-border-card rounded-[8px] bg-bg-card hover:bg-bg-base text-text-sec hover:text-emerald-500 hover:border-emerald-500/30 transition-colors cursor-pointer"
+                                  title="Download Excel Report"
+                                >
+                                  <Download size={13} />
+                                </button>
+                                <button
+                                  onClick={() => exportSingleUserPDF(user)}
+                                  className="w-7 h-7 flex items-center justify-center border border-border-card rounded-[8px] bg-bg-card hover:bg-bg-base text-text-sec hover:text-red-500 hover:border-red-500/30 transition-colors cursor-pointer"
+                                  title="Download PDF Report"
+                                >
+                                  <FileText size={13} />
+                                </button>
+                                {can("update", "EmployeeManagement") && user.role !== "admin" && (
+                                  <button
+                                    onClick={async () => {
+                                      if (window.confirm(`Are you sure you want to change the status of ${user.name} to ${user.status === 'inactive' ? 'Active' : 'Inactive'}?`)) {
+                                        try {
+                                          await updateUserRecord(
+                                            user.uid, user.name, user.department, user.programType,
+                                            user.shiftStart, user.shiftEnd, user.annualLeaves, user.sickLeaves, user.casualLeaves,
+                                            user.avatar, user.dob, user.joiningDate, user.projects, user.tasks, user.jobType, user.designation, user.isProjectManager, user.employeeId,
+                                            { status: user.status === 'inactive' ? 'active' : 'inactive' }
+                                          );
+                                          showToast(`${user.name} is now ${user.status === 'inactive' ? 'Active' : 'Inactive'}.`, "success");
+                                        } catch (err) {
+                                          showToast("Failed to update status", "error");
+                                        }
+                                      }
+                                    }}
+                                    className={`w-7 h-7 flex items-center justify-center border border-border-card rounded-[8px] bg-bg-card hover:bg-bg-base transition-colors cursor-pointer ${user.status === 'inactive' ? 'text-red-500 hover:text-emerald-500' : 'text-text-sec hover:text-red-500'}`}
+                                    title={user.status === "inactive" ? "Mark as Active" : "Mark as Inactive"}
+                                  >
+                                    {user.status === "inactive" ? <UserCheck size={13} /> : <UserX size={13} />}
+                                  </button>
+                                )}
+                                {user.role !== "admin" && can("delete", "EmployeeManagement") && (
+                                  <button
+                                    onClick={() => openDeleteConfirm(user)}
+                                    className="w-7 h-7 flex items-center justify-center border border-red-500/20 rounded-[8px] bg-red-500/5 hover:bg-red-500 text-red-500 hover:text-white transition-colors cursor-pointer"
+                                    title="Delete User"
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {filteredProfiles.length > 10 && (
+                <div className="flex justify-between items-center mt-6 pt-4 border-t border-border-card text-xs flex-wrap gap-4">
+                  <div className="flex items-center gap-4">
+                    <span className="text-text-mut font-semibold">
+                      Showing {usersStartIndex + 1} to {Math.min(filteredProfiles.length, usersStartIndex + rowsPerPage)} of {filteredProfiles.length} entries
+                    </span>
+                    <select
+                      value={rowsPerPage}
+                      onChange={(e) => {
+                        setRowsPerPage(Number(e.target.value));
+                        setLivePage(1); setUsersPage(1); setLeavesPendingPage(1); setRegsPendingPage(1); setHistoryPage(1); setAssetsPage(1);
+                      }}
+                      className="px-2 py-1 bg-bg-card border border-border-card rounded-[6px] text-xs font-bold text-text-sec cursor-pointer outline-none focus:border-brand-primary"
+                    >
+                      <option value={10}>10 / page</option>
+                      <option value={20}>20 / page</option>
+                      <option value={50}>50 / page</option>
+                      <option value={100}>100 / page</option>
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => setUsersPage(prev => Math.max(1, prev - 1))}
+                      disabled={usersPage === 1}
+                      className="px-3 py-1.5 border border-border-card rounded-[8px] bg-bg-card hover:bg-bg-base text-text-sec disabled:opacity-40 disabled:hover:bg-bg-card cursor-pointer font-bold transition-all"
+                    >
+                      Prev
+                    </button>
+                    {Array.from({ length: usersTotalPages }, (_, i) => i + 1).map((p) => {
+                      if (usersTotalPages > 5 && p !== 1 && p !== usersTotalPages && Math.abs(p - usersPage) > 1) {
+                        if (p === 2 || p === usersTotalPages - 1) {
+                          return <span key={p} className="px-1 text-text-mut font-bold">...</span>;
+                        }
+                        return null;
+                      }
+                      return (
+                        <button
+                          key={p}
+                          onClick={() => setUsersPage(p)}
+                          className={`w-8 h-8 rounded-[8px] border transition-all cursor-pointer font-bold ${usersPage === p
+                              ? "bg-brand-primary border-brand-primary text-white"
+                              : "border-border-card bg-bg-card text-text-sec hover:bg-bg-base"
+                            }`}
+                        >
+                          {p}
+                        </button>
+                      );
+                    })}
+                    <button
+                      onClick={() => setUsersPage(prev => Math.min(usersTotalPages, prev + 1))}
+                      disabled={usersPage === usersTotalPages}
+                      className="px-3 py-1.5 border border-border-card rounded-[8px] bg-bg-card hover:bg-bg-base text-text-sec disabled:opacity-40 disabled:hover:bg-bg-card cursor-pointer font-bold transition-all"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </>
         );
       })()}
 
@@ -3258,7 +3231,7 @@ export default function AdminDashboard() {
       {(activeTab === "logs" && (isAdminUser || can("read", "LeaveApprovals") || can("read", "Regularization"))) && (() => {
         const pendingCount = leaveRequests.length + regularizationRequests.length;
         const approvedThisMonth = allRequests.filter(r => r.status === "approved").length;
-        
+
         let totalApprovedDays = 0;
         allRequests.filter(r => r.status === "approved").forEach(r => {
           const dVal = parseInt(r.duration);
@@ -3292,20 +3265,20 @@ export default function AdminDashboard() {
                 <h1 className="text-2xl sm:text-3xl font-extrabold text-text-main tracking-tight">Approvals Center</h1>
                 <p className="text-sm text-text-sec mt-1">Review and manage time-off and regularization requests from your direct reports.</p>
               </div>
-              
+
               <div className="flex gap-2">
-                <button 
-                  onClick={handleExportExcel} 
+                <button
+                  onClick={handleExportExcel}
                   className="flex items-center gap-1.5 py-2.5 px-4 border border-emerald-500/30 text-xs font-bold rounded-[12px] bg-emerald-500/5 hover:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 transition-colors cursor-pointer"
                 >
-                  <Download size={14} /> 
+                  <Download size={14} />
                   <span>Excel</span>
                 </button>
-                <button 
-                  onClick={handleExportPDF} 
+                <button
+                  onClick={handleExportPDF}
                   className="flex items-center gap-1.5 py-2.5 px-4 border border-red-500/30 text-xs font-bold rounded-[12px] bg-red-500/5 hover:bg-red-500/10 text-red-600 dark:text-red-400 transition-colors cursor-pointer"
                 >
-                  <FileText size={14} /> 
+                  <FileText size={14} />
                   <span>PDF</span>
                 </button>
               </div>
@@ -3369,31 +3342,28 @@ export default function AdminDashboard() {
             <div className="flex border-b border-border-card mb-6 overflow-x-auto whitespace-nowrap scrollbar-hide">
               <button
                 onClick={() => setApprovalsSubTab("leaves")}
-                className={`py-3 px-6 text-sm font-bold border-b-2 transition-all cursor-pointer ${
-                  approvalsSubTab === "leaves"
+                className={`py-3 px-6 text-sm font-bold border-b-2 transition-all cursor-pointer ${approvalsSubTab === "leaves"
                     ? "border-brand-primary text-brand-primary"
                     : "border-transparent text-text-sec hover:text-text-main"
-                }`}
+                  }`}
               >
                 Leave Requests ({leaveRequests.length})
               </button>
               <button
                 onClick={() => setApprovalsSubTab("regularization")}
-                className={`py-3 px-6 text-sm font-bold border-b-2 transition-all cursor-pointer ${
-                  approvalsSubTab === "regularization"
+                className={`py-3 px-6 text-sm font-bold border-b-2 transition-all cursor-pointer ${approvalsSubTab === "regularization"
                     ? "border-brand-primary text-brand-primary"
                     : "border-transparent text-text-sec hover:text-text-main"
-                }`}
+                  }`}
               >
                 Regularization Requests ({regularizationRequests.length})
               </button>
               <button
                 onClick={() => setApprovalsSubTab("history")}
-                className={`py-3 px-6 text-sm font-bold border-b-2 transition-all cursor-pointer ${
-                  approvalsSubTab === "history"
+                className={`py-3 px-6 text-sm font-bold border-b-2 transition-all cursor-pointer ${approvalsSubTab === "history"
                     ? "border-brand-primary text-brand-primary"
                     : "border-transparent text-text-sec hover:text-text-main"
-                }`}
+                  }`}
               >
                 Request History ({allRequests.filter(r => r.status !== "pending").length + allRegularizationRequests.filter(r => r.status !== "pending").length})
               </button>
@@ -3430,10 +3400,10 @@ export default function AdminDashboard() {
                         <tbody className="divide-y divide-border-card text-xs text-text-main font-semibold">
                           {paginatedPendingLeaves.map((req) => {
                             const isSelected = req.id === selectedRequestId;
-                            
+
                             const startF = req.startDate ? new Date(req.startDate).toLocaleDateString([], { month: "short", day: "numeric" }) : "";
                             const endF = req.endDate ? new Date(req.endDate).toLocaleDateString([], { month: "short", day: "numeric" }) : "";
-                            
+
                             let typeBadge = "bg-brand-primary/10 text-brand-primary border border-brand-primary/20";
                             if (req.type === "Sick Leave") {
                               typeBadge = "bg-brand-danger/10 text-brand-danger border border-brand-danger/20";
@@ -3442,14 +3412,13 @@ export default function AdminDashboard() {
                             }
 
                             return (
-                              <tr 
-                                key={req.id} 
+                              <tr
+                                key={req.id}
                                 onClick={() => setSelectedRequestId(req.id)}
-                                className={`hover:bg-bg-base/30 cursor-pointer transition-all ${
-                                  isSelected ? "bg-brand-primary/5 border-l-4 border-brand-primary" : ""
-                                }`}
+                                className={`hover:bg-bg-base/30 cursor-pointer transition-all ${isSelected ? "bg-brand-primary/5 border-l-4 border-brand-primary" : ""
+                                  }`}
                               >
-                                <td 
+                                <td
                                   className="py-3.5 pr-4 flex items-center gap-3 cursor-pointer hover:bg-bg-base/50 rounded-lg transition-colors"
                                   onClick={(e) => {
                                     e.stopPropagation();
@@ -3496,8 +3465,8 @@ export default function AdminDashboard() {
                         <span className="text-text-mut font-semibold">
                           Showing {leavesPendingStartIndex + 1} to {Math.min(filteredLeaveRequests.length, leavesPendingStartIndex + rowsPerPage)} of {filteredLeaveRequests.length} entries
                         </span>
-                        <select 
-                          value={rowsPerPage} 
+                        <select
+                          value={rowsPerPage}
                           onChange={(e) => {
                             setRowsPerPage(Number(e.target.value));
                             setLivePage(1); setUsersPage(1); setLeavesPendingPage(1); setRegsPendingPage(1); setHistoryPage(1); setAssetsPage(1);
@@ -3529,11 +3498,10 @@ export default function AdminDashboard() {
                             <button
                               key={p}
                               onClick={() => setLeavesPendingPage(p)}
-                              className={`w-8 h-8 rounded-[8px] border transition-all cursor-pointer font-bold ${
-                                leavesPendingPage === p
+                              className={`w-8 h-8 rounded-[8px] border transition-all cursor-pointer font-bold ${leavesPendingPage === p
                                   ? "bg-brand-primary border-brand-primary text-white"
                                   : "border-border-card bg-bg-card text-text-sec hover:bg-bg-base"
-                              }`}
+                                }`}
                             >
                               {p}
                             </button>
@@ -3574,8 +3542,8 @@ export default function AdminDashboard() {
                             </div>
                             <span className="text-xs text-text-sec font-semibold mt-0.5 block">{selectedRequest.type} Request</span>
                             <span className="text-[10px] text-text-mut font-bold block mt-1">
-                              {selectedRequest.startDate && selectedRequest.endDate 
-                                ? `${new Date(selectedRequest.startDate).toLocaleDateString([], {month: 'short', day: 'numeric', year: 'numeric'})} - ${new Date(selectedRequest.endDate).toLocaleDateString([], {month: 'short', day: 'numeric', year: 'numeric'})}`
+                              {selectedRequest.startDate && selectedRequest.endDate
+                                ? `${new Date(selectedRequest.startDate).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })} - ${new Date(selectedRequest.endDate).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}`
                                 : "—"}
                             </span>
                           </div>
@@ -3595,8 +3563,8 @@ export default function AdminDashboard() {
                             <div className="p-2 bg-bg-card rounded-[10px] border border-border-card text-center">
                               <span className="text-[8px] font-bold text-text-mut uppercase block">Annual</span>
                               <span className="text-sm font-extrabold text-text-main mt-0.5 block">
-                                {users.find(u => u.uid === selectedRequest.userId)?.annualLeaves !== undefined 
-                                  ? users.find(u => u.uid === selectedRequest.userId).annualLeaves 
+                                {users.find(u => u.uid === selectedRequest.userId)?.annualLeaves !== undefined
+                                  ? users.find(u => u.uid === selectedRequest.userId).annualLeaves
                                   : 25}
                                 <span className="text-[8px] font-semibold text-text-sec">d</span>
                               </span>
@@ -3604,8 +3572,8 @@ export default function AdminDashboard() {
                             <div className="p-2 bg-bg-card rounded-[10px] border border-border-card text-center">
                               <span className="text-[8px] font-bold text-text-mut uppercase block">Sick</span>
                               <span className="text-sm font-extrabold text-text-main mt-0.5 block">
-                                {users.find(u => u.uid === selectedRequest.userId)?.sickLeaves !== undefined 
-                                  ? users.find(u => u.uid === selectedRequest.userId).sickLeaves 
+                                {users.find(u => u.uid === selectedRequest.userId)?.sickLeaves !== undefined
+                                  ? users.find(u => u.uid === selectedRequest.userId).sickLeaves
                                   : 10}
                                 <span className="text-[8px] font-semibold text-text-sec">d</span>
                               </span>
@@ -3613,8 +3581,8 @@ export default function AdminDashboard() {
                             <div className="p-2 bg-bg-card rounded-[10px] border border-border-card text-center">
                               <span className="text-[8px] font-bold text-text-mut uppercase block">Casual</span>
                               <span className="text-sm font-extrabold text-text-main mt-0.5 block">
-                                {users.find(u => u.uid === selectedRequest.userId)?.casualLeaves !== undefined 
-                                  ? users.find(u => u.uid === selectedRequest.userId).casualLeaves 
+                                {users.find(u => u.uid === selectedRequest.userId)?.casualLeaves !== undefined
+                                  ? users.find(u => u.uid === selectedRequest.userId).casualLeaves
                                   : 6}
                                 <span className="text-[8px] font-semibold text-text-sec">d</span>
                               </span>
@@ -3657,9 +3625,9 @@ export default function AdminDashboard() {
 
                         const otherOverlappingStaff = deptStaff.filter(u => {
                           if (u.uid === selectedRequest.userId) return false;
-                          return allRequests.some(req => 
-                            req.userId === u.uid && 
-                            req.status === "approved" && 
+                          return allRequests.some(req =>
+                            req.userId === u.uid &&
+                            req.status === "approved" &&
                             hasOverlap(req.startDate, req.endDate, selectedRequest.startDate, selectedRequest.endDate)
                           );
                         });
@@ -3670,8 +3638,8 @@ export default function AdminDashboard() {
                           <div className="bg-bg-card border border-border-card rounded-[24px] p-6 shadow-sm space-y-4">
                             <div className="flex items-center justify-between">
                               <h4 className="font-extrabold text-xs text-text-mut uppercase tracking-wider">
-                                TEAM AVAILABILITY: {selectedRequest.startDate && selectedRequest.endDate 
-                                  ? `${new Date(selectedRequest.startDate).toLocaleDateString([], {month: 'short', day: 'numeric'})} - ${new Date(selectedRequest.endDate).toLocaleDateString([], {month: 'short', day: 'numeric'})}`
+                                TEAM AVAILABILITY: {selectedRequest.startDate && selectedRequest.endDate
+                                  ? `${new Date(selectedRequest.startDate).toLocaleDateString([], { month: 'short', day: 'numeric' })} - ${new Date(selectedRequest.endDate).toLocaleDateString([], { month: 'short', day: 'numeric' })}`
                                   : "OCT 24 - OCT 28"}
                               </h4>
                             </div>
@@ -3679,7 +3647,7 @@ export default function AdminDashboard() {
                             <div className="space-y-4">
                               {deptStaff.map(u => {
                                 const isRequester = u.uid === selectedRequest.userId;
-                                
+
                                 if (isRequester) {
                                   return (
                                     <div key={u.uid} className="space-y-1">
@@ -3694,16 +3662,16 @@ export default function AdminDashboard() {
                                       </div>
                                       {selectedRequest.startDate && selectedRequest.endDate && (
                                         <span className="text-[9px] text-brand-primary font-semibold block">
-                                          Duration: {new Date(selectedRequest.startDate).toLocaleDateString([], {month: 'short', day: 'numeric'})} - {new Date(selectedRequest.endDate).toLocaleDateString([], {month: 'short', day: 'numeric'})} ({selectedRequest.duration})
+                                          Duration: {new Date(selectedRequest.startDate).toLocaleDateString([], { month: 'short', day: 'numeric' })} - {new Date(selectedRequest.endDate).toLocaleDateString([], { month: 'short', day: 'numeric' })} ({selectedRequest.duration})
                                         </span>
                                       )}
                                     </div>
                                   );
                                 }
 
-                                const overlappingLeaves = allRequests.filter(req => 
-                                  req.userId === u.uid && 
-                                  req.status === "approved" && 
+                                const overlappingLeaves = allRequests.filter(req =>
+                                  req.userId === u.uid &&
+                                  req.status === "approved" &&
                                   hasOverlap(req.startDate, req.endDate, selectedRequest.startDate, selectedRequest.endDate)
                                 );
 
@@ -3727,7 +3695,7 @@ export default function AdminDashboard() {
                                       </div>
                                       {oLeave.startDate && oLeave.endDate && (
                                         <span className="text-[9px] text-text-mut font-semibold block">
-                                          Duration: {new Date(oLeave.startDate).toLocaleDateString([], {month: 'short', day: 'numeric'})} - {new Date(oLeave.endDate).toLocaleDateString([], {month: 'short', day: 'numeric'})}
+                                          Duration: {new Date(oLeave.startDate).toLocaleDateString([], { month: 'short', day: 'numeric' })} - {new Date(oLeave.endDate).toLocaleDateString([], { month: 'short', day: 'numeric' })}
                                         </span>
                                       )}
                                     </div>
@@ -3796,14 +3764,13 @@ export default function AdminDashboard() {
                           {paginatedPendingRegs.map((req) => {
                             const isSelected = req.id === selectedRegRequestId;
                             return (
-                              <tr 
-                                key={req.id} 
+                              <tr
+                                key={req.id}
                                 onClick={() => setSelectedRegRequestId(req.id)}
-                                className={`hover:bg-bg-base/30 cursor-pointer transition-all ${
-                                  isSelected ? "bg-brand-primary/5 border-l-4 border-brand-primary" : ""
-                                }`}
+                                className={`hover:bg-bg-base/30 cursor-pointer transition-all ${isSelected ? "bg-brand-primary/5 border-l-4 border-brand-primary" : ""
+                                  }`}
                               >
-                                <td 
+                                <td
                                   className="py-3.5 pr-4 flex items-center gap-3 cursor-pointer hover:bg-bg-base/50 rounded-lg transition-colors"
                                   onClick={(e) => {
                                     e.stopPropagation();
@@ -3841,8 +3808,8 @@ export default function AdminDashboard() {
                         <span className="text-text-mut font-semibold">
                           Showing {regsPendingStartIndex + 1} to {Math.min(filteredRegRequests.length, regsPendingStartIndex + rowsPerPage)} of {filteredRegRequests.length} entries
                         </span>
-                        <select 
-                          value={rowsPerPage} 
+                        <select
+                          value={rowsPerPage}
                           onChange={(e) => {
                             setRowsPerPage(Number(e.target.value));
                             setLivePage(1); setUsersPage(1); setLeavesPendingPage(1); setRegsPendingPage(1); setHistoryPage(1); setAssetsPage(1);
@@ -3874,11 +3841,10 @@ export default function AdminDashboard() {
                             <button
                               key={p}
                               onClick={() => setRegsPendingPage(p)}
-                              className={`w-8 h-8 rounded-[8px] border transition-all cursor-pointer font-bold ${
-                                regsPendingPage === p
+                              className={`w-8 h-8 rounded-[8px] border transition-all cursor-pointer font-bold ${regsPendingPage === p
                                   ? "bg-brand-primary border-brand-primary text-white"
                                   : "border-border-card bg-bg-card text-text-sec hover:bg-bg-base"
-                              }`}
+                                }`}
                             >
                               {p}
                             </button>
@@ -4018,7 +3984,7 @@ export default function AdminDashboard() {
 
                           return (
                             <tr key={item.id} className="hover:bg-bg-base/30">
-                              <td 
+                              <td
                                 className="py-3.5 pr-4 flex items-center gap-3 cursor-pointer hover:bg-bg-base/50 rounded-lg transition-colors"
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -4069,8 +4035,8 @@ export default function AdminDashboard() {
                       <span className="text-text-mut font-semibold">
                         Showing {historyStartIndex + 1} to {Math.min(filteredHistory.length, historyStartIndex + rowsPerPage)} of {filteredHistory.length} entries
                       </span>
-                      <select 
-                        value={rowsPerPage} 
+                      <select
+                        value={rowsPerPage}
                         onChange={(e) => {
                           setRowsPerPage(Number(e.target.value));
                           setLivePage(1); setUsersPage(1); setLeavesPendingPage(1); setRegsPendingPage(1); setHistoryPage(1); setAssetsPage(1);
@@ -4102,11 +4068,10 @@ export default function AdminDashboard() {
                           <button
                             key={p}
                             onClick={() => setHistoryPage(p)}
-                            className={`w-8 h-8 rounded-[8px] border transition-all cursor-pointer font-bold ${
-                              historyPage === p
+                            className={`w-8 h-8 rounded-[8px] border transition-all cursor-pointer font-bold ${historyPage === p
                                 ? "bg-brand-primary border-brand-primary text-white"
                                 : "border-border-card bg-bg-card text-text-sec hover:bg-bg-base"
-                            }`}
+                              }`}
                           >
                             {p}
                           </button>
@@ -4133,7 +4098,7 @@ export default function AdminDashboard() {
         const dailyStats = getDailyAttendanceStats();
         const deptStats = getDeptAttendanceRates();
         const employeeStats = getEmployeeWorkingStats();
-        
+
         const maxDailyCount = Math.max(1, ...dailyStats.map(d => d.count));
         const maxHours = Math.max(8, ...employeeStats.map(e => e.avgHours));
 
@@ -4145,34 +4110,34 @@ export default function AdminDashboard() {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-              
+
               {/* Daily Attendance Level Bar Chart */}
               <div className="bg-bg-card border border-border-card rounded-[24px] p-6 shadow-sm">
                 <h4 className="font-extrabold text-base text-text-main mb-1.5 flex items-center gap-2">
-                  <Calendar size={18} className="text-brand-primary" /> 
+                  <Calendar size={18} className="text-brand-primary" />
                   <span>Daily Attendance Level (Last 7 Days)</span>
                 </h4>
                 <p className="text-[10px] text-text-mut font-semibold mb-6">Total number of unique employees checked-in per day</p>
-                
+
                 {/* Chart body */}
                 <div className="h-[200px] w-full pt-2">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={dailyStats} margin={{ top: 15, right: 0, left: -20, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" opacity={0.2} />
-                      <XAxis 
-                        dataKey="dateLabel" 
-                        axisLine={false} 
-                        tickLine={false} 
-                        tick={{ fontSize: 10, fill: '#64748b', fontWeight: 'bold' }} 
-                        dy={10} 
+                      <XAxis
+                        dataKey="dateLabel"
+                        axisLine={false}
+                        tickLine={false}
+                        tick={{ fontSize: 10, fill: '#64748b', fontWeight: 'bold' }}
+                        dy={10}
                       />
-                      <YAxis 
-                        axisLine={false} 
-                        tickLine={false} 
-                        tick={{ fontSize: 10, fill: '#64748b', fontWeight: 'bold' }} 
+                      <YAxis
+                        axisLine={false}
+                        tickLine={false}
+                        tick={{ fontSize: 10, fill: '#64748b', fontWeight: 'bold' }}
                         allowDecimals={false}
                       />
-                      <Tooltip 
+                      <Tooltip
                         cursor={{ fill: '#f1f5f9', opacity: 0.1 }}
                         contentStyle={{ backgroundColor: '#0f172a', border: 'none', borderRadius: '8px', color: '#fff', fontSize: '12px', fontWeight: 'bold' }}
                         itemStyle={{ color: '#fff' }}
@@ -4192,25 +4157,25 @@ export default function AdminDashboard() {
               {/* Department Attendance Rates */}
               <div className="bg-bg-card border border-border-card rounded-[24px] p-6 shadow-sm">
                 <h4 className="font-extrabold text-base text-text-main mb-1.5 flex items-center gap-2">
-                  <TrendingUp size={18} className="text-brand-success" /> 
+                  <TrendingUp size={18} className="text-brand-success" />
                   <span>Domain Attendance Rates (Today)</span>
                 </h4>
                 <p className="text-[10px] text-text-mut font-semibold mb-6">Percentage of checked-in staff out of registered domain members today</p>
-                
+
                 <div className="h-[200px] w-full">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={deptStats} layout="vertical" margin={{ top: 0, right: 30, left: 10, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#334155" opacity={0.1} />
                       <XAxis type="number" domain={[0, 100]} hide />
-                      <YAxis 
-                        dataKey="department" 
-                        type="category" 
-                        axisLine={false} 
-                        tickLine={false} 
-                        tick={{ fontSize: 11, fill: '#475569', fontWeight: 'bold' }} 
+                      <YAxis
+                        dataKey="department"
+                        type="category"
+                        axisLine={false}
+                        tickLine={false}
+                        tick={{ fontSize: 11, fill: '#475569', fontWeight: 'bold' }}
                         width={80}
                       />
-                      <Tooltip 
+                      <Tooltip
                         cursor={{ fill: '#f1f5f9', opacity: 0.1 }}
                         contentStyle={{ backgroundColor: '#0f172a', border: 'none', borderRadius: '8px', color: '#fff', fontSize: '12px', fontWeight: 'bold' }}
                         itemStyle={{ color: '#fff' }}
@@ -4227,11 +4192,11 @@ export default function AdminDashboard() {
                           else if (entry.rate < 80) fill = '#f59e0b'; // warning
                           return <Cell key={`cell-${index}`} fill={fill} />;
                         })}
-                        <LabelList 
-                          dataKey="rate" 
-                          position="right" 
-                          formatter={(value) => `${value}%`} 
-                          style={{ fontSize: '10px', fontWeight: 'bold', fill: '#64748b' }} 
+                        <LabelList
+                          dataKey="rate"
+                          position="right"
+                          formatter={(value) => `${value}%`}
+                          style={{ fontSize: '10px', fontWeight: 'bold', fill: '#64748b' }}
                         />
                       </Bar>
                     </BarChart>
@@ -4500,7 +4465,7 @@ export default function AdminDashboard() {
               {/* Published Paid Leaves List */}
               <div className="bg-bg-card border border-border-card rounded-[24px] p-6 shadow-sm">
                 <h3 className="font-extrabold text-base text-text-main tracking-tight mb-4">Published Paid Leaves</h3>
-                
+
                 {paidLeaves.length === 0 ? (
                   <div className="text-center py-8 text-text-mut text-xs font-bold font-semibold">No official paid leaves published yet.</div>
                 ) : (
@@ -4524,11 +4489,10 @@ export default function AdminDashboard() {
                             <button
                               type="button"
                               onClick={() => handleTogglePaidLeaveStatus(pl.id, pl.title, pl.status)}
-                              className={`text-[9px] font-black px-2.5 py-0.5 rounded-full uppercase transition-all cursor-pointer ${
-                                (pl.status || "active") === "active"
+                              className={`text-[9px] font-black px-2.5 py-0.5 rounded-full uppercase transition-all cursor-pointer ${(pl.status || "active") === "active"
                                   ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 hover:bg-emerald-500/20"
                                   : "bg-slate-500/10 text-slate-500 border border-slate-500/20 hover:bg-slate-500/20"
-                              }`}
+                                }`}
                               title="Click to toggle status"
                             >
                               {pl.status || "active"}
@@ -4562,14 +4526,14 @@ export default function AdminDashboard() {
           <div className="w-full max-w-[600px] bg-bg-card border border-border-card rounded-[24px] p-6 shadow-xl animate-scale-up relative overflow-hidden">
             <div className="flex items-center justify-between mb-4 border-b border-border-card pb-4">
               <h3 className="font-bold text-lg text-text-main">Employee Details</h3>
-              <button 
-                onClick={() => { setShowDetailModal(false); setSelectedUser(null); }} 
+              <button
+                onClick={() => { setShowDetailModal(false); setSelectedUser(null); }}
                 className="text-text-mut hover:text-text-main font-bold text-md cursor-pointer"
               >
                 <X size={18} />
               </button>
             </div>
-            
+
             <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-2 custom-scrollbar">
               <div className="flex items-center gap-4 bg-brand-primary/5 p-4 rounded-[16px] border border-brand-primary/10">
                 <div className="w-16 h-16 rounded-full bg-brand-primary/15 text-brand-primary border-2 border-brand-primary/30 flex items-center justify-center font-black text-2xl uppercase shadow-md flex-shrink-0 overflow-hidden">{selectedUser.avatar ? <img src={selectedUser.avatar} alt={selectedUser.name} className="w-full h-full object-cover" /> : (selectedUser.name ? getInitials(selectedUser.name) : "U")}</div>
@@ -4627,7 +4591,7 @@ export default function AdminDashboard() {
                     {selectedUser.tasks?.filter(t => t.completed).length || 0} / {selectedUser.tasks?.length || 0} Completed
                   </span>
                 </div>
-                
+
                 <div className="space-y-2">
                   {!selectedUser.tasks || selectedUser.tasks.length === 0 ? (
                     <p className="text-[10px] text-text-mut italic">No tasks assigned to this employee yet.</p>
@@ -4654,31 +4618,31 @@ export default function AdminDashboard() {
                     {logs.filter(l => l.uid === selectedUser.uid).length} Records
                   </span>
                 </div>
-                
+
                 <div className="space-y-2 max-h-[200px] overflow-y-auto custom-scrollbar pr-2">
                   {logs.filter(l => l.uid === selectedUser.uid).length === 0 ? (
                     <p className="text-[10px] text-text-mut italic">No attendance records found.</p>
                   ) : (
                     logs.filter(l => l.uid === selectedUser.uid)
-                    .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0))
-                    .map((log, idx) => {
-                      const checkIn = log.checkInTime ? new Date(log.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "-";
-                      const checkOut = log.checkOutTime ? new Date(log.checkOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "-";
-                      const totalHrs = log.totalWorkingMinutes ? (log.totalWorkingMinutes / 60).toFixed(2) : (log.checkInTime && !log.checkOutTime ? "Active" : "0.00");
-                      
-                      return (
-                        <div key={idx} className="flex items-center justify-between p-2.5 rounded-[8px] bg-bg-card border border-border-card">
-                          <div className="flex flex-col">
-                            <span className="text-xs font-bold text-text-main">{log.date || "Unknown Date"}</span>
-                            <span className="text-[10px] text-text-mut">{checkIn} - {checkOut}</span>
+                      .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0))
+                      .map((log, idx) => {
+                        const checkIn = log.checkInTime ? new Date(log.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "-";
+                        const checkOut = log.checkOutTime ? new Date(log.checkOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "-";
+                        const totalHrs = log.totalWorkingMinutes ? (log.totalWorkingMinutes / 60).toFixed(2) : (log.checkInTime && !log.checkOutTime ? "Active" : "0.00");
+
+                        return (
+                          <div key={idx} className="flex items-center justify-between p-2.5 rounded-[8px] bg-bg-card border border-border-card">
+                            <div className="flex flex-col">
+                              <span className="text-xs font-bold text-text-main">{log.date || "Unknown Date"}</span>
+                              <span className="text-[10px] text-text-mut">{checkIn} - {checkOut}</span>
+                            </div>
+                            <div className="text-right flex flex-col">
+                              <span className="text-xs font-bold text-brand-primary">{totalHrs === "Active" ? "Active" : `${totalHrs} hrs`}</span>
+                              <span className="text-[10px] text-text-mut">{log.status || (log.checkOutTime ? "Present" : "Checked In")}</span>
+                            </div>
                           </div>
-                          <div className="text-right flex flex-col">
-                            <span className="text-xs font-bold text-brand-primary">{totalHrs === "Active" ? "Active" : `${totalHrs} hrs`}</span>
-                            <span className="text-[10px] text-text-mut">{log.status || (log.checkOutTime ? "Present" : "Checked In")}</span>
-                          </div>
-                        </div>
-                      );
-                    })
+                        );
+                      })
                   )}
                 </div>
               </div>
@@ -4686,7 +4650,7 @@ export default function AdminDashboard() {
 
             <div className="flex justify-end gap-2 pt-4 border-t border-border-card mt-4">
               {(isAdminUser || can("update", "EmployeeManagement")) && (
-                <button 
+                <button
                   onClick={() => {
                     const uid = selectedUser.uid || selectedUser.id;
                     setShowDetailModal(false);
@@ -4699,7 +4663,7 @@ export default function AdminDashboard() {
                   <span>Face Biometrics</span>
                 </button>
               )}
-              <button 
+              <button
                 onClick={() => { setShowDetailModal(false); openEditModal(selectedUser); }}
                 className="py-2.5 px-6 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-[12px] transition-colors cursor-pointer"
               >
@@ -4717,15 +4681,15 @@ export default function AdminDashboard() {
           <div className="w-full max-w-[500px] bg-bg-card border border-border-card rounded-[24px] p-6 shadow-xl animate-scale-up relative overflow-hidden">
             <div className="flex items-center justify-between mb-4 border-b border-border-card pb-4">
               <h3 className="font-bold text-lg text-text-main">Add New Employee</h3>
-              <button 
-                onClick={() => setShowAddModal(false)} 
+              <button
+                onClick={() => setShowAddModal(false)}
                 className="text-text-mut hover:text-text-main font-bold text-md cursor-pointer"
               >
                 <X size={18} />
               </button>
             </div>
-            
-                        <form onSubmit={handleAddNewEmployee} className="flex flex-col max-h-[85vh]">
+
+            <form onSubmit={handleAddNewEmployee} className="flex flex-col max-h-[85vh]">
               {/* TABS */}
               <div className="flex border-b border-border-card mb-4 overflow-x-auto scrollbar-none">
                 {['Personal', 'Educational', 'Professional', 'Government & Identity', 'Employment', 'Banking'].map(tab => (
@@ -4778,7 +4742,7 @@ export default function AdminDashboard() {
                       </div>
                       <div className="flex flex-col gap-1">
                         <label className="text-[10px] font-bold text-text-sec uppercase">Date of Birth</label>
-                        <input type="date" className="w-full px-3 py-2 border border-border-card rounded-[8px] bg-bg-base/30 text-xs text-text-main outline-none focus:border-brand-primary" value={newDob} onChange={(e) => { setNewDob(e.target.value); if(e.target.value) { const age = new Date().getFullYear() - new Date(e.target.value).getFullYear(); setNewAge(age.toString()); } }} max={new Date().toISOString().split("T")[0]} />
+                        <input type="date" className="w-full px-3 py-2 border border-border-card rounded-[8px] bg-bg-base/30 text-xs text-text-main outline-none focus:border-brand-primary" value={newDob} onChange={(e) => { setNewDob(e.target.value); if (e.target.value) { const age = new Date().getFullYear() - new Date(e.target.value).getFullYear(); setNewAge(age.toString()); } }} max={new Date().toISOString().split("T")[0]} />
                       </div>
                       <div className="flex flex-col gap-1">
                         <label className="text-[10px] font-bold text-text-sec uppercase">Age</label>
@@ -4922,7 +4886,7 @@ export default function AdminDashboard() {
                         <label className="text-[10px] font-bold text-text-sec uppercase">PF Number</label>
                         <input type="text" className="w-full px-3 py-2 border border-border-card rounded-[8px] bg-bg-base/30 text-xs text-text-main outline-none focus:border-brand-primary" value={newPfNo} onChange={(e) => setNewPfNo(e.target.value)} placeholder="e.g. PF123456" />
                       </div>
-                      
+
                       <div className="flex flex-col gap-1 mt-2 col-span-3">
                         <label className="text-[10px] font-bold text-text-sec uppercase">Shift Type *</label>
                         <div className="flex gap-2">
@@ -4930,7 +4894,7 @@ export default function AdminDashboard() {
                           <button type="button" className={`flex-1 py-1.5 px-2 border rounded-[8px] text-[11px] font-bold transition-all ${newShiftType === 'Night' ? 'bg-brand-primary text-white border-brand-primary' : 'bg-bg-card border-border-card text-text-main'}`} onClick={() => { setNewShiftType('Night'); setNewShiftStart('21:00'); setNewShiftEnd('06:00'); }}>Night Shift</button>
                         </div>
                       </div>
-                      
+
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 col-span-3">
                         <div className="flex flex-col gap-1">
                           <label className="text-[10px] font-bold text-text-sec uppercase">Annual Leaves</label>
@@ -4966,16 +4930,16 @@ export default function AdminDashboard() {
               </div>
 
               <div className="flex justify-end gap-3 border-t border-border-card pt-4 mt-4 flex-shrink-0">
-                <button 
-                  type="button" 
-                  onClick={() => setShowAddModal(false)} 
+                <button
+                  type="button"
+                  onClick={() => setShowAddModal(false)}
                   className="py-2.5 px-4 border border-border-card rounded-[12px] bg-bg-card hover:bg-bg-base text-text-sec text-xs font-bold transition-colors cursor-pointer"
                   disabled={actionLoading}
                 >
                   Cancel
                 </button>
-                <button 
-                  type="submit" 
+                <button
+                  type="submit"
                   className="py-2.5 px-5 bg-brand-primary hover:bg-brand-hover shadow-md shadow-brand-primary/20 text-white text-xs font-bold rounded-[12px] transition-colors cursor-pointer"
                   disabled={actionLoading}
                 >
@@ -4995,15 +4959,15 @@ export default function AdminDashboard() {
           <div className="w-full max-w-[500px] bg-bg-card border border-border-card rounded-[24px] p-6 shadow-xl animate-scale-up relative overflow-hidden">
             <div className="flex items-center justify-between mb-4 border-b border-border-card pb-4">
               <h3 className="font-bold text-lg text-text-main">Edit User Profile</h3>
-              <button 
-                onClick={() => { setShowEditModal(false); setSelectedUser(null); }} 
+              <button
+                onClick={() => { setShowEditModal(false); setSelectedUser(null); }}
                 className="text-text-mut hover:text-text-main font-bold text-md cursor-pointer"
               >
                 <X size={18} />
               </button>
             </div>
-            
-                        <form onSubmit={handleSaveUserEdit} className="flex flex-col max-h-[85vh]">
+
+            <form onSubmit={handleSaveUserEdit} className="flex flex-col max-h-[85vh]">
               {/* TABS */}
               <div className="flex border-b border-border-card mb-4 overflow-x-auto scrollbar-none">
                 {['Personal', 'Educational', 'Professional', 'Government & Identity', 'Employment', 'Banking'].map(tab => (
@@ -5052,7 +5016,7 @@ export default function AdminDashboard() {
                       </div>
                       <div className="flex flex-col gap-1">
                         <label className="text-[10px] font-bold text-text-sec uppercase">Date of Birth</label>
-                        <input type="date" className="w-full px-3 py-2 border border-border-card rounded-[8px] bg-bg-base/30 text-xs text-text-main outline-none focus:border-brand-primary" value={editDob} onChange={(e) => { setEditDob(e.target.value); if(e.target.value) { const age = new Date().getFullYear() - new Date(e.target.value).getFullYear(); setEditAge(age.toString()); } }} max={new Date().toISOString().split("T")[0]} />
+                        <input type="date" className="w-full px-3 py-2 border border-border-card rounded-[8px] bg-bg-base/30 text-xs text-text-main outline-none focus:border-brand-primary" value={editDob} onChange={(e) => { setEditDob(e.target.value); if (e.target.value) { const age = new Date().getFullYear() - new Date(e.target.value).getFullYear(); setEditAge(age.toString()); } }} max={new Date().toISOString().split("T")[0]} />
                       </div>
                       <div className="flex flex-col gap-1">
                         <label className="text-[10px] font-bold text-text-sec uppercase">Age</label>
@@ -5153,9 +5117,9 @@ export default function AdminDashboard() {
                       </div>
                       <div className="flex flex-col gap-1 sm:col-span-2 mt-2 mb-2">
                         <label className="flex items-center gap-2 text-sm font-bold text-text-main cursor-pointer p-3 border border-border-card rounded-[8px] bg-bg-base/30">
-                          <input 
-                            type="checkbox" 
-                            checked={editAllowManualCheckIn} 
+                          <input
+                            type="checkbox"
+                            checked={editAllowManualCheckIn}
                             onChange={(e) => setEditAllowManualCheckIn(e.target.checked)}
                             className="w-4 h-4 text-brand-primary"
                           />
@@ -5210,7 +5174,7 @@ export default function AdminDashboard() {
                         <label className="text-[10px] font-bold text-text-sec uppercase">PF Number</label>
                         <input type="text" className="w-full px-3 py-2 border border-border-card rounded-[8px] bg-bg-base/30 text-xs text-text-main outline-none focus:border-brand-primary" value={editPfNo} onChange={(e) => setEditPfNo(e.target.value)} placeholder="e.g. PF123456" />
                       </div>
-                      
+
                       <div className="flex flex-col gap-1 mt-2 sm:col-span-2">
                         <label className="text-[10px] font-bold text-text-sec uppercase">Shift Type *</label>
                         <div className="flex gap-2">
@@ -5218,7 +5182,7 @@ export default function AdminDashboard() {
                           <button type="button" className={`flex-1 py-1.5 px-2 border rounded-[8px] text-[11px] font-bold transition-all ${editShiftStart === '21:00' || editShiftType === 'Night' ? 'bg-brand-primary text-white border-brand-primary' : 'bg-bg-card border-border-card text-text-main'}`} onClick={() => { setEditShiftType('Night'); setEditShiftStart('21:00'); setEditShiftEnd('06:00'); }}>Night Shift</button>
                         </div>
                       </div>
-                      
+
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:col-span-2">
                         <div className="flex flex-col gap-1">
                           <label className="text-[10px] font-bold text-text-sec uppercase">Annual Leaves</label>
@@ -5254,16 +5218,16 @@ export default function AdminDashboard() {
               </div>
 
               <div className="flex justify-end gap-3 border-t border-border-card pt-4 mt-4 flex-shrink-0">
-                <button 
-                  type="button" 
-                  onClick={() => { setShowEditModal(false); setSelectedUser(null); }} 
+                <button
+                  type="button"
+                  onClick={() => { setShowEditModal(false); setSelectedUser(null); }}
                   className="py-2.5 px-4 border border-border-card rounded-[12px] bg-bg-card hover:bg-bg-base text-text-sec text-xs font-bold transition-colors cursor-pointer"
                   disabled={actionLoading}
                 >
                   Cancel
                 </button>
-                <button 
-                  type="submit" 
+                <button
+                  type="submit"
                   className="py-2.5 px-5 bg-brand-primary hover:bg-brand-hover shadow-md shadow-brand-primary/20 text-white text-xs font-bold rounded-[12px] transition-colors cursor-pointer"
                   disabled={actionLoading}
                 >
@@ -5283,31 +5247,31 @@ export default function AdminDashboard() {
           <div className="w-full max-w-[440px] bg-bg-card border border-border-card rounded-[24px] p-6 shadow-xl animate-scale-up relative overflow-hidden">
             <div className="flex items-center justify-between mb-4 border-b border-border-card pb-4">
               <h3 className="font-bold text-lg text-brand-danger">Delete User Profile</h3>
-              <button 
-                onClick={() => { setShowDeleteConfirm(false); setSelectedUser(null); }} 
+              <button
+                onClick={() => { setShowDeleteConfirm(false); setSelectedUser(null); }}
                 className="text-text-mut hover:text-text-main font-bold text-md cursor-pointer"
               >
                 <X size={18} />
               </button>
             </div>
-            
+
             <div className="space-y-3 mb-6 text-sm text-text-sec leading-relaxed">
               <p>Are you sure you want to delete the profile for <strong>{selectedUser.name}</strong> ({selectedUser.email})?</p>
               <p className="text-brand-danger font-bold text-xs flex items-center gap-1">
                 <AlertTriangle size={18} className='text-amber-500 inline-block mr-1' /> Warning: This action is permanent and will remove the user record from the database directory.
               </p>
             </div>
-            
+
             <div className="flex justify-end gap-3">
-              <button 
-                onClick={() => { setShowDeleteConfirm(false); setSelectedUser(null); }} 
+              <button
+                onClick={() => { setShowDeleteConfirm(false); setSelectedUser(null); }}
                 className="py-2.5 px-4 border border-border-card rounded-[12px] bg-bg-card hover:bg-bg-base text-text-sec text-xs font-bold transition-colors cursor-pointer"
                 disabled={actionLoading}
               >
                 Cancel
               </button>
-              <button 
-                onClick={handleConfirmDeleteUser} 
+              <button
+                onClick={handleConfirmDeleteUser}
                 className="py-2.5 px-5 bg-brand-danger text-white text-xs font-bold rounded-[12px] hover:bg-brand-danger-hover transition-colors cursor-pointer"
                 disabled={actionLoading}
               >
@@ -5325,31 +5289,31 @@ export default function AdminDashboard() {
           <div className="w-full max-w-[440px] bg-bg-card border border-border-card rounded-[24px] p-6 shadow-xl animate-scale-up relative overflow-hidden">
             <div className="flex items-center justify-between mb-4 border-b border-border-card pb-4">
               <h3 className="font-bold text-lg text-brand-danger">Delete Paid Leave</h3>
-              <button 
-                onClick={() => { setShowDeletePaidLeaveConfirm(false); setSelectedPaidLeave(null); }} 
+              <button
+                onClick={() => { setShowDeletePaidLeaveConfirm(false); setSelectedPaidLeave(null); }}
                 className="text-text-mut hover:text-text-main font-bold text-md cursor-pointer"
               >
                 <X size={18} />
               </button>
             </div>
-            
+
             <div className="space-y-3 mb-6 text-sm text-text-sec leading-relaxed">
               <p>Are you sure you want to delete the paid leave announcement for <strong>{selectedPaidLeave.title}</strong>?</p>
               <p className="text-brand-danger font-bold text-xs flex items-center gap-1">
                 <AlertTriangle size={18} className='text-amber-500 inline-block mr-1' /> Warning: This action is permanent and will remove the announcement from the system.
               </p>
             </div>
-            
+
             <div className="flex justify-end gap-3">
-              <button 
-                onClick={() => { setShowDeletePaidLeaveConfirm(false); setSelectedPaidLeave(null); }} 
+              <button
+                onClick={() => { setShowDeletePaidLeaveConfirm(false); setSelectedPaidLeave(null); }}
                 className="py-2.5 px-4 border border-border-card rounded-[12px] bg-bg-card hover:bg-bg-base text-text-sec text-xs font-bold transition-colors cursor-pointer"
                 disabled={actionLoading}
               >
                 Cancel
               </button>
-              <button 
-                onClick={confirmDeletePaidLeave} 
+              <button
+                onClick={confirmDeletePaidLeave}
                 className="py-2.5 px-5 bg-brand-danger text-white text-xs font-bold rounded-[12px] hover:bg-brand-danger-hover transition-colors cursor-pointer"
                 disabled={actionLoading}
               >
@@ -5408,7 +5372,7 @@ export default function AdminDashboard() {
             if (fileUrl.startsWith("data:") && fileUrl.length > 500) {
               fileUrl = "[Embedded File Data]";
             }
-            
+
             const rowData = [
               m.timestamp ? new Date(m.timestamp).toLocaleString() : "",
               m.threadType,
@@ -5418,7 +5382,7 @@ export default function AdminDashboard() {
               m.fileData?.name || "",
               fileUrl
             ];
-            
+
             // Truncate to avoid Excel's 32,767 character limit per cell
             rows.push(rowData.map(val => String(val).substring(0, 32000)));
           });
@@ -5478,8 +5442,8 @@ export default function AdminDashboard() {
                 { label: "Channels", val: chatChannels.length, icon: "#", color: "text-indigo-500" },
                 { label: "DM Threads", val: chatDmThreads.length, icon: <Mail size={18} className='inline-block mr-1' />, color: "text-amber-500" }
               ].map((s, i) => (
-                <div 
-                  key={i} 
+                <div
+                  key={i}
                   onClick={() => s.filter && setChatStatusFilter(prev => prev === s.filter ? "all" : s.filter)}
                   className={`bg-bg-card border border-border-card rounded-[16px] p-4 flex items-center gap-3 ${s.filter ? "cursor-pointer hover:border-brand-primary/40 transition-colors" : ""} ${s.filter && chatStatusFilter === s.filter ? "ring-2 ring-brand-primary" : ""}`}
                 >
@@ -5558,97 +5522,97 @@ export default function AdminDashboard() {
                 <>
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-border-card bg-bg-base">
-                        {["Timestamp", "Type", "Thread / Channel", "Sender", "Message", "Attachment", "Actions"].map(h => (
-                          <th key={h} className="text-[10px] font-extrabold text-text-mut uppercase tracking-wider px-4 py-3 text-left whitespace-nowrap">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredMsgs.slice((chatPage - 1) * 20, chatPage * 20).map(msg => (
-                        <tr key={msg.id} className={`border-b border-border-card hover:bg-bg-base transition-colors ${msg.isDeleted ? "bg-red-500/5" : ""}`}>
-                          <td className="px-4 py-3 text-[11px] text-text-mut whitespace-nowrap">
-                            {msg.timestamp ? new Date(msg.timestamp).toLocaleString() : "—"}
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${msg.threadType === "channel" ? "bg-indigo-500/10 text-indigo-500" : "bg-amber-500/10 text-amber-500"}`}>
-                              {msg.threadType === "channel" ? "Channel" : "DM"}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-xs font-semibold text-text-sec whitespace-nowrap">
-                            {getThreadLabel(msg)}
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-2">
-                              <div className="w-6 h-6 rounded-full bg-brand-primary/20 text-brand-primary flex items-center justify-center text-[9px] font-bold overflow-hidden">{(users.find(u => u.uid === msg.senderId)?.avatar) ? <img src={users.find(u => u.uid === msg.senderId).avatar} alt={msg.senderName} className="w-full h-full object-cover" /> : ((msg.senderName || "?").charAt(0).toUpperCase())}</div>
-                              <span className="text-xs font-semibold text-text-main whitespace-nowrap">{msg.senderName}</span>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 max-w-[280px]">
-                            {msg.isDeleted ? (
-                              <div className="flex flex-col gap-1">
-                                <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-red-500/15 text-red-500 border border-red-500/30 w-fit">
-                                  <Trash2 size={10} /> Deleted {msg.deletedBy ? `by ${msg.deletedBy}` : ""}
-                                </span>
-                                <span className="text-xs text-red-400/90 line-through line-clamp-2" title={msg.text}>
-                                  {msg.text || <span className="text-text-mut italic">—</span>}
-                                </span>
-                              </div>
-                            ) : (
-                              <span className="text-xs text-text-sec line-clamp-2" title={msg.text}>{msg.text || <span className="text-text-mut italic">—</span>}</span>
-                            )}
-                          </td>
-                          <td className="px-4 py-3">
-                            {msg.fileData ? (
-                              <a
-                                href={msg.fileData.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-[10px] font-bold text-brand-primary hover:underline flex items-center gap-1 whitespace-nowrap"
-                              >
-                                <Paperclip size={18} className='inline-block mr-1' /> {msg.fileData.name?.substring(0, 20) || "File"}
-                              </a>
-                            ) : <span className="text-text-mut text-xs">—</span>}
-                          </td>
-                          <td className="px-4 py-3">
-                            <button
-                              onClick={() => handleDeleteMsg(msg.id)}
-                              className="p-1.5 text-text-mut hover:text-red-500 hover:bg-red-500/10 rounded-[6px] transition-colors cursor-pointer"
-                              title="Delete message"
-                            >
-                              <Trash2 size={13} />
-                            </button>
-                          </td>
+                      <thead>
+                        <tr className="border-b border-border-card bg-bg-base">
+                          {["Timestamp", "Type", "Thread / Channel", "Sender", "Message", "Attachment", "Actions"].map(h => (
+                            <th key={h} className="text-[10px] font-extrabold text-text-mut uppercase tracking-wider px-4 py-3 text-left whitespace-nowrap">{h}</th>
+                          ))}
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                {/* Pagination Controls */}
-                {Math.ceil(filteredMsgs.length / 20) > 1 && (
-                  <div className="px-5 py-3 border-t border-border-card flex items-center justify-between">
-                    <span className="text-[10px] font-bold text-text-mut uppercase tracking-wider">
-                      Page {chatPage} of {Math.ceil(filteredMsgs.length / 20)}
-                    </span>
-                    <div className="flex gap-2">
-                      <button 
-                        onClick={() => setChatPage(p => Math.max(1, p - 1))}
-                        disabled={chatPage === 1}
-                        className="px-3 py-1.5 bg-bg-base border border-border-card text-text-main text-xs font-bold rounded-[8px] hover:bg-brand-primary/10 hover:text-brand-primary hover:border-brand-primary/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
-                      >
-                        Previous
-                      </button>
-                      <button 
-                        onClick={() => setChatPage(p => Math.min(Math.ceil(filteredMsgs.length / 20), p + 1))}
-                        disabled={chatPage === Math.ceil(filteredMsgs.length / 20)}
-                        className="px-3 py-1.5 bg-bg-base border border-border-card text-text-main text-xs font-bold rounded-[8px] hover:bg-brand-primary/10 hover:text-brand-primary hover:border-brand-primary/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
-                      >
-                        Next
-                      </button>
-                    </div>
+                      </thead>
+                      <tbody>
+                        {filteredMsgs.slice((chatPage - 1) * 20, chatPage * 20).map(msg => (
+                          <tr key={msg.id} className={`border-b border-border-card hover:bg-bg-base transition-colors ${msg.isDeleted ? "bg-red-500/5" : ""}`}>
+                            <td className="px-4 py-3 text-[11px] text-text-mut whitespace-nowrap">
+                              {msg.timestamp ? new Date(msg.timestamp).toLocaleString() : "—"}
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${msg.threadType === "channel" ? "bg-indigo-500/10 text-indigo-500" : "bg-amber-500/10 text-amber-500"}`}>
+                                {msg.threadType === "channel" ? "Channel" : "DM"}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-xs font-semibold text-text-sec whitespace-nowrap">
+                              {getThreadLabel(msg)}
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-2">
+                                <div className="w-6 h-6 rounded-full bg-brand-primary/20 text-brand-primary flex items-center justify-center text-[9px] font-bold overflow-hidden">{(users.find(u => u.uid === msg.senderId)?.avatar) ? <img src={users.find(u => u.uid === msg.senderId).avatar} alt={msg.senderName} className="w-full h-full object-cover" /> : ((msg.senderName || "?").charAt(0).toUpperCase())}</div>
+                                <span className="text-xs font-semibold text-text-main whitespace-nowrap">{msg.senderName}</span>
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 max-w-[280px]">
+                              {msg.isDeleted ? (
+                                <div className="flex flex-col gap-1">
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-red-500/15 text-red-500 border border-red-500/30 w-fit">
+                                    <Trash2 size={10} /> Deleted {msg.deletedBy ? `by ${msg.deletedBy}` : ""}
+                                  </span>
+                                  <span className="text-xs text-red-400/90 line-through line-clamp-2" title={msg.text}>
+                                    {msg.text || <span className="text-text-mut italic">—</span>}
+                                  </span>
+                                </div>
+                              ) : (
+                                <span className="text-xs text-text-sec line-clamp-2" title={msg.text}>{msg.text || <span className="text-text-mut italic">—</span>}</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3">
+                              {msg.fileData ? (
+                                <a
+                                  href={msg.fileData.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-[10px] font-bold text-brand-primary hover:underline flex items-center gap-1 whitespace-nowrap"
+                                >
+                                  <Paperclip size={18} className='inline-block mr-1' /> {msg.fileData.name?.substring(0, 20) || "File"}
+                                </a>
+                              ) : <span className="text-text-mut text-xs">—</span>}
+                            </td>
+                            <td className="px-4 py-3">
+                              <button
+                                onClick={() => handleDeleteMsg(msg.id)}
+                                className="p-1.5 text-text-mut hover:text-red-500 hover:bg-red-500/10 rounded-[6px] transition-colors cursor-pointer"
+                                title="Delete message"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
-                )}
+                  {/* Pagination Controls */}
+                  {Math.ceil(filteredMsgs.length / 20) > 1 && (
+                    <div className="px-5 py-3 border-t border-border-card flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-text-mut uppercase tracking-wider">
+                        Page {chatPage} of {Math.ceil(filteredMsgs.length / 20)}
+                      </span>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setChatPage(p => Math.max(1, p - 1))}
+                          disabled={chatPage === 1}
+                          className="px-3 py-1.5 bg-bg-base border border-border-card text-text-main text-xs font-bold rounded-[8px] hover:bg-brand-primary/10 hover:text-brand-primary hover:border-brand-primary/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                        >
+                          Previous
+                        </button>
+                        <button
+                          onClick={() => setChatPage(p => Math.min(Math.ceil(filteredMsgs.length / 20), p + 1))}
+                          disabled={chatPage === Math.ceil(filteredMsgs.length / 20)}
+                          className="px-3 py-1.5 bg-bg-base border border-border-card text-text-main text-xs font-bold rounded-[8px] hover:bg-brand-primary/10 hover:text-brand-primary hover:border-brand-primary/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                        >
+                          Next
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </>
               )}
             </div>
@@ -5685,7 +5649,7 @@ export default function AdminDashboard() {
             (asset.name || "").toLowerCase().includes(assetSearch.toLowerCase()) ||
             (asset.serialNumber || "").toLowerCase().includes(assetSearch.toLowerCase()) ||
             (asset.assignedUserName || "").toLowerCase().includes(assetSearch.toLowerCase());
-          const matchCategory = assetCategoryFilter === "all" || 
+          const matchCategory = assetCategoryFilter === "all" ||
             (Array.isArray(asset.category) ? asset.category.includes(assetCategoryFilter) : asset.category === assetCategoryFilter);
           const matchStatus = assetStatusFilter === "all" || asset.status === assetStatusFilter;
           return matchSearch && matchCategory && matchStatus;
@@ -5707,18 +5671,18 @@ export default function AdminDashboard() {
                 <p className="text-sm text-text-sec mt-1">Register, track, and assign organization devices (laptops, headsets, chargers, etc.)</p>
               </div>
               <div className="flex gap-2 self-start sm:self-center">
-                <button 
-                  onClick={handleExportAssetsExcel} 
+                <button
+                  onClick={handleExportAssetsExcel}
                   className="flex items-center gap-1.5 py-2.5 px-4 border border-emerald-500/30 text-xs font-bold rounded-[12px] bg-emerald-500/5 hover:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 transition-colors cursor-pointer"
                 >
-                  <Download size={14} /> 
+                  <Download size={14} />
                   <span>Excel</span>
                 </button>
-                <button 
-                  onClick={handleExportAssetsPDF} 
+                <button
+                  onClick={handleExportAssetsPDF}
                   className="flex items-center gap-1.5 py-2.5 px-4 border border-red-500/30 text-xs font-bold rounded-[12px] bg-red-500/5 hover:bg-red-500/10 text-red-600 dark:text-red-400 transition-colors cursor-pointer"
                 >
-                  <FileText size={14} /> 
+                  <FileText size={14} />
                   <span>PDF</span>
                 </button>
                 {canManageAssetsGlobal && (
@@ -5906,8 +5870,8 @@ export default function AdminDashboard() {
                         <span className="text-xs text-text-mut font-semibold">
                           Showing {assetsStartIndex + 1} to {Math.min(filteredAssets.length, assetsStartIndex + assetsPerPage)} of {filteredAssets.length} entries
                         </span>
-                        <select 
-                          value={rowsPerPage} 
+                        <select
+                          value={rowsPerPage}
                           onChange={(e) => {
                             setRowsPerPage(Number(e.target.value));
                             setLivePage(1); setUsersPage(1); setLeavesPendingPage(1); setRegsPendingPage(1); setHistoryPage(1); setAssetsPage(1);
@@ -5951,7 +5915,7 @@ export default function AdminDashboard() {
           <div className="w-full max-w-[550px] bg-bg-card border border-border-card/85 rounded-[24px] p-6 shadow-2xl shadow-brand-primary/5 animate-scale-up relative overflow-hidden flex flex-col max-h-[90vh]">
             {/* Top Premium Gradient Line */}
             <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-brand-primary via-purple-500 to-brand-hover" />
-            
+
             <div className="flex items-center justify-between mb-5 pb-4 border-b border-border-card flex-shrink-0">
               <div className="flex items-center gap-2.5">
                 <div className="w-10 h-10 rounded-[14px] bg-gradient-to-tr from-brand-primary/20 to-brand-hover/10 text-brand-primary flex items-center justify-center border border-brand-primary/10">
@@ -5964,14 +5928,14 @@ export default function AdminDashboard() {
                   <p className="text-[10px] text-text-mut font-bold uppercase tracking-wider">Asset Configuration Panel</p>
                 </div>
               </div>
-              <button 
-                onClick={() => setShowAssetModal(false)} 
+              <button
+                onClick={() => setShowAssetModal(false)}
                 className="w-8 h-8 rounded-full flex items-center justify-center bg-bg-base border border-border-card text-text-mut hover:text-text-main hover:border-brand-primary/40 hover:rotate-90 transition-all duration-300 cursor-pointer"
               >
                 <X size={16} />
               </button>
             </div>
-            
+
             <form onSubmit={handleSaveAsset} className="flex-1 overflow-y-auto pr-1 space-y-5 py-1">
               {/* Asset Specs Section */}
               <div className="bg-bg-base/30 dark:bg-slate-900/10 rounded-[18px] p-5 border border-border-card space-y-4">
@@ -5979,14 +5943,14 @@ export default function AdminDashboard() {
                   <Laptop size={12} />
                   <span>Asset Specifications</span>
                 </div>
-                
+
                 <div className="flex flex-col gap-1.5">
                   <label className="text-[10px] font-extrabold text-text-sec uppercase tracking-wider">Asset Name</label>
                   <div className="relative flex items-center">
                     <Laptop size={15} className="absolute left-3.5 text-text-mut/70 pointer-events-none" />
-                    <input 
-                      type="text" 
-                      className="w-full pl-10 pr-4 py-2.5 border border-border-card/80 hover:border-brand-primary/40 focus:border-brand-primary focus:ring-4 focus:ring-brand-primary/5 rounded-[14px] bg-bg-card text-xs text-text-main outline-none transition-all font-semibold shadow-sm" 
+                    <input
+                      type="text"
+                      className="w-full pl-10 pr-4 py-2.5 border border-border-card/80 hover:border-brand-primary/40 focus:border-brand-primary focus:ring-4 focus:ring-brand-primary/5 rounded-[14px] bg-bg-card text-xs text-text-main outline-none transition-all font-semibold shadow-sm"
                       value={assetFormName}
                       onChange={(e) => setAssetFormName(e.target.value)}
                       placeholder="e.g. Dell Latitude 5420"
@@ -6006,8 +5970,8 @@ export default function AdminDashboard() {
                         className="w-full pl-10 pr-10 py-2.5 border border-border-card/80 hover:border-brand-primary/40 focus:border-brand-primary focus:ring-4 focus:ring-brand-primary/5 rounded-[14px] bg-bg-card text-xs text-text-main outline-none transition-all cursor-pointer font-semibold shadow-sm flex items-center justify-between text-left"
                       >
                         <span className="truncate">
-                          {assetFormCategory.length === 0 
-                            ? "Select Categories" 
+                          {assetFormCategory.length === 0
+                            ? "Select Categories"
                             : assetFormCategory.join(", ")}
                         </span>
                         <ChevronDown size={14} className="text-text-mut/70 pointer-events-none flex-shrink-0" />
@@ -6043,9 +6007,9 @@ export default function AdminDashboard() {
                     <label className="text-[10px] font-extrabold text-text-sec uppercase tracking-wider">Serial Number / ID</label>
                     <div className="relative flex items-center">
                       <Hash size={15} className="absolute left-3.5 text-text-mut/70 pointer-events-none" />
-                      <input 
-                        type="text" 
-                        className="w-full pl-10 pr-4 py-2.5 border border-border-card/80 hover:border-brand-primary/40 focus:border-brand-primary focus:ring-4 focus:ring-brand-primary/5 rounded-[14px] bg-bg-card text-xs text-text-main outline-none transition-all font-mono font-semibold shadow-sm" 
+                      <input
+                        type="text"
+                        className="w-full pl-10 pr-4 py-2.5 border border-border-card/80 hover:border-brand-primary/40 focus:border-brand-primary focus:ring-4 focus:ring-brand-primary/5 rounded-[14px] bg-bg-card text-xs text-text-main outline-none transition-all font-mono font-semibold shadow-sm"
                         value={assetFormSerial}
                         onChange={(e) => setAssetFormSerial(e.target.value)}
                         placeholder="e.g. SN-Dell-98A"
@@ -6068,7 +6032,7 @@ export default function AdminDashboard() {
                     <label className="text-[10px] font-extrabold text-text-sec uppercase tracking-wider">Status</label>
                     <div className="relative flex items-center">
                       <Activity size={15} className="absolute left-3.5 text-text-mut/70 pointer-events-none" />
-                      <select 
+                      <select
                         className="w-full pl-10 pr-10 py-2.5 border border-border-card/80 hover:border-brand-primary/40 focus:border-brand-primary focus:ring-4 focus:ring-brand-primary/5 rounded-[14px] bg-bg-card text-xs text-text-main outline-none transition-all cursor-pointer font-semibold shadow-sm appearance-none"
                         value={assetFormStatus}
                         onChange={(e) => setAssetFormStatus(e.target.value)}
@@ -6086,7 +6050,7 @@ export default function AdminDashboard() {
                     <label className="text-[10px] font-extrabold text-text-sec uppercase tracking-wider">Assign to Employee</label>
                     <div className="relative flex items-center">
                       <Users size={15} className="absolute left-3.5 text-text-mut/70 pointer-events-none" />
-                      <select 
+                      <select
                         className="w-full pl-10 pr-10 py-2.5 border border-border-card/80 hover:border-brand-primary/40 focus:border-brand-primary focus:ring-4 focus:ring-brand-primary/5 rounded-[14px] bg-bg-card text-xs text-text-main outline-none transition-all cursor-pointer font-semibold shadow-sm appearance-none"
                         value={assetFormAssignedUser}
                         onChange={(e) => {
@@ -6117,9 +6081,9 @@ export default function AdminDashboard() {
                       <label className="text-[10px] font-extrabold text-text-sec uppercase tracking-wider">Date of Assigning</label>
                       <div className="relative flex items-center">
                         <Calendar size={15} className="absolute left-3.5 text-text-mut/70 pointer-events-none" />
-                        <input 
-                          type="date" 
-                          className="w-full pl-10 pr-4 py-2.5 border border-border-card/80 hover:border-brand-primary/40 focus:border-brand-primary focus:ring-4 focus:ring-brand-primary/5 rounded-[14px] bg-bg-card text-xs text-text-main outline-none transition-all font-semibold shadow-sm" 
+                        <input
+                          type="date"
+                          className="w-full pl-10 pr-4 py-2.5 border border-border-card/80 hover:border-brand-primary/40 focus:border-brand-primary focus:ring-4 focus:ring-brand-primary/5 rounded-[14px] bg-bg-card text-xs text-text-main outline-none transition-all font-semibold shadow-sm"
                           value={assetFormAssignedDate}
                           onChange={(e) => setAssetFormAssignedDate(e.target.value)}
                           required
@@ -6131,14 +6095,14 @@ export default function AdminDashboard() {
                       <label className="text-[10px] font-extrabold text-text-sec uppercase tracking-wider">Assigning Authority</label>
                       <div className="relative flex items-center">
                         <Shield size={15} className="absolute left-3.5 text-text-mut/70 pointer-events-none" />
-                        <select 
+                        <select
                           className="w-full pl-10 pr-10 py-2.5 border border-border-card/80 hover:border-brand-primary/40 focus:border-brand-primary focus:ring-4 focus:ring-brand-primary/5 rounded-[14px] bg-bg-card text-xs text-text-main outline-none transition-all cursor-pointer font-semibold shadow-sm appearance-none"
                           value={assetFormAssigningAuthority}
                           onChange={(e) => setAssetFormAssigningAuthority(e.target.value)}
                           required
                         >
                           <option value="">Select Authority</option>
-                          {users.filter(u => 
+                          {users.filter(u =>
                             (u.role === "admin" || u.role === "superadmin" || u.role === "systemadmin" || u.role === "system admin") &&
                             !(u.name || "").toLowerCase().includes("zoho")
                           ).map((u) => (
@@ -6182,7 +6146,7 @@ export default function AdminDashboard() {
           <div className="w-full max-w-[550px] bg-bg-card border border-border-card/85 rounded-[24px] p-6 shadow-2xl shadow-brand-primary/5 animate-scale-up relative overflow-hidden flex flex-col max-h-[90vh]">
             {/* Top Premium Gradient Line */}
             <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-brand-primary via-purple-500 to-brand-hover" />
-            
+
             <div className="flex items-center justify-between mb-5 pb-4 border-b border-border-card flex-shrink-0">
               <div className="flex items-center gap-2.5">
                 <div className="w-10 h-10 rounded-[14px] bg-gradient-to-tr from-brand-primary/20 to-brand-hover/10 text-brand-primary flex items-center justify-center border border-brand-primary/10">
@@ -6195,14 +6159,14 @@ export default function AdminDashboard() {
                   <p className="text-[10px] text-text-mut font-bold uppercase tracking-wider">Bulk Asset Assignment Panel</p>
                 </div>
               </div>
-              <button 
-                onClick={() => setShowAssignAssetsModal(false)} 
+              <button
+                onClick={() => setShowAssignAssetsModal(false)}
                 className="w-8 h-8 rounded-full flex items-center justify-center bg-bg-base border border-border-card text-text-mut hover:text-text-main hover:border-brand-primary/40 hover:rotate-90 transition-all duration-300 cursor-pointer"
               >
                 <X size={16} />
               </button>
             </div>
-            
+
             <form onSubmit={handleAssignAssetsSubmit} className="flex-1 overflow-y-auto pr-1 space-y-5 py-1">
               {/* Assignment Specs Section */}
               <div className="bg-bg-base/30 dark:bg-slate-900/10 rounded-[18px] p-5 border border-border-card space-y-4">
@@ -6210,12 +6174,12 @@ export default function AdminDashboard() {
                   <UserPlus size={12} />
                   <span>Assignment Parameters</span>
                 </div>
-                
+
                 <div className="flex flex-col gap-1.5">
                   <label className="text-[10px] font-extrabold text-text-sec uppercase tracking-wider">Assign to Employee</label>
                   <div className="relative flex items-center">
                     <Users size={15} className="absolute left-3.5 text-text-mut/70 pointer-events-none" />
-                    <select 
+                    <select
                       className="w-full pl-10 pr-10 py-2.5 border border-border-card/80 hover:border-brand-primary/40 focus:border-brand-primary focus:ring-4 focus:ring-brand-primary/5 rounded-[14px] bg-bg-card text-xs text-text-main outline-none transition-all cursor-pointer font-semibold shadow-sm appearance-none"
                       value={assignAssetsTargetUser}
                       onChange={(e) => setAssignAssetsTargetUser(e.target.value)}
@@ -6237,9 +6201,9 @@ export default function AdminDashboard() {
                     <label className="text-[10px] font-extrabold text-text-sec uppercase tracking-wider">Date of Assigning</label>
                     <div className="relative flex items-center">
                       <Calendar size={15} className="absolute left-3.5 text-text-mut/70 pointer-events-none" />
-                      <input 
-                        type="date" 
-                        className="w-full pl-10 pr-4 py-2.5 border border-border-card/80 hover:border-brand-primary/40 focus:border-brand-primary focus:ring-4 focus:ring-brand-primary/5 rounded-[14px] bg-bg-card text-xs text-text-main outline-none transition-all font-semibold shadow-sm" 
+                      <input
+                        type="date"
+                        className="w-full pl-10 pr-4 py-2.5 border border-border-card/80 hover:border-brand-primary/40 focus:border-brand-primary focus:ring-4 focus:ring-brand-primary/5 rounded-[14px] bg-bg-card text-xs text-text-main outline-none transition-all font-semibold shadow-sm"
                         value={assignAssetsDate}
                         onChange={(e) => setAssignAssetsDate(e.target.value)}
                         required
@@ -6251,14 +6215,14 @@ export default function AdminDashboard() {
                     <label className="text-[10px] font-extrabold text-text-sec uppercase tracking-wider">Assigning Authority</label>
                     <div className="relative flex items-center">
                       <Shield size={15} className="absolute left-3.5 text-text-mut/70 pointer-events-none" />
-                      <select 
+                      <select
                         className="w-full pl-10 pr-10 py-2.5 border border-border-card/80 hover:border-brand-primary/40 focus:border-brand-primary focus:ring-4 focus:ring-brand-primary/5 rounded-[14px] bg-bg-card text-xs text-text-main outline-none transition-all cursor-pointer font-semibold shadow-sm appearance-none"
                         value={assignAssetsAuthority}
                         onChange={(e) => setAssignAssetsAuthority(e.target.value)}
                         required
                       >
                         <option value="">Select Authority</option>
-                        {users.filter(u => 
+                        {users.filter(u =>
                           (u.role === "admin" || u.role === "superadmin" || u.role === "systemadmin" || u.role === "system admin") &&
                           !(u.name || "").toLowerCase().includes("zoho")
                         ).map((u) => (
@@ -6342,29 +6306,19 @@ export default function AdminDashboard() {
 
           const basic = Math.round((gross * (basicPct / 100)) * 100) / 100;
           const otherAllowance = Math.round((gross * (otherPct / 100)) * 100) / 100;
-          
+
           const actualBasic = Math.round((actualGross * (basicPct / 100)) * 100) / 100;
           const actualOtherAllowance = Math.round((actualGross * (otherPct / 100)) * 100) / 100;
 
           const pf = companyPayrollSettings?.pf ? Math.round((actualBasic * 0.12) * 100) / 100 : 0;
           const isEsiEligible = actualGross <= 21000;
           const esi = (companyPayrollSettings?.esi && isEsiEligible) ? Math.round((actualGross * 0.0075) * 100) / 100 : 0;
-          
-          const getPTDeduction = (g) => {
-            if (companyPayrollSettings && !companyPayrollSettings.pt) return 0;
-            if (g <= 21000) return 0;
-            if (g <= 30000) return Math.round((180 / 6) * 100) / 100;
-            if (g <= 45000) return Math.round((425 / 6) * 100) / 100;
-            if (g <= 60000) return Math.round((930 / 6) * 100) / 100;
-            if (g <= 75000) return Math.round((1025 / 6) * 100) / 100;
-            return Math.round((1250 / 6) * 100) / 100;
-          };
-          const pt = getPTDeduction(actualGross);
-          const insurance = companyPayrollSettings?.insurance ? Number(companyPayrollSettings.insuranceAmount || 0) : 0;
 
-          const tds = actualGross > 50000 ? Math.round(((actualGross - pf - pt - insurance) * 0.05) * 100) / 100 : 0;
-          const totalDeductions = Math.round((pf + esi + pt + tds + insurance + lopAmount) * 100) / 100;
-          const net = Math.max(0, Math.round((actualGross - (pf + esi + pt + tds + insurance)) * 100) / 100);
+          const pt = 0;
+          const insurance = 0;
+          const tds = 0;
+          const totalDeductions = Math.round((pf + esi + lopAmount) * 100) / 100;
+          const net = Math.max(0, Math.round((actualGross - (pf + esi)) * 100) / 100);
           return {
             basic,
             hra: 0,
@@ -6390,7 +6344,7 @@ export default function AdminDashboard() {
 
         const currentPayroll = staffUsers.map(user => {
           const savedPayslip = payrollData.find(p => p.employeeId === user.uid);
-          
+
           if (savedPayslip) {
             const basicPct = savedPayslip.basicPercentageSnapshot !== undefined ? Number(savedPayslip.basicPercentageSnapshot) : (companyPayrollSettings?.basicPercentage || 50);
             const otherPct = savedPayslip.otherAllowancePercentageSnapshot !== undefined ? Number(savedPayslip.otherAllowancePercentageSnapshot) : (companyPayrollSettings?.otherAllowancePercentage || 30);
@@ -6417,7 +6371,7 @@ export default function AdminDashboard() {
           const workingDays = companyPayrollSettings?.workingDays || 30;
           const paidDays = user.paidDays !== undefined ? user.paidDays : workingDays;
           const calc = calculatePayroll(gross, paidDays, workingDays);
-          
+
           return {
             ...user,
             gross,
@@ -6430,8 +6384,8 @@ export default function AdminDashboard() {
 
         // Search logic for payroll table
         const filteredPayroll = currentPayroll.filter((u) => {
-          const matchesSearch = 
-            u.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+          const matchesSearch =
+            u.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
             u.email.toLowerCase().includes(searchQuery.toLowerCase());
           const matchesDept = !selectedDept || u.department === selectedDept;
           return matchesSearch && matchesDept;
@@ -6440,426 +6394,412 @@ export default function AdminDashboard() {
         const totalGross = payrollData.reduce((acc, curr) => acc + (curr.grossSalary || curr.gross || 0), 0);
         const totalPF = payrollData.reduce((acc, curr) => acc + (curr.pf || 0), 0);
         const totalNet = payrollData.reduce((acc, curr) => acc + (curr.netSalary || curr.net || 0), 0);
-        
+
         return (
           <>
-          <div className="animate-fade-in space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-2 text-left">
-              <div>
-                <h1 className="text-2xl sm:text-3xl font-extrabold text-text-main tracking-tight">Payroll Management</h1>
-                <p className="text-sm text-text-sec mt-1">Manage employee salaries, EPF, ESI, and generate payslips complying with Indian Law.</p>
-              </div>
-              <div className="flex items-center gap-2">
+            <div className="animate-fade-in space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-2 text-left">
+                <div>
+                  <h1 className="text-2xl sm:text-3xl font-extrabold text-text-main tracking-tight">Payroll Management</h1>
+                  <p className="text-sm text-text-sec mt-1">Manage employee salaries, EPF, ESI, and generate payslips complying with Indian Law.</p>
+                </div>
+                <div className="flex items-center gap-2">
 
-                <button 
-                  onClick={handleDownloadTemplate}
-                  className="flex items-center justify-center gap-2 px-4 h-10 whitespace-nowrap bg-blue-500 hover:bg-blue-600 text-white text-sm font-bold rounded-[14px] transition-colors shadow-sm"
-                >
-                  <Download size={16} /> Template
-                </button>
-                <div className="relative">
-                  <input 
-                    type="file" 
-                    accept=".xlsx, .xls, .csv" 
-                    onChange={handleExcelUpload} 
-                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" 
+                  <button
+                    onClick={handleDownloadTemplate}
+                    className="flex items-center justify-center gap-2 px-4 h-10 whitespace-nowrap bg-blue-500 hover:bg-blue-600 text-white text-sm font-bold rounded-[14px] transition-colors shadow-sm"
+                  >
+                    <Download size={16} /> Template
+                  </button>
+                  <div className="relative">
+                    <input
+                      type="file"
+                      accept=".xlsx, .xls, .csv"
+                      onChange={handleExcelUpload}
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                      disabled={actionLoading}
+                      title="Upload Payroll Excel"
+                    />
+                    <button className="flex items-center justify-center gap-2 px-4 h-10 whitespace-nowrap bg-brand-primary hover:bg-brand-hover text-white text-sm font-bold rounded-[14px] transition-colors shadow-sm disabled:opacity-50 w-full">
+                      <Upload size={16} /> {actionLoading ? 'Importing...' : 'Import Excel'}
+                    </button>
+                  </div>
+                  <button
+                    onClick={() => handleBulkExportPDF(filteredPayroll)}
                     disabled={actionLoading}
-                    title="Upload Payroll Excel"
-                  />
-                  <button className="flex items-center justify-center gap-2 px-4 h-10 whitespace-nowrap bg-brand-primary hover:bg-brand-hover text-white text-sm font-bold rounded-[14px] transition-colors shadow-sm disabled:opacity-50 w-full">
-                    <Upload size={16} /> {actionLoading ? 'Importing...' : 'Import Excel'}
+                    className="flex items-center justify-center gap-2 px-4 h-10 whitespace-nowrap bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-bold rounded-[14px] transition-colors shadow-sm disabled:opacity-50"
+                  >
+                    <Download size={16} /> {actionLoading ? 'Exporting...' : 'Bulk Export PDF'}
+                  </button>
+                  <button onClick={() => setShowPayrollSettingsModal(true)} className="flex items-center justify-center gap-2 px-4 h-10 whitespace-nowrap bg-bg-card border border-border-card text-text-main text-sm font-bold rounded-[14px] hover:bg-bg-base transition-colors shadow-sm">
+                    <Edit size={16} /> Payroll Settings
                   </button>
                 </div>
-                <button 
-                  onClick={() => handleBulkExportPDF(filteredPayroll)} 
-                  disabled={actionLoading}
-                  className="flex items-center justify-center gap-2 px-4 h-10 whitespace-nowrap bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-bold rounded-[14px] transition-colors shadow-sm disabled:opacity-50"
-                >
-                  <Download size={16} /> {actionLoading ? 'Exporting...' : 'Bulk Export PDF'}
-                </button>
-                <button onClick={() => setShowPayrollSettingsModal(true)} className="flex items-center justify-center gap-2 px-4 h-10 whitespace-nowrap bg-bg-card border border-border-card text-text-main text-sm font-bold rounded-[14px] hover:bg-bg-base transition-colors shadow-sm">
-                  <Edit size={16} /> Payroll Settings
-                </button>
               </div>
-            </div>
 
-            {/* Metrics */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 text-left">
-              <div className="bg-bg-card border border-border-card rounded-[20px] p-5 shadow-sm relative overflow-hidden">
-                <div className="relative z-10">
-                  <span className="text-[10px] font-bold text-text-mut uppercase tracking-wider block">Total Gross Payout</span>
-                  <span className="text-3xl font-extrabold text-text-main block mt-1.5 flex items-center gap-1"><IndianRupee size={24} /> {totalGross.toLocaleString('en-IN')}</span>
-                </div>
-                <div className="absolute right-0 top-0 p-4 opacity-5">
-                  <Banknote size={80} />
-                </div>
-              </div>
-              <div className="bg-bg-card border border-border-card rounded-[20px] p-5 shadow-sm relative overflow-hidden">
-                <div className="relative z-10">
-                  <span className="text-[10px] font-bold text-text-mut uppercase tracking-wider block">Total PF Contribution</span>
-                  <span className="text-3xl font-extrabold text-brand-primary block mt-1.5 flex items-center gap-1"><IndianRupee size={24} /> {totalPF.toLocaleString('en-IN')}</span>
-                </div>
-                <div className="absolute right-0 top-0 p-4 text-brand-primary opacity-5">
-                  <Activity size={80} />
-                </div>
-              </div>
-              <div className="bg-bg-card border border-border-card rounded-[20px] p-5 shadow-sm relative overflow-hidden">
-                <div className="relative z-10">
-                  <span className="text-[10px] font-bold text-text-mut uppercase tracking-wider block">Total Net Payout</span>
-                  <span className="text-3xl font-extrabold text-emerald-500 block mt-1.5 flex items-center gap-1"><IndianRupee size={24} /> {totalNet.toLocaleString('en-IN')}</span>
-                </div>
-                <div className="absolute right-0 top-0 p-4 text-emerald-500 opacity-5">
-                  <Check size={80} />
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-bg-card border border-border-card rounded-[24px] p-6 shadow-sm">
-              <div className="flex flex-col lg:flex-row gap-4 items-stretch lg:items-end">
-                <div className="flex flex-col gap-1.5 flex-grow">
-                  <label className="text-[10px] font-bold text-text-mut uppercase tracking-wider">Search Employee</label>
-                  <div className="relative">
-                    <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-text-mut" />
-                    <input
-                      type="text"
-                      className="w-full pl-10 pr-4 py-2.5 border border-border-card rounded-[12px] bg-bg-base/40 text-xs text-text-main outline-none focus:bg-bg-card focus:border-brand-primary transition-all placeholder-text-mut"
-                      placeholder="Search name or email..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                    />
+              {/* Metrics */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 text-left">
+                <div className="bg-bg-card border border-border-card rounded-[20px] p-5 shadow-sm relative overflow-hidden">
+                  <div className="relative z-10">
+                    <span className="text-[10px] font-bold text-text-mut uppercase tracking-wider block">Total Gross Payout</span>
+                    <span className="text-3xl font-extrabold text-text-main block mt-1.5 flex items-center gap-1"><IndianRupee size={24} /> {totalGross.toLocaleString('en-IN')}</span>
+                  </div>
+                  <div className="absolute right-0 top-0 p-4 opacity-5">
+                    <Banknote size={80} />
                   </div>
                 </div>
-                <div className="flex flex-col gap-1.5 min-w-[150px]">
-                  <label className="text-[10px] font-bold text-text-mut uppercase tracking-wider">Department</label>
-                  <select
-                    className="w-full px-4 py-2.5 border border-border-card rounded-[12px] bg-bg-base/40 text-xs text-text-main outline-none focus:bg-bg-card focus:border-brand-primary transition-all appearance-none"
-                    value={selectedDept}
-                    onChange={(e) => setSelectedDept(e.target.value)}
-                  >
-                    <option value="">All Departments</option>
-                    {departments.map((dept, idx) => <option key={idx} value={dept}>{dept}</option>)}
-                  </select>
+                <div className="bg-bg-card border border-border-card rounded-[20px] p-5 shadow-sm relative overflow-hidden">
+                  <div className="relative z-10">
+                    <span className="text-[10px] font-bold text-text-mut uppercase tracking-wider block">Total PF Contribution</span>
+                    <span className="text-3xl font-extrabold text-brand-primary block mt-1.5 flex items-center gap-1"><IndianRupee size={24} /> {totalPF.toLocaleString('en-IN')}</span>
+                  </div>
+                  <div className="absolute right-0 top-0 p-4 text-brand-primary opacity-5">
+                    <Activity size={80} />
+                  </div>
                 </div>
-                <div className="flex flex-col gap-1.5 min-w-[120px]">
-                  <label className="text-[10px] font-bold text-text-mut uppercase tracking-wider">Month</label>
-                  <select
-                    className="w-full px-4 py-2.5 border border-border-card rounded-[12px] bg-bg-base/40 text-xs text-text-main outline-none focus:bg-bg-card focus:border-brand-primary transition-all appearance-none"
-                    value={payrollMonth}
-                    onChange={(e) => setPayrollMonth(e.target.value)}
-                  >
-                    {["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"].map(m => (
-                      <option key={m} value={m}>{m}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="flex flex-col gap-1.5 min-w-[100px]">
-                  <label className="text-[10px] font-bold text-text-mut uppercase tracking-wider">Year</label>
-                  <select
-                    className="w-full px-4 py-2.5 border border-border-card rounded-[12px] bg-bg-base/40 text-xs text-text-main outline-none focus:bg-bg-card focus:border-brand-primary transition-all appearance-none"
-                    value={payrollYear}
-                    onChange={(e) => setPayrollYear(Number(e.target.value))}
-                  >
-                    {[...Array(5)].map((_, i) => {
-                      const year = new Date().getFullYear() - 2 + i;
-                      return <option key={year} value={year}>{year}</option>;
-                    })}
-                  </select>
+                <div className="bg-bg-card border border-border-card rounded-[20px] p-5 shadow-sm relative overflow-hidden">
+                  <div className="relative z-10">
+                    <span className="text-[10px] font-bold text-text-mut uppercase tracking-wider block">Total Net Payout</span>
+                    <span className="text-3xl font-extrabold text-emerald-500 block mt-1.5 flex items-center gap-1"><IndianRupee size={24} /> {totalNet.toLocaleString('en-IN')}</span>
+                  </div>
+                  <div className="absolute right-0 top-0 p-4 text-emerald-500 opacity-5">
+                    <Check size={80} />
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <div className="bg-bg-card border border-border-card rounded-[24px] p-6 shadow-sm overflow-hidden text-left">
-              <div className="overflow-x-auto custom-scrollbar -mx-6 px-6">
-                <table className="w-full min-w-[950px] border-collapse">
-                  <thead>
-                    <tr className="border-b border-border-card">
-                      <th className="pb-3 px-3 text-center text-[10px] font-extrabold text-text-mut uppercase tracking-wider w-12">S.No</th>
-                      <th className="pb-3 px-4 text-left text-[10px] font-extrabold text-text-mut uppercase tracking-wider">Employee Name</th>
-                      <th className="pb-3 px-4 text-left text-[10px] font-extrabold text-text-mut uppercase tracking-wider">Gross Salary</th>
-                      <th className="pb-3 px-4 text-left text-[10px] font-extrabold text-text-mut uppercase tracking-wider">Basic Pay</th>
-                      <th className="pb-3 px-4 text-left text-[10px] font-extrabold text-text-mut uppercase tracking-wider">Other Allowance</th>
-                      <th className="pb-3 px-4 text-left text-[10px] font-extrabold text-text-mut uppercase tracking-wider">PF (12%)</th>
-                      <th className="pb-3 px-4 text-left text-[10px] font-extrabold text-text-mut uppercase tracking-wider">ESI (0.75%)</th>
-                      <th className="pb-3 px-4 text-left text-[10px] font-extrabold text-text-mut uppercase tracking-wider">Net Salary</th>
-                      <th className="pb-3 px-4 text-right text-[10px] font-extrabold text-text-mut uppercase tracking-wider">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredPayroll.length === 0 ? (
-                      <tr>
-                        <td colSpan="9" className="text-center py-12 text-sm text-text-mut">No payroll data found.</td>
+              <div className="bg-bg-card border border-border-card rounded-[24px] p-6 shadow-sm">
+                <div className="flex flex-col lg:flex-row gap-4 items-stretch lg:items-end">
+                  <div className="flex flex-col gap-1.5 flex-grow">
+                    <label className="text-[10px] font-bold text-text-mut uppercase tracking-wider">Search Employee</label>
+                    <div className="relative">
+                      <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-text-mut" />
+                      <input
+                        type="text"
+                        className="w-full pl-10 pr-4 py-2.5 border border-border-card rounded-[12px] bg-bg-base/40 text-xs text-text-main outline-none focus:bg-bg-card focus:border-brand-primary transition-all placeholder-text-mut"
+                        placeholder="Search name or email..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-1.5 min-w-[150px]">
+                    <label className="text-[10px] font-bold text-text-mut uppercase tracking-wider">Department</label>
+                    <select
+                      className="w-full px-4 py-2.5 border border-border-card rounded-[12px] bg-bg-base/40 text-xs text-text-main outline-none focus:bg-bg-card focus:border-brand-primary transition-all appearance-none"
+                      value={selectedDept}
+                      onChange={(e) => setSelectedDept(e.target.value)}
+                    >
+                      <option value="">All Departments</option>
+                      {departments.map((dept, idx) => <option key={idx} value={dept}>{dept}</option>)}
+                    </select>
+                  </div>
+                  <div className="flex flex-col gap-1.5 min-w-[120px]">
+                    <label className="text-[10px] font-bold text-text-mut uppercase tracking-wider">Month</label>
+                    <select
+                      className="w-full px-4 py-2.5 border border-border-card rounded-[12px] bg-bg-base/40 text-xs text-text-main outline-none focus:bg-bg-card focus:border-brand-primary transition-all appearance-none"
+                      value={payrollMonth}
+                      onChange={(e) => setPayrollMonth(e.target.value)}
+                    >
+                      {["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"].map(m => (
+                        <option key={m} value={m}>{m}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex flex-col gap-1.5 min-w-[100px]">
+                    <label className="text-[10px] font-bold text-text-mut uppercase tracking-wider">Year</label>
+                    <select
+                      className="w-full px-4 py-2.5 border border-border-card rounded-[12px] bg-bg-base/40 text-xs text-text-main outline-none focus:bg-bg-card focus:border-brand-primary transition-all appearance-none"
+                      value={payrollYear}
+                      onChange={(e) => setPayrollYear(Number(e.target.value))}
+                    >
+                      {[...Array(5)].map((_, i) => {
+                        const year = new Date().getFullYear() - 2 + i;
+                        return <option key={year} value={year}>{year}</option>;
+                      })}
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-bg-card border border-border-card rounded-[24px] p-6 shadow-sm overflow-hidden text-left">
+                <div className="overflow-x-auto custom-scrollbar -mx-6 px-6">
+                  <table className="w-full min-w-[950px] border-collapse">
+                    <thead>
+                      <tr className="border-b border-border-card">
+                        <th className="pb-3 px-3 text-center text-[10px] font-extrabold text-text-mut uppercase tracking-wider w-12">S.No</th>
+                        <th className="pb-3 px-4 text-left text-[10px] font-extrabold text-text-mut uppercase tracking-wider">Employee Name</th>
+                        <th className="pb-3 px-4 text-left text-[10px] font-extrabold text-text-mut uppercase tracking-wider">Gross Salary</th>
+                        <th className="pb-3 px-4 text-left text-[10px] font-extrabold text-text-mut uppercase tracking-wider">Basic Pay</th>
+                        <th className="pb-3 px-4 text-left text-[10px] font-extrabold text-text-mut uppercase tracking-wider">Other Allowance</th>
+                        <th className="pb-3 px-4 text-left text-[10px] font-extrabold text-text-mut uppercase tracking-wider">PF (12%)</th>
+                        <th className="pb-3 px-4 text-left text-[10px] font-extrabold text-text-mut uppercase tracking-wider">ESI (0.75%)</th>
+                        <th className="pb-3 px-4 text-left text-[10px] font-extrabold text-text-mut uppercase tracking-wider">Net Salary</th>
+                        <th className="pb-3 px-4 text-right text-[10px] font-extrabold text-text-mut uppercase tracking-wider">Actions</th>
                       </tr>
-                    ) : (
-                      filteredPayroll.map((user, idx) => (
-                        <tr key={user.uid} className="border-b border-border-card/50 hover:bg-bg-base/30 transition-colors">
-                          <td className="py-3 px-3 text-center text-xs font-bold text-text-mut">
-                            {idx + 1}
-                          </td>
-                          <td className="py-3 px-4">
-                            <div className="flex flex-col">
-                              <span className="text-xs font-extrabold text-text-main">{user.name}</span>
-                              <span className="text-[10px] font-bold text-text-sec uppercase mt-0.5">{user.designation || user.role}</span>
-                            </div>
-                          </td>
-                          <td className="py-3 px-4">
-                            <span className="text-xs font-extrabold text-text-main flex items-center gap-0.5"><IndianRupee size={12} /> {user.gross.toLocaleString('en-IN')}</span>
-                          </td>
-                          <td className="py-3 px-4">
-                            <div className="flex flex-col">
-                              <span className="text-xs font-bold text-text-sec">₹{user.basic.toLocaleString('en-IN')}</span>
-                              <span className="text-[10px] font-medium text-text-mut font-mono">({user.basicPercentage || companyPayrollSettings?.basicPercentage || 50}%)</span>
-                            </div>
-                          </td>
-                          <td className="py-3 px-4">
-                            <div className="flex flex-col">
-                              <span className="text-xs font-bold text-text-sec">₹{(user.otherAllowance !== undefined ? user.otherAllowance : user.special || 0).toLocaleString('en-IN')}</span>
-                              <span className="text-[10px] font-medium text-text-mut font-mono">({user.otherAllowancePercentage || companyPayrollSettings?.otherAllowancePercentage || 30}%)</span>
-                            </div>
-                          </td>
-                          <td className="py-3 px-4">
-                            {companyPayrollSettings?.pf ? (
-                              <span className="text-xs font-bold text-brand-danger">₹{user.pf.toLocaleString('en-IN')}</span>
-                            ) : (
-                              <span className="text-xs text-text-mut">Disabled</span>
-                            )}
-                          </td>
-                          <td className="py-3 px-4">
-                            {companyPayrollSettings?.esi ? (
-                              user.gross <= 21000 ? (
-                                <span className="text-xs font-bold text-brand-danger">₹{user.esi.toLocaleString('en-IN')}</span>
-                              ) : (
-                                <span className="text-[11px] font-semibold text-text-mut" title="Gross salary exceeds ₹21,000 wage ceiling">₹0 <span className="text-[10px] text-text-mut/70">(Not eligible)</span></span>
-                              )
-                            ) : (
-                              <span className="text-xs text-text-mut">Disabled</span>
-                            )}
-                          </td>
-                          <td className="py-3 px-4">
-                            <span className="text-xs font-extrabold text-emerald-500 bg-emerald-500/10 px-2.5 py-1 rounded-[8px] border border-emerald-500/20">₹{user.net.toLocaleString('en-IN')}</span>
-                          </td>
-                          <td className="py-3 px-4 text-right">
-                            <div className="flex justify-end gap-1.5">
-                              <button 
-                                onClick={async () => {
-                                  setSelectedPayrollUser(user);
-                                  setEditSalaryValue(user.gross);
-                                  setEditSalaryEffectiveDate(user.effectiveDate || new Date().toISOString().split("T")[0]);
-                                  setAttendanceSummary(null);
-                                  setShowEditSalaryModal(true);
-                                  setAttendanceSummaryLoading(true);
-                                  try {
-                                    const targetId = user.uid || user.id || user.employeeId || user.employee_id;
-                                    const summary = await getEmployeeAttendancePayrollSummary(
-                                      targetId,
-                                      payrollMonth,
-                                      payrollYear,
-                                      currentUser.companyId,
-                                      companyPayrollSettings?.workingDays || 30
-                                    );
-                                    if (summary && summary.lopDays !== undefined) {
-                                      setAttendanceSummary(summary);
-                                      setEditLeaveDaysValue(summary.lopDays);
-                                    } else {
-                                      setEditLeaveDaysValue(user.paidDays !== undefined ? Math.max(0, (companyPayrollSettings?.workingDays || 30) - user.paidDays) : 0);
-                                    }
-                                  } catch (err) {
-                                    setEditLeaveDaysValue(user.paidDays !== undefined ? Math.max(0, (companyPayrollSettings?.workingDays || 30) - user.paidDays) : 0);
-                                  } finally {
-                                    setAttendanceSummaryLoading(false);
-                                  }
-                                }}
-                                className="p-1.5 text-text-mut hover:text-brand-primary bg-bg-base hover:bg-brand-primary/10 rounded-lg transition-colors border border-border-card/60"
-                                title="Edit Salary"
-                              >
-                                <Edit size={14} />
-                              </button>
-                              <button 
-                                onClick={() => {
-                                  setSelectedPayrollUser(user);
-                                  setShowPayslipModal(true);
-                                }}
-                                className="p-1.5 text-text-mut hover:text-emerald-500 bg-bg-base hover:bg-emerald-500/10 rounded-lg transition-colors border border-border-card/60"
-                                title="View Payslip"
-                              >
-                                <FileText size={14} />
-                              </button>
-                              <button 
-                                onClick={() => {
-                                  setSelectedPayrollUser(user);
-                                  setTimeout(() => {
-                                    const element = document.getElementById('payslip-content');
-                                    if (element) {
-                                      const opt = {
-                                        margin:       0,
-                                        filename:     `Payslip_${user.name}_${payrollMonth}_${payrollYear}.pdf`,
-                                        image:        { type: 'jpeg', quality: 0.98 },
-                                        html2canvas:  { scale: 2, useCORS: true },
-                                        jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
-                                      };
-                                      html2pdf().set(opt).from(element).save();
-                                      showToast(`Downloaded payslip for ${user.name}`, "success");
-                                    }
-                                  }, 100);
-                                }}
-                                className="p-1.5 text-text-mut hover:text-blue-500 bg-bg-base hover:bg-blue-500/10 rounded-lg transition-colors border border-border-card/60"
-                                title="Download Payslip PDF"
-                              >
-                                <Download size={14} />
-                              </button>
-                            </div>
-                          </td>
+                    </thead>
+                    <tbody>
+                      {filteredPayroll.length === 0 ? (
+                        <tr>
+                          <td colSpan="9" className="text-center py-12 text-sm text-text-mut">No payroll data found.</td>
                         </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
+                      ) : (
+                        filteredPayroll.map((user, idx) => (
+                          <tr key={user.uid} className="border-b border-border-card/50 hover:bg-bg-base/30 transition-colors">
+                            <td className="py-3 px-3 text-center text-xs font-bold text-text-mut">
+                              {idx + 1}
+                            </td>
+                            <td className="py-3 px-4">
+                              <div className="flex flex-col">
+                                <span className="text-xs font-extrabold text-text-main">{user.name}</span>
+                                <span className="text-[10px] font-bold text-text-sec uppercase mt-0.5">{user.designation || user.role}</span>
+                              </div>
+                            </td>
+                            <td className="py-3 px-4">
+                              <span className="text-xs font-extrabold text-text-main flex items-center gap-0.5"><IndianRupee size={12} /> {user.gross.toLocaleString('en-IN')}</span>
+                            </td>
+                            <td className="py-3 px-4">
+                              <div className="flex flex-col">
+                                <span className="text-xs font-bold text-text-sec">₹{user.basic.toLocaleString('en-IN')}</span>
+                                <span className="text-[10px] font-medium text-text-mut font-mono">({user.basicPercentage || companyPayrollSettings?.basicPercentage || 50}%)</span>
+                              </div>
+                            </td>
+                            <td className="py-3 px-4">
+                              <div className="flex flex-col">
+                                <span className="text-xs font-bold text-text-sec">₹{(user.otherAllowance !== undefined ? user.otherAllowance : user.special || 0).toLocaleString('en-IN')}</span>
+                                <span className="text-[10px] font-medium text-text-mut font-mono">({user.otherAllowancePercentage || companyPayrollSettings?.otherAllowancePercentage || 30}%)</span>
+                              </div>
+                            </td>
+                            <td className="py-3 px-4">
+                              {companyPayrollSettings?.pf ? (
+                                <span className="text-xs font-bold text-brand-danger">₹{user.pf.toLocaleString('en-IN')}</span>
+                              ) : (
+                                <span className="text-xs text-text-mut">Disabled</span>
+                              )}
+                            </td>
+                            <td className="py-3 px-4">
+                              {companyPayrollSettings?.esi ? (
+                                user.gross <= 21000 ? (
+                                  <span className="text-xs font-bold text-brand-danger">₹{user.esi.toLocaleString('en-IN')}</span>
+                                ) : (
+                                  <span className="text-[11px] font-semibold text-text-mut" title="Gross salary exceeds ₹21,000 wage ceiling">₹0 <span className="text-[10px] text-text-mut/70">(Not eligible)</span></span>
+                                )
+                              ) : (
+                                <span className="text-xs text-text-mut">Disabled</span>
+                              )}
+                            </td>
+                            <td className="py-3 px-4">
+                              <span className="text-xs font-extrabold text-emerald-500 bg-emerald-500/10 px-2.5 py-1 rounded-[8px] border border-emerald-500/20">₹{user.net.toLocaleString('en-IN')}</span>
+                            </td>
+                            <td className="py-3 px-4 text-right">
+                              <div className="flex justify-end gap-1.5">
+                                <button
+                                  onClick={async () => {
+                                    setSelectedPayrollUser(user);
+                                    setEditSalaryValue(user.gross);
+                                    setEditSalaryEffectiveDate(user.effectiveDate || new Date().toISOString().split("T")[0]);
+                                    setAttendanceSummary(null);
+                                    setShowEditSalaryModal(true);
+                                    setAttendanceSummaryLoading(true);
+                                    try {
+                                      const targetId = user.uid || user.id || user.employeeId || user.employee_id;
+                                      const summary = await getEmployeeAttendancePayrollSummary(
+                                        targetId,
+                                        payrollMonth,
+                                        payrollYear,
+                                        currentUser.companyId,
+                                        companyPayrollSettings?.workingDays || 30
+                                      );
+                                      if (summary && summary.lopDays !== undefined) {
+                                        setAttendanceSummary(summary);
+                                        setEditLeaveDaysValue(summary.lopDays);
+                                      } else {
+                                        setEditLeaveDaysValue(user.paidDays !== undefined ? Math.max(0, (companyPayrollSettings?.workingDays || 30) - user.paidDays) : 0);
+                                      }
+                                    } catch (err) {
+                                      setEditLeaveDaysValue(user.paidDays !== undefined ? Math.max(0, (companyPayrollSettings?.workingDays || 30) - user.paidDays) : 0);
+                                    } finally {
+                                      setAttendanceSummaryLoading(false);
+                                    }
+                                  }}
+                                  className="p-1.5 text-text-mut hover:text-brand-primary bg-bg-base hover:bg-brand-primary/10 rounded-lg transition-colors border border-border-card/60"
+                                  title="Edit Salary"
+                                >
+                                  <Edit size={14} />
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setSelectedPayrollUser(user);
+                                    setShowPayslipModal(true);
+                                  }}
+                                  className="p-1.5 text-text-mut hover:text-emerald-500 bg-bg-base hover:bg-emerald-500/10 rounded-lg transition-colors border border-border-card/60"
+                                  title="View Payslip"
+                                >
+                                  <FileText size={14} />
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setSelectedPayrollUser(user);
+                                    setTimeout(() => {
+                                      const element = document.getElementById('payslip-content');
+                                      if (element) {
+                                        const opt = {
+                                          margin: 0,
+                                          filename: `Payslip_${user.name}_${payrollMonth}_${payrollYear}.pdf`,
+                                          image: { type: 'jpeg', quality: 0.98 },
+                                          html2canvas: { scale: 2, useCORS: true },
+                                          jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
+                                        };
+                                        html2pdf().set(opt).from(element).save();
+                                        showToast(`Downloaded payslip for ${user.name}`, "success");
+                                      }
+                                    }, 100);
+                                  }}
+                                  className="p-1.5 text-text-mut hover:text-blue-500 bg-bg-base hover:bg-blue-500/10 rounded-lg transition-colors border border-border-card/60"
+                                  title="Download Payslip PDF"
+                                >
+                                  <Download size={14} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
-          </div>
 
             {/* HIDDEN BULK PDF CONTAINER */}
             <div className="absolute top-[-9999px] left-[-9999px] w-[800px] pointer-events-none opacity-0">
               <div id="bulk-payslip-content" className="bg-white text-left font-sans text-black w-full">
-              {filteredPayroll.map((user, index) => (
-                <div key={user.uid} style={{ pageBreakAfter: index === filteredPayroll.length - 1 ? 'auto' : 'always' }}>
-                  <div className="p-8 pb-[100px]">
-                    {/* Header */}
-                    <div className="flex items-center mb-6">
-                      <div className="w-1/3">
-                        {companyLogo && <img src={companyLogo} crossOrigin="anonymous" alt={companyName} className="h-14 object-contain" />}
+                {filteredPayroll.map((user, index) => (
+                  <div key={user.uid} style={{ pageBreakAfter: index === filteredPayroll.length - 1 ? 'auto' : 'always' }}>
+                    <div className="p-8 pb-[100px]">
+                      {/* Header */}
+                      <div className="flex items-center mb-6">
+                        <div className="w-1/3">
+                          {companyLogo && <img src={companyLogo} crossOrigin="anonymous" alt={companyName} className="h-14 object-contain" />}
+                        </div>
+                        <div className="w-1/3 flex flex-col items-center justify-center text-center">
+                          <h1 className="text-lg font-extrabold text-[#000080] whitespace-nowrap">{companyName || "ZUNA HRMS"}</h1>
+                        </div>
+                        <div className="w-1/3"></div>
                       </div>
-                      <div className="w-1/3 flex flex-col items-center justify-center text-center">
-                        <h1 className="text-lg font-extrabold text-[#000080] whitespace-nowrap">{companyName || "ZUNA HRMS"}</h1>
+                      <div className="text-center mb-4 -mt-4">
+                        {companyAddress && <p className="text-[11px] font-bold text-black mt-1 whitespace-pre-wrap">{companyAddress}</p>}
                       </div>
-                      <div className="w-1/3"></div>
-                    </div>
-                    <div className="text-center mb-4 -mt-4">
-                      {companyAddress && <p className="text-[11px] font-bold text-black mt-1 whitespace-pre-wrap">{companyAddress}</p>}
-                    </div>
-                    
-                    <div className="text-center mb-2 mt-4">
-                      <h2 className="text-xl font-extrabold text-black tracking-wider uppercase">PAYSLIP</h2>
-                    </div>
-                    
-                    <div className="border-t-[3px] border-black w-full my-2"></div>
 
-                    <div className="text-center mb-2 mt-2">
-                      <p className="text-sm font-extrabold text-black">Payslip for the month of {payrollMonth}, {payrollYear}</p>
-                    </div>
-
-                    <div className="border-t-[3px] border-black w-full mb-4"></div>
-                    
-                    {/* Employee Info Grid */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-1 text-[10px] font-normal text-black mb-4">
-                      {/* Left Column */}
-                      <div>
-                        <div className="grid grid-cols-[120px_1fr]"><span>Emp Name</span><span>: {user.name || 'NaN'}</span></div>
-                        <div className="grid grid-cols-[120px_1fr]"><span>Emp Code</span><span>: {user.employeeId || 'NaN'}</span></div>
-                        <div className="grid grid-cols-[120px_1fr]"><span>Department</span><span>: {user.department || 'NaN'}</span></div>
-                        <div className="grid grid-cols-[120px_1fr]"><span>Designation</span><span>: {user.designation || 'NaN'}</span></div>
-                        <div className="grid grid-cols-[120px_1fr]"><span>Grade</span><span>: {user.grade || 'NaN'}</span></div>
-                        <div className="grid grid-cols-[120px_1fr]"><span>PF No.</span><span>: {user.pfNo || 'NaN'}</span></div>
-                        <div className="grid grid-cols-[120px_1fr]"><span>PF UAN</span><span>: {user.uan || 'NaN'}</span></div>
-                        <div className="grid grid-cols-[120px_1fr]"><span>Bank Account No.</span><span>: {user.bankAcNo || 'NaN'}</span></div>
-                        <div className="grid grid-cols-[120px_1fr]"><span>IFSC</span><span>: {user.ifscCode || 'NaN'}</span></div>
+                      <div className="text-center mb-2 mt-4">
+                        <h2 className="text-xl font-extrabold text-black tracking-wider uppercase">PAYSLIP</h2>
                       </div>
-                      {/* Right Column */}
-                      <div>
-                        <div className="grid grid-cols-[120px_1fr]"><span>Office Address</span><span className="line-clamp-2" title={companyAddress}>: {companyAddress || 'NaN'}</span></div>
-                        <div className="grid grid-cols-[120px_1fr]"><span>Joining Date</span><span>: {user.joiningDate || 'NaN'}</span></div>
-                        <div className="grid grid-cols-[120px_1fr]"><span>Paid Days</span><span>: {Number(user.paidDays || companyPayrollSettings?.workingDays || 30).toFixed(2)}</span></div>
-                        <div className="grid grid-cols-[120px_1fr]"><span>Working Days</span><span>: {Number(user.workingDays || companyPayrollSettings?.workingDays || 30).toFixed(2)}</span></div>
-                        <div className="grid grid-cols-[120px_1fr]"><span>Cost Center</span><span>: {user.costCenter || 'NaN'}</span></div>
-                        <div className="grid grid-cols-[120px_1fr]"><span>PAN</span><span>: {user.pan || 'NaN'}</span></div>
-                        <div className="grid grid-cols-[120px_1fr]"><span>Gender</span><span>: {user.gender || 'NaN'}</span></div>
-                        <div className="grid grid-cols-[120px_1fr]"><span>Loss of Pay Days</span><span>: {Math.max(0, (user.lopsDays || 0)).toFixed(2)}</span></div>
+
+                      <div className="border-t-[3px] border-black w-full my-2"></div>
+
+                      <div className="text-center mb-2 mt-2">
+                        <p className="text-sm font-extrabold text-black">Payslip for the month of {payrollMonth}, {payrollYear}</p>
                       </div>
-                    </div>
 
-                    <div className="border-t-[3px] border-black w-full my-2"></div>
+                      <div className="border-t-[3px] border-black w-full mb-4"></div>
 
-                    {/* Financial Table Header */}
-                    <div className="grid grid-cols-12 gap-2 text-[10px] font-extrabold text-black py-1">
-                      <div className="col-span-4">Earnings</div>
-                      <div className="col-span-2 text-right">Earned Amt.</div>
-                      <div className="col-span-2 text-right">Arrears</div>
-                      <div className="col-span-3 pl-4">Deductions</div>
-                      <div className="col-span-1 text-right">Amount</div>
-                    </div>
-                    
-                    <div className="border-t-[3px] border-black w-full mb-3"></div>
+                      {/* Employee Info Grid */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-1 text-[10px] font-normal text-black mb-4">
+                        {/* Left Column */}
+                        <div>
+                          <div className="grid grid-cols-[120px_1fr]"><span>Emp Name</span><span>: {user.name || 'NaN'}</span></div>
+                          <div className="grid grid-cols-[120px_1fr]"><span>Emp Code</span><span>: {user.employeeId || 'NaN'}</span></div>
+                          <div className="grid grid-cols-[120px_1fr]"><span>Department</span><span>: {user.department || 'NaN'}</span></div>
+                          <div className="grid grid-cols-[120px_1fr]"><span>Designation</span><span>: {user.designation || 'NaN'}</span></div>
+                          <div className="grid grid-cols-[120px_1fr]"><span>Grade</span><span>: {user.grade || 'NaN'}</span></div>
+                          <div className="grid grid-cols-[120px_1fr]"><span>PF No.</span><span>: {user.pfNo || 'NaN'}</span></div>
+                          <div className="grid grid-cols-[120px_1fr]"><span>PF UAN</span><span>: {user.uan || 'NaN'}</span></div>
+                          <div className="grid grid-cols-[120px_1fr]"><span>Bank Account No.</span><span>: {user.bankAcNo || 'NaN'}</span></div>
+                          <div className="grid grid-cols-[120px_1fr]"><span>IFSC</span><span>: {user.ifscCode || 'NaN'}</span></div>
+                        </div>
+                        {/* Right Column */}
+                        <div>
+                          <div className="grid grid-cols-[120px_1fr]"><span>Office Address</span><span className="line-clamp-2" title={companyAddress}>: {companyAddress || 'NaN'}</span></div>
+                          <div className="grid grid-cols-[120px_1fr]"><span>Joining Date</span><span>: {user.joiningDate || 'NaN'}</span></div>
+                          <div className="grid grid-cols-[120px_1fr]"><span>Paid Days</span><span>: {Number(user.paidDays || companyPayrollSettings?.workingDays || 30).toFixed(2)}</span></div>
+                          <div className="grid grid-cols-[120px_1fr]"><span>Working Days</span><span>: {Number(user.workingDays || companyPayrollSettings?.workingDays || 30).toFixed(2)}</span></div>
+                          <div className="grid grid-cols-[120px_1fr]"><span>Cost Center</span><span>: {user.costCenter || 'NaN'}</span></div>
+                          <div className="grid grid-cols-[120px_1fr]"><span>PAN</span><span>: {user.pan || 'NaN'}</span></div>
+                          <div className="grid grid-cols-[120px_1fr]"><span>Gender</span><span>: {user.gender || 'NaN'}</span></div>
+                          <div className="grid grid-cols-[120px_1fr]"><span>Loss of Pay Days</span><span>: {Math.max(0, (user.lopsDays || 0)).toFixed(2)}</span></div>
+                        </div>
+                      </div>
 
-                    <div className="grid grid-cols-12 gap-y-1 gap-x-2 text-[10px] text-black pb-4 font-normal">
-                      {/* Row 1 */}
-                      <div className="col-span-4">Basic Pay ({user.basicPercentage || companyPayrollSettings?.basicPercentage || 50}%)</div>
-                      <div className="col-span-2 text-right">{(user.basic || 0).toFixed(2)}</div>
-                      <div className="col-span-2 text-right">0.00</div>
-                      <div className="col-span-3 pl-4">Provident Fund (12%)</div>
-                      <div className="col-span-1 text-right">{(user.pf || 0).toFixed(2)}</div>
+                      <div className="border-t-[3px] border-black w-full my-2"></div>
 
-                      {/* Row 2 */}
-                      <div className="col-span-4">Other Allowance ({user.otherAllowancePercentage || companyPayrollSettings?.otherAllowancePercentage || 30}%)</div>
-                      <div className="col-span-2 text-right">{((user.otherAllowance !== undefined ? user.otherAllowance : user.special) || 0).toFixed(2)}</div>
-                      <div className="col-span-2 text-right">0.00</div>
-                      <div className="col-span-3 pl-4">Employee ESI (0.75%)</div>
-                      <div className="col-span-1 text-right">{(user.esi || 0).toFixed(2)}</div>
+                      {/* Financial Table Header */}
+                      <div className="grid grid-cols-12 gap-2 text-[10px] font-extrabold text-black py-1">
+                        <div className="col-span-4">Earnings</div>
+                        <div className="col-span-2 text-right">Earned Amt.</div>
+                        <div className="col-span-2 text-right">Arrears</div>
+                        <div className="col-span-3 pl-4">Deductions</div>
+                        <div className="col-span-1 text-right">Amount</div>
+                      </div>
 
-                      {/* Row 3 */}
-                      <div className="col-span-4"></div>
-                      <div className="col-span-2 text-right"></div>
-                      <div className="col-span-2 text-right"></div>
-                      <div className="col-span-3 pl-4">Professional Tax</div>
-                      <div className="col-span-1 text-right">{(user.pt || 0).toFixed(2)}</div>
+                      <div className="border-t-[3px] border-black w-full mb-3"></div>
 
-                      {/* Row 4 */}
-                      <div className="col-span-4"></div>
-                      <div className="col-span-2 text-right"></div>
-                      <div className="col-span-2 text-right"></div>
-                      <div className="col-span-3 pl-4">Loss of Pay</div>
-                      <div className="col-span-1 text-right">{(user.lopAmount || 0).toFixed(2)}</div>
+                      <div className="grid grid-cols-12 gap-y-1 gap-x-2 text-[10px] text-black pb-4 font-normal">
+                        {/* Row 1 */}
+                        <div className="col-span-4">Basic Pay ({user.basicPercentage || companyPayrollSettings?.basicPercentage || 50}%)</div>
+                        <div className="col-span-2 text-right">{(user.basic || 0).toFixed(2)}</div>
+                        <div className="col-span-2 text-right">0.00</div>
+                        <div className="col-span-3 pl-4">Provident Fund (12%)</div>
+                        <div className="col-span-1 text-right">{(user.pf || 0).toFixed(2)}</div>
 
-                      {/* Row 5 */}
-                      <div className="col-span-4"></div>
-                      <div className="col-span-2 text-right"></div>
-                      <div className="col-span-2 text-right"></div>
-                      <div className="col-span-3 pl-4">{(user.insurance || 0) > 0 ? 'Health Insurance' : ''}</div>
-                      <div className="col-span-1 text-right">{(user.insurance || 0) > 0 ? Number(user.insurance).toFixed(2) : ''}</div>
-                    </div>
-                    
-                    <div className="border-t-[3px] border-black w-full my-1"></div>
-                    
-                    <div className="grid grid-cols-12 gap-2 text-[10px] font-extrabold text-black py-1">
-                      <div className="col-span-4">Gross Earning</div>
-                      <div className="col-span-2 text-right">{(user.gross || 0).toFixed(2)}</div>
-                      <div className="col-span-2 text-right">0.00</div>
-                      <div className="col-span-3 pl-4">Gross Deduction</div>
-                      <div className="col-span-1 text-right">{(user.pf + user.pt + user.esi + user.tds + (user.lopAmount || 0)).toFixed(2)}</div>
-                    </div>
+                        {/* Row 2 */}
+                        <div className="col-span-4">Other Allowance ({user.otherAllowancePercentage || companyPayrollSettings?.otherAllowancePercentage || 30}%)</div>
+                        <div className="col-span-2 text-right">{((user.otherAllowance !== undefined ? user.otherAllowance : user.special) || 0).toFixed(2)}</div>
+                        <div className="col-span-2 text-right">0.00</div>
+                        <div className="col-span-3 pl-4">Employee ESI (0.75%)</div>
+                        <div className="col-span-1 text-right">{(user.esi || 0).toFixed(2)}</div>
 
-                    <div className="border-t-[3px] border-black w-full my-1"></div>
+                        {/* Row 3 */}
+                        <div className="col-span-4"></div>
+                        <div className="col-span-2 text-right"></div>
+                        <div className="col-span-2 text-right"></div>
+                        <div className="col-span-3 pl-4">Loss of Pay</div>
+                        <div className="col-span-1 text-right">{(user.lopAmount || 0).toFixed(2)}</div>
+                      </div>
 
-                    <div className="grid grid-cols-12 gap-2 text-[10px] font-extrabold text-black py-1 mb-4">
-                      <div className="col-span-4">Net Amount</div>
-                      <div className="col-span-2 text-right">{(user.net || 0).toFixed(2)}</div>
-                    </div>
-                    
-                    <div className="text-[10px] text-black mb-4 font-normal">
-                      Net Amount in words: ( {numberToWords(user.net || 0).toUpperCase()} ONLY )
-                    </div>
-                    
-                    <div className="text-[10px] font-extrabold text-black mb-12">
-                      Disclaimer: This is a system generated payslip, does not require any signature.
-                    </div>
-                    
-                    {/* Footer Logo */}
-                    <div className="mt-12 flex justify-center items-center gap-2 pb-2">
-                      <span className="text-[11px] font-extrabold text-black">Powered by</span>
-                      <img src={zunaLogo} alt="Zuna Logo" className="h-6 object-contain" />
-                      <span className="text-[11px] font-extrabold text-black ml-1">Simplify payroll and compliance.</span>
+                      <div className="border-t-[3px] border-black w-full my-1"></div>
+
+                      <div className="grid grid-cols-12 gap-2 text-[10px] font-extrabold text-black py-1">
+                        <div className="col-span-4">Gross Earning</div>
+                        <div className="col-span-2 text-right">{(user.gross || 0).toFixed(2)}</div>
+                        <div className="col-span-2 text-right">0.00</div>
+                        <div className="col-span-3 pl-4">Gross Deduction</div>
+                        <div className="col-span-1 text-right">{(user.pf + user.esi + (user.lopAmount || 0)).toFixed(2)}</div>
+                      </div>
+
+                      <div className="border-t-[3px] border-black w-full my-1"></div>
+
+                      <div className="grid grid-cols-12 gap-2 text-[10px] font-extrabold text-black py-1 mb-4">
+                        <div className="col-span-4">Net Amount</div>
+                        <div className="col-span-2 text-right">{(user.net || 0).toFixed(2)}</div>
+                      </div>
+
+                      <div className="text-[10px] text-black mb-4 font-normal">
+                        Net Amount in words: ( {numberToWords(user.net || 0).toUpperCase()} ONLY )
+                      </div>
+
+                      <div className="text-[10px] font-extrabold text-black mb-12">
+                        Disclaimer: This is a system generated payslip, does not require any signature.
+                      </div>
+
+                      {/* Footer Logo */}
+                      <div className="mt-12 flex justify-center items-center gap-2 pb-2">
+                        <span className="text-[11px] font-extrabold text-black">Powered by</span>
+                        <img src={zunaLogo} alt="Zuna Logo" className="h-6 object-contain" />
+                        <span className="text-[11px] font-extrabold text-black ml-1">Simplify payroll and compliance.</span>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                ))}
               </div>
             </div>
           </>
@@ -6876,7 +6816,7 @@ export default function AdminDashboard() {
       {/* ------------------ VIEW: EXTERNAL LINKS ------------------ */}
       {(activeTab === "external-links" && (isAdminUser || can("read", "ExternalLinks"))) && (
         <div className="animate-fade-in">
-          <ExternalLinksTab 
+          <ExternalLinksTab
             currentUser={currentUser}
             users={users}
             showToast={showToast}
@@ -6900,11 +6840,11 @@ export default function AdminDashboard() {
               </div>
               <button onClick={() => setShowEditSalaryModal(false)} className="text-text-mut hover:text-text-main transition-colors p-1 rounded-lg hover:bg-bg-base"><X size={18} /></button>
             </div>
-                        <div className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+            <div className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
               {/* Employee Name (Read-Only) */}
               <div>
                 <label className="text-xs font-bold text-text-sec block mb-1.5">Employee Name</label>
-                <input 
+                <input
                   type="text"
                   readOnly
                   value={`${selectedPayrollUser.name} (${selectedPayrollUser.designation || selectedPayrollUser.role || 'Employee'})`}
@@ -6917,7 +6857,7 @@ export default function AdminDashboard() {
                 <label className="text-xs font-bold text-text-sec block mb-1.5">Monthly Gross Salary (₹)</label>
                 <div className="relative">
                   <IndianRupee size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-text-mut" />
-                  <input 
+                  <input
                     type="number"
                     min="0"
                     value={editSalaryValue}
@@ -7001,7 +6941,7 @@ export default function AdminDashboard() {
                     {/* Salary Effective Date */}
                     <div>
                       <label className="text-xs font-bold text-text-sec block mb-1.5">Salary Effective Date</label>
-                      <input 
+                      <input
                         type="date"
                         value={editSalaryEffectiveDate}
                         onChange={(e) => setEditSalaryEffectiveDate(e.target.value)}
@@ -7024,7 +6964,7 @@ export default function AdminDashboard() {
                   )}
                 </div>
                 <div className="relative">
-                  <input 
+                  <input
                     type="number"
                     step="0.5"
                     min="0"
@@ -7082,20 +7022,8 @@ export default function AdminDashboard() {
                 const other = Math.round((actualGross * (otherPct / 100)) * 100) / 100;
                 const pf = companyPayrollSettings?.pf ? Math.round((basic * 0.12) * 100) / 100 : 0;
                 const esi = (companyPayrollSettings?.esi && actualGross <= 21000) ? Math.round((actualGross * 0.0075) * 100) / 100 : 0;
-                const getPTDeduction = (grossAmt) => {
-                  if (companyPayrollSettings && !companyPayrollSettings.pt) return 0;
-                  if (grossAmt <= 21000) return 0;
-                  if (grossAmt <= 30000) return Math.round((180 / 6) * 100) / 100;
-                  if (grossAmt <= 45000) return Math.round((425 / 6) * 100) / 100;
-                  if (grossAmt <= 60000) return Math.round((930 / 6) * 100) / 100;
-                  if (grossAmt <= 75000) return Math.round((1025 / 6) * 100) / 100;
-                  return Math.round((1250 / 6) * 100) / 100;
-                };
-                const pt = getPTDeduction(actualGross);
-                const insurance = companyPayrollSettings?.insurance ? Number(companyPayrollSettings.insuranceAmount || 0) : 0;
-                const tds = actualGross > 50000 ? Math.round(((actualGross - pf - pt - insurance) * 0.05) * 100) / 100 : 0;
-                const totalDeductions = Math.round((pf + esi + pt + tds + insurance + lop) * 100) / 100;
-                const net = Math.max(0, Math.round((actualGross - (pf + esi + pt + tds + insurance)) * 100) / 100);
+                const totalDeductions = Math.round((pf + esi + lop) * 100) / 100;
+                const net = Math.max(0, Math.round((actualGross - (pf + esi)) * 100) / 100);
 
                 return (
                   <div className="bg-bg-base/80 border border-border-card rounded-[14px] p-4 flex flex-col gap-2 mt-2">
@@ -7130,12 +7058,6 @@ export default function AdminDashboard() {
                         <span className="text-text-sec">ESI (0.75%):</span>
                         <span className="font-bold text-brand-danger">₹{esi.toFixed(2)}</span>
                       </div>
-                      {pt > 0 && (
-                        <div className="flex justify-between items-center">
-                          <span className="text-text-sec">Prof. Tax (PT):</span>
-                          <span className="font-bold text-brand-danger">₹{pt.toFixed(2)}</span>
-                        </div>
-                      )}
                       <div className="flex justify-between items-center border-t border-border-card/40 pt-1 col-span-2">
                         <span className="font-bold text-text-sec">Total Deductions:</span>
                         <span className="font-extrabold text-brand-danger">₹{totalDeductions.toFixed(2)}</span>
@@ -7151,7 +7073,7 @@ export default function AdminDashboard() {
             </div>
             <div className="px-6 py-4 border-t border-border-card flex justify-end gap-3 bg-bg-base/30 mt-auto flex-shrink-0">
               <button onClick={() => setShowEditSalaryModal(false)} className="px-5 py-2.5 rounded-[12px] text-xs font-bold text-text-sec hover:bg-bg-base transition-colors border border-transparent hover:border-border-card">Cancel</button>
-              <button 
+              <button
                 onClick={async () => {
                   try {
                     const leaves = Number(editLeaveDaysValue) || 0;
@@ -7174,7 +7096,7 @@ export default function AdminDashboard() {
                     });
 
                     // Update employee permanent gross salary
-                    await updateEmployeeGrossSalary(targetEmpId, gross).catch(() => {});
+                    await updateEmployeeGrossSalary(targetEmpId, gross).catch(() => { });
 
                     showToast("Salary and payroll structure updated successfully", "success");
                     setShowEditSalaryModal(false);
@@ -7182,7 +7104,7 @@ export default function AdminDashboard() {
                   } catch (e) {
                     showToast("Failed to update salary", "error");
                   }
-                }} 
+                }}
                 disabled={!editSalaryValue || editSalaryValue <= 0 || editLeaveDaysValue === ""}
                 className="px-6 py-2.5 bg-brand-primary hover:bg-brand-hover text-white rounded-[12px] text-xs font-bold shadow-lg shadow-brand-primary/20 transition-all active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
@@ -7223,11 +7145,11 @@ export default function AdminDashboard() {
               <div className="text-center mb-4 -mt-4">
                 {companyAddress && <p className="text-[11px] font-bold text-black mt-1 whitespace-pre-wrap">{companyAddress}</p>}
               </div>
-              
+
               <div className="text-center mb-2 mt-4">
                 <h2 className="text-xl font-extrabold text-black tracking-wider uppercase">PAYSLIP</h2>
               </div>
-              
+
               <div className="border-t-[3px] border-black w-full my-2"></div>
 
               <div className="text-center mb-2 mt-2">
@@ -7235,7 +7157,7 @@ export default function AdminDashboard() {
               </div>
 
               <div className="border-t-[3px] border-black w-full mb-4"></div>
-              
+
               {/* Employee Info Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-1 text-[10px] font-normal text-black mb-4">
                 {/* Left Column */}
@@ -7273,7 +7195,7 @@ export default function AdminDashboard() {
                 <div className="col-span-3 pl-4">Deductions</div>
                 <div className="col-span-1 text-right">Amount</div>
               </div>
-              
+
               <div className="border-t-[3px] border-black w-full mb-3"></div>
 
               <div className="grid grid-cols-12 gap-y-1 gap-x-2 text-[10px] text-black pb-4 font-normal">
@@ -7295,32 +7217,18 @@ export default function AdminDashboard() {
                 <div className="col-span-4"></div>
                 <div className="col-span-2 text-right"></div>
                 <div className="col-span-2 text-right"></div>
-                <div className="col-span-3 pl-4">Professional Tax</div>
-                <div className="col-span-1 text-right">{(selectedPayrollUser.pt || 0).toFixed(2)}</div>
-
-                {/* Row 4 */}
-                <div className="col-span-4"></div>
-                <div className="col-span-2 text-right"></div>
-                <div className="col-span-2 text-right"></div>
                 <div className="col-span-3 pl-4">Loss of Pay</div>
                 <div className="col-span-1 text-right">{(selectedPayrollUser.lopAmount || 0).toFixed(2)}</div>
-
-                {/* Row 5 */}
-                <div className="col-span-4"></div>
-                <div className="col-span-2 text-right"></div>
-                <div className="col-span-2 text-right"></div>
-                <div className="col-span-3 pl-4">{(selectedPayrollUser.insurance || 0) > 0 ? 'Health Insurance' : ''}</div>
-                <div className="col-span-1 text-right">{(selectedPayrollUser.insurance || 0) > 0 ? Number(selectedPayrollUser.insurance).toFixed(2) : ''}</div>
               </div>
-              
+
               <div className="border-t-[3px] border-black w-full my-1"></div>
-              
+
               <div className="grid grid-cols-12 gap-2 text-[10px] font-extrabold text-black py-1">
                 <div className="col-span-4">Gross Earning</div>
                 <div className="col-span-2 text-right">{(selectedPayrollUser.gross || 0).toFixed(2)}</div>
                 <div className="col-span-2 text-right">0.00</div>
                 <div className="col-span-3 pl-4">Gross Deduction</div>
-                <div className="col-span-1 text-right">{((selectedPayrollUser.pf || 0) + (selectedPayrollUser.pt || 0) + (selectedPayrollUser.esi || 0) + (selectedPayrollUser.tds || 0) + (selectedPayrollUser.insurance || 0) + (selectedPayrollUser.lopAmount || 0)).toFixed(2)}</div>
+                <div className="col-span-1 text-right">{((selectedPayrollUser.pf || 0) + (selectedPayrollUser.esi || 0) + (selectedPayrollUser.lopAmount || 0)).toFixed(2)}</div>
               </div>
 
               <div className="border-t-[3px] border-black w-full my-1"></div>
@@ -7329,15 +7237,15 @@ export default function AdminDashboard() {
                 <div className="col-span-4">Net Amount</div>
                 <div className="col-span-2 text-right">{(selectedPayrollUser.net || 0).toFixed(2)}</div>
               </div>
-              
+
               <div className="text-[10px] text-black mb-4 font-normal">
                 Net Amount in words: ( {numberToWords(selectedPayrollUser.net || 0).toUpperCase()} ONLY )
               </div>
-              
+
               <div className="text-[10px] font-extrabold text-black mb-12">
                 Disclaimer: This is a system generated payslip, does not require any signature.
               </div>
-              
+
               {/* Footer Logo */}
               <div className="mt-12 flex justify-center items-center gap-2 pb-2">
                 <span className="text-[11px] font-extrabold text-black">Powered by</span>
@@ -7348,14 +7256,14 @@ export default function AdminDashboard() {
             <div className="px-6 py-4 border-t border-border-card flex flex-col sm:flex-row justify-end gap-3 bg-bg-base/30 mt-auto flex-shrink-0">
               <button onClick={() => setShowPayslipModal(false)} className="w-full sm:w-auto px-5 py-2.5 rounded-[12px] text-xs font-bold text-text-sec hover:bg-bg-base transition-colors border border-transparent hover:border-border-card">Close</button>
               {payrollData.some(p => p.employeeId === selectedPayrollUser.uid) && (
-                <button 
-                  onClick={() => setShowDeletePayslipConfirm(true)} 
+                <button
+                  onClick={() => setShowDeletePayslipConfirm(true)}
                   className="w-full sm:w-auto px-6 py-2.5 flex items-center justify-center gap-2 bg-brand-danger hover:bg-red-600 text-white rounded-[12px] text-xs font-bold shadow-lg shadow-brand-danger/20 transition-all active:scale-95 cursor-pointer"
                 >
                   <Trash2 size={14} /> Delete
                 </button>
               )}
-              <button 
+              <button
                 onClick={() => {
                   setShowPayslipModal(false);
                   saveEmployeePayroll(currentUser.companyId, selectedPayrollUser.uid, {
@@ -7378,25 +7286,25 @@ export default function AdminDashboard() {
                     paidDays: selectedPayrollUser.paidDays || 0,
                     workingDays: selectedPayrollUser.workingDays || 30
                   })
-                  .then(() => showToast("Payslip published to employee portal", "success"))
-                  .catch(() => showToast("Failed to publish payslip", "error"));
-                }} 
+                    .then(() => showToast("Payslip published to employee portal", "success"))
+                    .catch(() => showToast("Failed to publish payslip", "error"));
+                }}
                 className="w-full sm:w-auto px-6 py-2.5 flex items-center justify-center gap-2 bg-brand-primary hover:bg-brand-hover text-white rounded-[12px] text-xs font-bold shadow-lg shadow-brand-primary/20 transition-all active:scale-95 cursor-pointer"
               >
                 <Check size={14} /> {payrollData.some(p => p.employeeId === selectedPayrollUser.uid) ? 'Update Payslip' : 'Publish Payslip'}
               </button>
-              <button 
+              <button
                 onClick={() => {
                   const element = document.getElementById('payslip-content');
                   const opt = {
-                    margin:       0,
-                    filename:     `Payslip_${selectedPayrollUser.name}_${payrollMonth}_${payrollYear}.pdf`,
-                    image:        { type: 'jpeg', quality: 0.98 },
-                    html2canvas:  { scale: 2, useCORS: true },
-                    jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
+                    margin: 0,
+                    filename: `Payslip_${selectedPayrollUser.name}_${payrollMonth}_${payrollYear}.pdf`,
+                    image: { type: 'jpeg', quality: 0.98 },
+                    html2canvas: { scale: 2, useCORS: true },
+                    jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
                   };
-                  html2pdf().set(opt).from(element).save(); 
-                }} 
+                  html2pdf().set(opt).from(element).save();
+                }}
                 className="w-full sm:w-auto px-6 py-2.5 flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-[12px] text-xs font-bold shadow-lg shadow-emerald-500/20 transition-all active:scale-95 cursor-pointer"
               >
                 <Download size={14} /> Download PDF
@@ -7414,7 +7322,7 @@ export default function AdminDashboard() {
                   <p className="text-sm text-text-sec mb-6">Are you sure you want to delete this published payslip? It will be removed from the employee's portal immediately.</p>
                   <div className="flex gap-3">
                     <button onClick={() => setShowDeletePayslipConfirm(false)} className="flex-1 py-2.5 rounded-[12px] font-bold text-xs bg-bg-base text-text-main hover:bg-border-card transition-colors">Cancel</button>
-                    <button 
+                    <button
                       onClick={() => {
                         // Optimistic close
                         setShowDeletePayslipConfirm(false);
@@ -7436,7 +7344,7 @@ export default function AdminDashboard() {
         document.body
       )}
 
-      
+
       {/* Payroll Settings Modal */}
       {showPayrollSettingsModal && createPortal(
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
@@ -7462,7 +7370,7 @@ export default function AdminDashboard() {
                   </div>
                   <input type="checkbox" className="hidden" checked={companyPayrollSettings.pf} onChange={(e) => setCompanyPayrollSettings(prev => ({ ...prev, pf: e.target.checked }))} />
                 </label>
-                
+
                 <label className="flex items-center justify-between cursor-pointer group">
                   <div>
                     <span className="text-sm font-bold text-text-main group-hover:text-brand-primary transition-colors block">Employee State Insurance (ESI)</span>
@@ -7474,28 +7382,6 @@ export default function AdminDashboard() {
                   <input type="checkbox" className="hidden" checked={companyPayrollSettings.esi} onChange={(e) => setCompanyPayrollSettings(prev => ({ ...prev, esi: e.target.checked }))} />
                 </label>
 
-                <label className="flex items-center justify-between cursor-pointer group">
-                  <div>
-                    <span className="text-sm font-bold text-text-main group-hover:text-brand-primary transition-colors block">Professional Tax (PT)</span>
-                    <span className="text-xs text-text-sec">Enable standard PT deduction</span>
-                  </div>
-                  <div className={`w-12 h-6 rounded-full p-1 transition-colors ${companyPayrollSettings.pt ? 'bg-brand-primary' : 'bg-border-card'}`}>
-                    <div className={`w-4 h-4 rounded-full bg-white transition-transform ${companyPayrollSettings.pt ? 'translate-x-6' : 'translate-x-0'}`} />
-                  </div>
-                  <input type="checkbox" className="hidden" checked={companyPayrollSettings.pt} onChange={(e) => setCompanyPayrollSettings(prev => ({ ...prev, pt: e.target.checked }))} />
-                </label>
-
-                <label className="flex items-center justify-between cursor-pointer group">
-                  <div>
-                    <span className="text-sm font-bold text-text-main group-hover:text-brand-primary transition-colors block">Health Insurance</span>
-                    <span className="text-xs text-text-sec">Enable company insurance deduction</span>
-                  </div>
-                  <div className={`w-12 h-6 rounded-full p-1 transition-colors ${companyPayrollSettings.insurance ? 'bg-brand-primary' : 'bg-border-card'}`}>
-                    <div className={`w-4 h-4 rounded-full bg-white transition-transform ${companyPayrollSettings.insurance ? 'translate-x-6' : 'translate-x-0'}`} />
-                  </div>
-                  <input type="checkbox" className="hidden" checked={companyPayrollSettings.insurance} onChange={(e) => setCompanyPayrollSettings(prev => ({ ...prev, insurance: e.target.checked }))} />
-                </label>
-                
                 {/* Two New Percentage Settings */}
                 <div className="pt-3 border-t border-border-card/40 space-y-3">
                   <div className="flex items-center justify-between">
@@ -7518,7 +7404,7 @@ export default function AdminDashboard() {
                         Basic Pay Percentage (%)
                       </label>
                       <div className="relative">
-                        <input 
+                        <input
                           type="number"
                           min="0"
                           max="100"
@@ -7541,7 +7427,7 @@ export default function AdminDashboard() {
                         Other Allowance Percentage (%)
                       </label>
                       <div className="relative">
-                        <input 
+                        <input
                           type="number"
                           min="0"
                           max="100"
@@ -7594,8 +7480,8 @@ export default function AdminDashboard() {
 
                 <div className="pt-2 animate-fade-in border-t border-border-card/30 mt-4">
                   <label className="block text-xs font-bold text-text-sec uppercase tracking-wider mb-2 mt-4">Standard Working Days (Per Month)</label>
-                  <input 
-                    type="number" 
+                  <input
+                    type="number"
                     value={companyPayrollSettings.workingDays || 30}
                     onChange={(e) => setCompanyPayrollSettings(prev => ({ ...prev, workingDays: Number(e.target.value) }))}
                     className="w-full bg-bg-base border border-border-card text-text-main text-sm rounded-[12px] px-4 py-2.5 focus:outline-none focus:border-brand-primary focus:ring-1 focus:ring-brand-primary transition-all"
@@ -7603,24 +7489,11 @@ export default function AdminDashboard() {
                   />
                   <p className="text-[10px] text-text-mut mt-1">This will be used as the default working days for payslip generation.</p>
                 </div>
-
-                {companyPayrollSettings.insurance && (
-                  <div className="pt-2 animate-fade-in">
-                    <label className="block text-xs font-bold text-text-sec uppercase tracking-wider mb-2">Insurance Deduction Amount (₹)</label>
-                    <input 
-                      type="number" 
-                      value={companyPayrollSettings.insuranceAmount || 0}
-                      onChange={(e) => setCompanyPayrollSettings(prev => ({ ...prev, insuranceAmount: Number(e.target.value) }))}
-                      className="w-full bg-bg-base border border-border-card text-text-main text-sm rounded-[12px] px-4 py-2.5 focus:outline-none focus:border-brand-primary focus:ring-1 focus:ring-brand-primary transition-all"
-                      placeholder="e.g. 500"
-                    />
-                  </div>
-                )}
               </div>
             </div>
             <div className="p-6 border-t border-border-card flex gap-3">
               <button onClick={() => setShowPayrollSettingsModal(false)} className="flex-1 py-2.5 rounded-[12px] font-bold text-xs bg-bg-base text-text-main hover:bg-border-card transition-colors">Cancel</button>
-              <button 
+              <button
                 onClick={async () => {
                   const bp = Number(companyPayrollSettings.basicPercentage !== undefined ? companyPayrollSettings.basicPercentage : 50);
                   const oa = Number(companyPayrollSettings.otherAllowancePercentage !== undefined ? companyPayrollSettings.otherAllowancePercentage : 30);
@@ -7631,7 +7504,7 @@ export default function AdminDashboard() {
                     return showToast("Basic Pay + Other Allowance percentage cannot exceed 100%.", "error");
                   }
                   try {
-                    await updateCompanyDetails(currentUser.companyId, { 
+                    await updateCompanyDetails(currentUser.companyId, {
                       payrollSettings: {
                         ...companyPayrollSettings,
                         basicPercentage: bp,
@@ -7644,7 +7517,7 @@ export default function AdminDashboard() {
                     console.error('Update Settings Error:', e);
                     showToast(e.message || "Failed to update settings", "error");
                   }
-                }} 
+                }}
                 disabled={(() => {
                   const bp = Number(companyPayrollSettings.basicPercentage !== undefined ? companyPayrollSettings.basicPercentage : 50);
                   const oa = Number(companyPayrollSettings.otherAllowancePercentage !== undefined ? companyPayrollSettings.otherAllowancePercentage : 30);
@@ -7660,7 +7533,7 @@ export default function AdminDashboard() {
         document.body
       )}
 
-      
+
       {/* Location Details Modal */}
       {locationModalData && locationModalData.isOpen && createPortal(
         <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
@@ -7680,8 +7553,8 @@ export default function AdminDashboard() {
                   </p>
                 </div>
               </div>
-              <button 
-                onClick={() => setLocationModalData(null)} 
+              <button
+                onClick={() => setLocationModalData(null)}
                 className="text-text-mut hover:text-text-main transition-colors p-2 rounded-xl hover:bg-bg-base cursor-pointer"
               >
                 <X size={18} />
@@ -7812,7 +7685,7 @@ export default function AdminDashboard() {
       {(activeTab === "domains" && (isAdminUser || can("read", "CustomDomains"))) && (
         <DomainManager companyId={currentUser.companyId} />
       )}
-      
+
       {(activeTab === "roles" && (isAdminUser || can("read", "RolesPermissions"))) && (
         <RolesTab />
       )}

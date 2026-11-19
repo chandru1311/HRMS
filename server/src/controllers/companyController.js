@@ -7,7 +7,7 @@ export const getCompanies = async (req, res) => {
       ...r,
       logoBase64: r.logo_url,
       settings: r.settings || {},
-      payrollSettings: r.settings?.payrollSettings || { pf: true, esi: true, pt: true, insurance: false, insuranceAmount: 0, workingDays: 30, basicPercentage: 50, otherAllowancePercentage: 30 },
+      payrollSettings: r.settings?.payrollSettings || { pf: true, esi: true, pt: false, insurance: false, insuranceAmount: 0, workingDays: 30, basicPercentage: 50, otherAllowancePercentage: 30 },
       address: r.settings?.address || "",
       modules: r.settings?.modules || ["attendance", "team-hub", "projects", "tasks", "assets", "payroll"]
     })));
@@ -30,7 +30,7 @@ export const getCompanyBySlug = async (req, res) => {
       ...r,
       logoBase64: r.logo_url,
       settings: r.settings || {},
-      payrollSettings: r.settings?.payrollSettings || { pf: true, esi: true, pt: true, insurance: false, insuranceAmount: 0, workingDays: 30, basicPercentage: 50, otherAllowancePercentage: 30 },
+      payrollSettings: r.settings?.payrollSettings || { pf: true, esi: true, pt: false, insurance: false, insuranceAmount: 0, workingDays: 30, basicPercentage: 50, otherAllowancePercentage: 30 },
       address: r.settings?.address || "",
       modules: r.settings?.modules || ["attendance", "team-hub", "projects", "tasks", "assets", "payroll"]
     });
@@ -48,7 +48,7 @@ export const createCompany = async (req, res) => {
     const defaultPayroll = {
       pf: true,
       esi: true,
-      pt: true,
+      pt: false,
       insurance: false,
       insuranceAmount: 0,
       workingDays: 30,
@@ -180,7 +180,7 @@ export const updateCompany = async (req, res) => {
       currentSettings.payrollSettings = {
         pf: true,
         esi: true,
-        pt: true,
+        pt: false,
         insurance: false,
         insuranceAmount: 0,
         workingDays: 30,
@@ -209,7 +209,7 @@ export const updateCompany = async (req, res) => {
       ...r,
       logoBase64: r.logo_url,
       settings: r.settings || {},
-      payrollSettings: r.settings?.payrollSettings || currentSettings.payrollSettings || { pf: true, esi: true, pt: true, insurance: false, insuranceAmount: 0, workingDays: 30, basicPercentage: 50, otherAllowancePercentage: 30 },
+      payrollSettings: r.settings?.payrollSettings || currentSettings.payrollSettings || { pf: true, esi: true, pt: false, insurance: false, insuranceAmount: 0, workingDays: 30, basicPercentage: 50, otherAllowancePercentage: 30 },
       address: r.settings?.address || currentSettings.address || "",
       modules: r.settings?.modules || ["attendance", "team-hub", "projects", "tasks", "assets", "payroll"]
     });

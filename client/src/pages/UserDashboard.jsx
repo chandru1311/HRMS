@@ -183,9 +183,6 @@ export default function UserDashboard() {
   const [companyPayrollSettings, setCompanyPayrollSettings] = useState({
     pf: true,
     esi: true,
-    pt: true,
-    insurance: false,
-    insuranceAmount: 0,
     workingDays: 30,
     basicPercentage: 50,
     otherAllowancePercentage: 30
@@ -1523,22 +1520,8 @@ export default function UserDashboard() {
                   <div className="col-span-4"></div>
                   <div className="col-span-2 text-right"></div>
                   <div className="col-span-2 text-right"></div>
-                  <div className="col-span-3 pl-4">Professional Tax</div>
-                  <div className="col-span-1 text-right">{(selectedPayslip.pt || 0).toFixed(2)}</div>
-
-                  {/* Row 4 */}
-                  <div className="col-span-4"></div>
-                  <div className="col-span-2 text-right"></div>
-                  <div className="col-span-2 text-right"></div>
                   <div className="col-span-3 pl-4">Loss of Pay</div>
                   <div className="col-span-1 text-right">{(selectedPayslip.lopAmount || 0).toFixed(2)}</div>
-
-                  {/* Row 5 */}
-                  <div className="col-span-4"></div>
-                  <div className="col-span-2 text-right"></div>
-                  <div className="col-span-2 text-right"></div>
-                  <div className="col-span-3 pl-4">{(selectedPayslip.insurance || 0) > 0 ? 'Health Insurance' : ''}</div>
-                  <div className="col-span-1 text-right">{(selectedPayslip.insurance || 0) > 0 ? Number(selectedPayslip.insurance).toFixed(2) : ''}</div>
                 </div>
                 
                 <div className="border-t-[3px] border-black w-full my-1"></div>
@@ -1548,7 +1531,7 @@ export default function UserDashboard() {
                   <div className="col-span-2 text-right">{(selectedPayslip.grossSalary || 0).toFixed(2)}</div>
                   <div className="col-span-2 text-right">0.00</div>
                   <div className="col-span-3 pl-4">Gross Deduction</div>
-                  <div className="col-span-1 text-right">{(selectedPayslip.pf + selectedPayslip.pt + selectedPayslip.esi + selectedPayslip.tds + (selectedPayslip.lopAmount || 0)).toFixed(2)}</div>
+                  <div className="col-span-1 text-right">{(selectedPayslip.pf + selectedPayslip.esi + (selectedPayslip.lopAmount || 0)).toFixed(2)}</div>
                 </div>
 
                 <div className="border-t-[3px] border-black w-full my-1"></div>

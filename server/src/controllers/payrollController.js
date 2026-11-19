@@ -211,16 +211,16 @@ export const savePayroll = async (req, res) => {
 
     const numPf = pf !== undefined ? Number(pf) : (isPfEnabled ? Math.round((numBasic * 0.12) * 100) / 100 : 0);
     const numEsi = esi !== undefined ? Number(esi) : ((isEsiEnabled && numGross <= 21000) ? Math.round((numGross * 0.0075) * 100) / 100 : 0);
-    const numPt = pt !== undefined ? Number(pt) : 0;
-    const numTds = Number(tds || 0);
-    const numInsurance = insurance !== undefined ? Number(insurance) : (companySettings.insurance ? Number(companySettings.insuranceAmount || 0) : 0);
+    const numPt = 0;
+    const numTds = 0;
+    const numInsurance = 0;
     const numLopAmount = Number(lopAmount || 0);
     const numLopsDays = Number(lopsDays || 0);
     const numPaidDays = Number(paidDays !== undefined ? paidDays : 30);
     const numPresentDays = Number(presentDays !== undefined ? presentDays : 30);
     const numWorkingDays = Number(workingDays !== undefined ? workingDays : (companySettings.workingDays || 30));
 
-    const calculatedDeductions = Math.round((numPf + numEsi + numPt + numTds + numInsurance + numLopAmount) * 100) / 100;
+    const calculatedDeductions = Math.round((numPf + numEsi + numLopAmount) * 100) / 100;
     const numTotalDeductions = Number(totalDeductions !== undefined ? totalDeductions : calculatedDeductions);
     const numNet = Number(netSalary !== undefined ? netSalary : (net !== undefined ? net : Math.max(0, Math.round((numGross - numTotalDeductions) * 100) / 100)));
 
@@ -504,19 +504,11 @@ export const calculatePayrollBatch = async (req, res) => {
       // Employee ESI = Gross Salary * 0.75 / 100 when enabled and Gross <= 21,000 wage ceiling
       const esi = (esiEnabled && actualGross <= 21000) ? Math.round((actualGross * 0.0075) * 100) / 100 : 0;
 
-      let pt = 0;
-      if (ptEnabled) {
-        if (actualGross > 75000) pt = 208.33;
-        else if (actualGross > 60000) pt = 170.83;
-        else if (actualGross > 45000) pt = 155;
-        else if (actualGross > 30000) pt = 70.83;
-        else if (actualGross > 21000) pt = 30;
-      }
-
-      const insurance = insEnabled ? insAmount : 0;
-      const tds = actualGross > 50000 ? Math.round(((actualGross - pf - pt - insurance) * 0.05) * 100) / 100 : 0;
-      const totalDeductions = Math.round((pf + esi + pt + tds + insurance + lopAmount) * 100) / 100;
-      const netSalary = Math.round(Math.max(0, actualGross - (pf + esi + pt + tds + insurance)) * 100) / 100;
+      const pt = 0;
+      const insurance = 0;
+      const tds = 0;
+      const totalDeductions = Math.round((pf + esi + lopAmount) * 100) / 100;
+      const netSalary = Math.round(Math.max(0, actualGross - (pf + esi)) * 100) / 100;
 
       const metadata = {
         workingDays: wDays,
