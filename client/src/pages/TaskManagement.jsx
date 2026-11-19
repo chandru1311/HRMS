@@ -668,16 +668,6 @@ export default function TaskManagement() {
 
         {/* Action Buttons */}
         <div className="flex items-center gap-3">
-          {isAdmin && (
-            <button
-              onClick={() => setShowAssignModal(true)}
-              className="flex items-center gap-2 bg-brand-primary text-white hover:bg-brand-primary/90 px-4 py-2.5 rounded-[12px] font-bold text-xs shadow-sm transition-all cursor-pointer"
-            >
-              <Plus size={16} />
-              Assign New Task
-            </button>
-          )}
-
           {!isAdmin && (
             <button
               onClick={() => {
