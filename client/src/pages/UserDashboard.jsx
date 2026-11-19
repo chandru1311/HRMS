@@ -180,7 +180,16 @@ export default function UserDashboard() {
   const [showPayslipModal, setShowPayslipModal] = useState(false);
   const [selectedPayslip, setSelectedPayslip] = useState(null);
   const [companyName, setCompanyName] = useState("");
-  const [companyPayrollSettings, setCompanyPayrollSettings] = useState({ pf: true, esi: true, pt: true, insurance: false, insuranceAmount: 0 });
+  const [companyPayrollSettings, setCompanyPayrollSettings] = useState({
+    pf: true,
+    esi: true,
+    pt: true,
+    insurance: false,
+    insuranceAmount: 0,
+    workingDays: 30,
+    basicPercentage: 50,
+    otherAllowancePercentage: 30
+  });
   const [companyLogo, setCompanyLogo] = useState("");
   const [companyAddress, setCompanyAddress] = useState("");
 
@@ -192,7 +201,12 @@ export default function UserDashboard() {
           setCompanyLogo(data.logoBase64 || "");
           setCompanyAddress(data.address || "");
           if (data.payrollSettings) {
-            setCompanyPayrollSettings(data.payrollSettings);
+            setCompanyPayrollSettings({
+              basicPercentage: 50,
+              otherAllowancePercentage: 30,
+              workingDays: 30,
+              ...data.payrollSettings
+            });
           }
         }
       });
@@ -1492,53 +1506,39 @@ export default function UserDashboard() {
 
                 <div className="grid grid-cols-12 gap-y-1 gap-x-2 text-[10px] text-black pb-4 font-normal">
                   {/* Row 1 */}
-                  <div className="col-span-4">Basic</div>
-                  <div className="col-span-2 text-right">{(selectedPayslip.basic || 0).toFixed(2)}</div>
+                  <div className="col-span-4">Basic Pay ({selectedPayslip.basicPercentageSnapshot || selectedPayslip.basicPercentage || companyPayrollSettings?.basicPercentage || 50}%)</div>
+                  <div className="col-span-2 text-right">{(selectedPayslip.basicPay || selectedPayslip.basic || 0).toFixed(2)}</div>
                   <div className="col-span-2 text-right">0.00</div>
-                  <div className="col-span-3 pl-4">Provident Fund</div>
+                  <div className="col-span-3 pl-4">Provident Fund (12%)</div>
                   <div className="col-span-1 text-right">{(selectedPayslip.pf || 0).toFixed(2)}</div>
 
                   {/* Row 2 */}
-                  <div className="col-span-4">House Rent Allowance</div>
-                  <div className="col-span-2 text-right">{(selectedPayslip.hra || 0).toFixed(2)}</div>
+                  <div className="col-span-4">Other Allowance ({selectedPayslip.otherAllowancePercentageSnapshot || selectedPayslip.otherAllowancePercentage || companyPayrollSettings?.otherAllowancePercentage || 30}%)</div>
+                  <div className="col-span-2 text-right">{((selectedPayslip.otherAllowance !== undefined ? selectedPayslip.otherAllowance : selectedPayslip.special) || 0).toFixed(2)}</div>
                   <div className="col-span-2 text-right">0.00</div>
-                  <div className="col-span-3 pl-4">Loss of Pay</div>
-                  <div className="col-span-1 text-right">{(selectedPayslip.lopAmount || 0).toFixed(2)}</div>
+                  <div className="col-span-3 pl-4">Employee ESI (0.75%)</div>
+                  <div className="col-span-1 text-right">{(selectedPayslip.esi || 0).toFixed(2)}</div>
 
                   {/* Row 3 */}
-                  <div className="col-span-4">Conveyance</div>
-                  <div className="col-span-2 text-right">0.00</div>
-                  <div className="col-span-2 text-right">0.00</div>
+                  <div className="col-span-4"></div>
+                  <div className="col-span-2 text-right"></div>
+                  <div className="col-span-2 text-right"></div>
                   <div className="col-span-3 pl-4">Professional Tax</div>
                   <div className="col-span-1 text-right">{(selectedPayslip.pt || 0).toFixed(2)}</div>
 
                   {/* Row 4 */}
-                  <div className="col-span-4">Special Allowance</div>
-                  <div className="col-span-2 text-right">{(selectedPayslip.special || 0).toFixed(2)}</div>
-                  <div className="col-span-2 text-right">0.00</div>
-                  <div className="col-span-3 pl-4">{(selectedPayslip.esi || 0) > 0 ? 'ESI' : ''}</div>
-                  <div className="col-span-1 text-right">{(selectedPayslip.esi || 0) > 0 ? selectedPayslip.esi.toFixed(2) : ''}</div>
+                  <div className="col-span-4"></div>
+                  <div className="col-span-2 text-right"></div>
+                  <div className="col-span-2 text-right"></div>
+                  <div className="col-span-3 pl-4">Loss of Pay</div>
+                  <div className="col-span-1 text-right">{(selectedPayslip.lopAmount || 0).toFixed(2)}</div>
 
                   {/* Row 5 */}
-                  <div className="col-span-4">Basic (Prorated)</div>
-                  <div className="col-span-2 text-right">0.00</div>
-                  <div className="col-span-2 text-right">0.00</div>
-                  <div className="col-span-3 pl-4">{(selectedPayslip.tds || 0) > 0 ? 'TDS' : ''}</div>
-                  <div className="col-span-1 text-right">{(selectedPayslip.tds || 0) > 0 ? selectedPayslip.tds.toFixed(2) : ''}</div>
-
-                  {/* Row 6 */}
-                  <div className="col-span-4">HRA (Prorated)</div>
-                  <div className="col-span-2 text-right">0.00</div>
-                  <div className="col-span-2 text-right">0.00</div>
-                  <div className="col-span-3 pl-4"></div>
-                  <div className="col-span-1 text-right"></div>
-
-                  {/* Row 7 */}
-                  <div className="col-span-4">Other Allowance</div>
-                  <div className="col-span-2 text-right">0.00</div>
-                  <div className="col-span-2 text-right">0.00</div>
-                  <div className="col-span-3 pl-4"></div>
-                  <div className="col-span-1 text-right"></div>
+                  <div className="col-span-4"></div>
+                  <div className="col-span-2 text-right"></div>
+                  <div className="col-span-2 text-right"></div>
+                  <div className="col-span-3 pl-4">{(selectedPayslip.insurance || 0) > 0 ? 'Health Insurance' : ''}</div>
+                  <div className="col-span-1 text-right">{(selectedPayslip.insurance || 0) > 0 ? Number(selectedPayslip.insurance).toFixed(2) : ''}</div>
                 </div>
                 
                 <div className="border-t-[3px] border-black w-full my-1"></div>

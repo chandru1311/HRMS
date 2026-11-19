@@ -7,7 +7,7 @@ export const getCompanies = async (req, res) => {
       ...r,
       logoBase64: r.logo_url,
       settings: r.settings || {},
-      payrollSettings: r.settings?.payrollSettings || { pf: true, esi: true, pt: true, insurance: false, insuranceAmount: 0, workingDays: 30 },
+      payrollSettings: r.settings?.payrollSettings || { pf: true, esi: true, pt: true, insurance: false, insuranceAmount: 0, workingDays: 30, basicPercentage: 50, otherAllowancePercentage: 30 },
       address: r.settings?.address || "",
       modules: r.settings?.modules || ["attendance", "team-hub", "projects", "tasks", "assets", "payroll"]
     })));
@@ -30,7 +30,7 @@ export const getCompanyBySlug = async (req, res) => {
       ...r,
       logoBase64: r.logo_url,
       settings: r.settings || {},
-      payrollSettings: r.settings?.payrollSettings || { pf: true, esi: true, pt: true, insurance: false, insuranceAmount: 0, workingDays: 30 },
+      payrollSettings: r.settings?.payrollSettings || { pf: true, esi: true, pt: true, insurance: false, insuranceAmount: 0, workingDays: 30, basicPercentage: 50, otherAllowancePercentage: 30 },
       address: r.settings?.address || "",
       modules: r.settings?.modules || ["attendance", "team-hub", "projects", "tasks", "assets", "payroll"]
     });
@@ -45,9 +45,37 @@ export const createCompany = async (req, res) => {
     const { name, slug, domain, plan = "basic", logoBase64, address, payrollSettings, modules } = req.body;
     const id = req.body.id || "comp_" + Math.random().toString(36).substr(2, 9);
 
+    const defaultPayroll = {
+      pf: true,
+      esi: true,
+      pt: true,
+      insurance: false,
+      insuranceAmount: 0,
+      workingDays: 30,
+      basicPercentage: 50,
+      otherAllowancePercentage: 30
+    };
+
+    let finalPayroll = { ...defaultPayroll, ...(payrollSettings || {}) };
+    if (payrollSettings) {
+      const basicPct = payrollSettings.basicPercentage !== undefined ? Number(payrollSettings.basicPercentage) : 50;
+      const otherPct = payrollSettings.otherAllowancePercentage !== undefined ? Number(payrollSettings.otherAllowancePercentage) : 30;
+      if (isNaN(basicPct) || basicPct < 0 || basicPct > 100) {
+        return res.status(400).json({ error: "Basic Pay percentage must be between 0 and 100." });
+      }
+      if (isNaN(otherPct) || otherPct < 0 || otherPct > 100) {
+        return res.status(400).json({ error: "Other Allowance percentage must be between 0 and 100." });
+      }
+      if (basicPct + otherPct > 100) {
+        return res.status(400).json({ error: "Basic Pay percentage and Other Allowance percentage combined cannot exceed 100%." });
+      }
+      finalPayroll.basicPercentage = basicPct;
+      finalPayroll.otherAllowancePercentage = otherPct;
+    }
+
     const settings = {
       address: address || "",
-      payrollSettings: payrollSettings || { pf: true, esi: true, pt: true, insurance: false, insuranceAmount: 0, workingDays: 30 },
+      payrollSettings: finalPayroll,
       modules: modules || ["attendance", "team-hub", "projects", "tasks", "assets", "payroll"]
     };
 
@@ -134,10 +162,34 @@ export const updateCompany = async (req, res) => {
       return res.status(404).json({ error: "Company not found." });
     }
 
-
     const currentSettings = existing.rows[0].settings || {};
     if (address !== undefined) currentSettings.address = address;
-    if (payrollSettings !== undefined) currentSettings.payrollSettings = payrollSettings;
+    if (payrollSettings !== undefined) {
+      const existingPayroll = currentSettings.payrollSettings || {};
+      const basicPct = payrollSettings.basicPercentage !== undefined ? Number(payrollSettings.basicPercentage) : (existingPayroll.basicPercentage !== undefined ? Number(existingPayroll.basicPercentage) : 50);
+      const otherPct = payrollSettings.otherAllowancePercentage !== undefined ? Number(payrollSettings.otherAllowancePercentage) : (existingPayroll.otherAllowancePercentage !== undefined ? Number(existingPayroll.otherAllowancePercentage) : 30);
+      if (isNaN(basicPct) || basicPct < 0 || basicPct > 100) {
+        return res.status(400).json({ error: "Basic Pay percentage must be between 0 and 100." });
+      }
+      if (isNaN(otherPct) || otherPct < 0 || otherPct > 100) {
+        return res.status(400).json({ error: "Other Allowance percentage must be between 0 and 100." });
+      }
+      if (basicPct + otherPct > 100) {
+        return res.status(400).json({ error: "Basic Pay percentage and Other Allowance percentage combined cannot exceed 100%." });
+      }
+      currentSettings.payrollSettings = {
+        pf: true,
+        esi: true,
+        pt: true,
+        insurance: false,
+        insuranceAmount: 0,
+        workingDays: 30,
+        ...existingPayroll,
+        ...payrollSettings,
+        basicPercentage: basicPct,
+        otherAllowancePercentage: otherPct
+      };
+    }
     if (modules !== undefined) currentSettings.modules = modules;
 
     const result = await query(
@@ -157,13 +209,13 @@ export const updateCompany = async (req, res) => {
       ...r,
       logoBase64: r.logo_url,
       settings: r.settings || {},
-      payrollSettings: r.settings?.payrollSettings || currentSettings.payrollSettings || { pf: true, esi: true, pt: true, insurance: false, insuranceAmount: 0, workingDays: 30 },
+      payrollSettings: r.settings?.payrollSettings || currentSettings.payrollSettings || { pf: true, esi: true, pt: true, insurance: false, insuranceAmount: 0, workingDays: 30, basicPercentage: 50, otherAllowancePercentage: 30 },
       address: r.settings?.address || currentSettings.address || "",
       modules: r.settings?.modules || ["attendance", "team-hub", "projects", "tasks", "assets", "payroll"]
     });
   } catch (err) {
     console.error("updateCompany error:", err);
-    res.status(500).json({ error: "Failed to update company." });
+    res.status(500).json({ error: err.message || "Failed to update company." });
   }
 };
 

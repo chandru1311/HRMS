@@ -50,7 +50,12 @@ export const getPayroll = async (req, res) => {
       const gross = Number(row.gross_salary || 0);
       const basic = Number(row.basic_salary || 0);
       const hra = Number(row.hra || 0);
-      const allowances = Number(row.allowances || 0);
+      const allowances = Number(row.allowances !== null && row.allowances !== undefined ? row.allowances : (meta.otherAllowance !== undefined ? meta.otherAllowance : (meta.special || 0)));
+      const otherAllowance = allowances;
+      const basicPercentageSnapshot = meta.basicPercentageSnapshot !== undefined ? Number(meta.basicPercentageSnapshot) : 50;
+      const otherAllowancePercentageSnapshot = meta.otherAllowancePercentageSnapshot !== undefined ? Number(meta.otherAllowancePercentageSnapshot) : 30;
+      const pfPercentageSnapshot = meta.pfPercentageSnapshot !== undefined ? Number(meta.pfPercentageSnapshot) : 12;
+      const esiPercentageSnapshot = meta.esiPercentageSnapshot !== undefined ? Number(meta.esiPercentageSnapshot) : 0.75;
       const pf = Number(row.pf_deduction || 0);
       const esi = Number(row.esi_deduction || 0);
       const pt = Number(row.tax_deduction || 0);
@@ -63,7 +68,8 @@ export const getPayroll = async (req, res) => {
       const lopsDays = Number(meta.lopsDays || 0);
       const tds = Number(meta.tds || 0);
       const insurance = Number(meta.insurance || 0);
-      const special = allowances || Number(meta.special || 0);
+      const special = otherAllowance;
+      const effectiveDate = meta.effectiveDate || "";
       const userMeta = (typeof row.userMetadata === "object" && row.userMetadata !== null) ? row.userMetadata : {};
       const bankAccountNumber = userMeta.bankAccountNumber || userMeta.bankAccount || "";
       const panNumber = userMeta.panNumber || userMeta.pan || "";
@@ -86,10 +92,17 @@ export const getPayroll = async (req, res) => {
         grossSalary: gross,
         gross: gross,
         basicSalary: basic,
+        basicPay: basic,
         basic: basic,
         hra: hra,
-        allowances: allowances,
+        allowances: otherAllowance,
+        otherAllowance: otherAllowance,
         special: special,
+        basicPercentageSnapshot,
+        otherAllowancePercentageSnapshot,
+        pfPercentageSnapshot,
+        esiPercentageSnapshot,
+        effectiveDate,
         pf: pf,
         esi: esi,
         pt: pt,
@@ -130,14 +143,19 @@ export const savePayroll = async (req, res) => {
       gross,
       basicSalary,
       basic,
+      basicPay,
+      basicPercentage,
+      basicPayPercentage,
+      otherAllowancePercentage,
+      otherAllowance,
       hra = 0,
       allowances,
       special,
-      pf = 0,
-      esi = 0,
-      pt = 0,
+      pf,
+      esi,
+      pt,
       tds = 0,
-      insurance = 0,
+      insurance,
       lopAmount = 0,
       lopsDays = 0,
       totalDeductions,
@@ -147,6 +165,7 @@ export const savePayroll = async (req, res) => {
       presentDays = 30,
       workingDays = 30,
       status = "generated",
+      effectiveDate,
       companyId
     } = req.body;
 
@@ -157,26 +176,55 @@ export const savePayroll = async (req, res) => {
       return res.status(400).json({ error: "Employee ID, month, and year are required." });
     }
 
-    const id = `payroll_${targetEmpId}_${month}_${year}`;
+    // Fetch company settings to resolve default percentages and statutory deductions if not provided
+    let companySettings = {};
+    if (targetCompanyId) {
+      const compRes = await query("SELECT settings FROM companies WHERE id = $1", [targetCompanyId]).catch(() => ({ rows: [] }));
+      companySettings = compRes.rows[0]?.settings?.payrollSettings || {};
+    }
+
+    const numBasicPercentage = Number(
+      basicPercentage !== undefined ? basicPercentage :
+      (basicPayPercentage !== undefined ? basicPayPercentage :
+      (companySettings.basicPercentage !== undefined ? companySettings.basicPercentage : 50))
+    );
+    const numOtherAllowancePercentage = Number(
+      otherAllowancePercentage !== undefined ? otherAllowancePercentage :
+      (companySettings.otherAllowancePercentage !== undefined ? companySettings.otherAllowancePercentage : 30)
+    );
 
     const numGross = Number(grossSalary !== undefined ? grossSalary : (gross !== undefined ? gross : 0));
-    const numBasic = Number(basicSalary !== undefined ? basicSalary : (basic !== undefined ? basic : 0));
+    const numBasic = Number(
+      basicSalary !== undefined ? basicSalary :
+      (basicPay !== undefined ? basicPay :
+      (basic !== undefined ? basic : Math.round((numGross * (numBasicPercentage / 100)) * 100) / 100))
+    );
+    const numOtherAllowance = Number(
+      otherAllowance !== undefined ? otherAllowance :
+      (allowances !== undefined ? allowances :
+      (special !== undefined ? special : Math.round((numGross * (numOtherAllowancePercentage / 100)) * 100) / 100))
+    );
     const numHra = Number(hra || 0);
-    const numAllowances = Number(allowances !== undefined ? allowances : (special !== undefined ? special : 0));
-    const numPf = Number(pf || 0);
-    const numEsi = Number(esi || 0);
-    const numPt = Number(pt || 0);
+
+    const isPfEnabled = companySettings.pf !== false;
+    const isEsiEnabled = companySettings.esi !== false;
+
+    const numPf = pf !== undefined ? Number(pf) : (isPfEnabled ? Math.round((numBasic * 0.12) * 100) / 100 : 0);
+    const numEsi = esi !== undefined ? Number(esi) : ((isEsiEnabled && numGross <= 21000) ? Math.round((numGross * 0.0075) * 100) / 100 : 0);
+    const numPt = pt !== undefined ? Number(pt) : 0;
     const numTds = Number(tds || 0);
-    const numInsurance = Number(insurance || 0);
+    const numInsurance = insurance !== undefined ? Number(insurance) : (companySettings.insurance ? Number(companySettings.insuranceAmount || 0) : 0);
     const numLopAmount = Number(lopAmount || 0);
     const numLopsDays = Number(lopsDays || 0);
     const numPaidDays = Number(paidDays !== undefined ? paidDays : 30);
     const numPresentDays = Number(presentDays !== undefined ? presentDays : 30);
-    const numWorkingDays = Number(workingDays !== undefined ? workingDays : 30);
+    const numWorkingDays = Number(workingDays !== undefined ? workingDays : (companySettings.workingDays || 30));
 
-    const calculatedDeductions = numPf + numEsi + numPt + numTds + numInsurance + numLopAmount;
+    const calculatedDeductions = Math.round((numPf + numEsi + numPt + numTds + numInsurance + numLopAmount) * 100) / 100;
     const numTotalDeductions = Number(totalDeductions !== undefined ? totalDeductions : calculatedDeductions);
-    const numNet = Number(netSalary !== undefined ? netSalary : (net !== undefined ? net : (numGross - numTotalDeductions)));
+    const numNet = Number(netSalary !== undefined ? netSalary : (net !== undefined ? net : Math.max(0, Math.round((numGross - numTotalDeductions) * 100) / 100)));
+
+    const id = `payroll_${targetEmpId}_${month}_${year}`;
 
     const metadata = {
       workingDays: numWorkingDays,
@@ -184,7 +232,14 @@ export const savePayroll = async (req, res) => {
       lopsDays: numLopsDays,
       tds: numTds,
       insurance: numInsurance,
-      special: numAllowances
+      otherAllowance: numOtherAllowance,
+      special: numOtherAllowance,
+      basicPercentageSnapshot: numBasicPercentage,
+      otherAllowancePercentageSnapshot: numOtherAllowancePercentage,
+      pfPercentageSnapshot: 12,
+      esiPercentageSnapshot: 0.75,
+      effectiveDate: effectiveDate || new Date().toISOString().split("T")[0],
+      calculatedAt: new Date().toISOString()
     };
 
     const result = await query(
@@ -209,7 +264,7 @@ export const savePayroll = async (req, res) => {
        RETURNING *`,
       [
         id, targetCompanyId, targetEmpId, month, Number(year), numBasic, numHra,
-        numAllowances, numGross, numPf, numEsi, numPt,
+        numOtherAllowance, numGross, numPf, numEsi, numPt,
         numTotalDeductions, numNet, numPaidDays, numPresentDays, status,
         JSON.stringify(metadata)
       ]
@@ -236,7 +291,15 @@ export const savePayroll = async (req, res) => {
       grossSalary: Number(row.gross_salary),
       gross: Number(row.gross_salary),
       basicSalary: Number(row.basic_salary),
+      basicPay: Number(row.basic_salary),
       basic: Number(row.basic_salary),
+      otherAllowance: numOtherAllowance,
+      allowances: numOtherAllowance,
+      special: numOtherAllowance,
+      basicPercentageSnapshot: numBasicPercentage,
+      otherAllowancePercentageSnapshot: numOtherAllowancePercentage,
+      pfPercentageSnapshot: 12,
+      esiPercentageSnapshot: 0.75,
       netSalary: Number(row.net_salary),
       net: Number(row.net_salary),
       pf: Number(row.pf_deduction),
@@ -332,13 +395,29 @@ export const wipeAllPayrolls = async (req, res) => {
 
 export const calculatePayrollBatch = async (req, res) => {
   try {
-    const { companyId, month, year, workingDays = 30 } = req.body;
+    const { companyId, month, year, workingDays } = req.body;
     const isSuperAdmin = req.user?.role?.toLowerCase() === "superadmin";
     const targetCompanyId = (isSuperAdmin && companyId) ? companyId : req.user?.companyId;
 
     if (!month || !year) {
       return res.status(400).json({ error: "Month and Year are required for payroll calculation." });
     }
+
+    // Fetch company payroll settings
+    let companySettings = {};
+    if (targetCompanyId) {
+      const compRes = await query("SELECT settings FROM companies WHERE id = $1", [targetCompanyId]).catch(() => ({ rows: [] }));
+      companySettings = compRes.rows[0]?.settings?.payrollSettings || {};
+    }
+
+    const basicPct = Number(companySettings.basicPercentage !== undefined ? companySettings.basicPercentage : 50);
+    const otherPct = Number(companySettings.otherAllowancePercentage !== undefined ? companySettings.otherAllowancePercentage : 30);
+    const pfEnabled = companySettings.pf !== false;
+    const esiEnabled = companySettings.esi !== false;
+    const ptEnabled = companySettings.pt !== false;
+    const insEnabled = Boolean(companySettings.insurance);
+    const insAmount = Number(companySettings.insuranceAmount || 0);
+    const wDays = Number(workingDays || companySettings.workingDays || 30);
 
     // 1. Fetch all active employees in this company
     let userSql = "SELECT id, name, email, gross_salary, metadata FROM users WHERE role != 'superadmin' AND (metadata->>'status' IS NULL OR metadata->>'status' != 'inactive')";
@@ -354,7 +433,6 @@ export const calculatePayrollBatch = async (req, res) => {
     }
 
     const calculatedRecords = [];
-    const wDays = Number(workingDays) || 30;
 
     for (const emp of employees.rows) {
       const gross = Number(emp.gross_salary || 30000);
@@ -413,31 +491,45 @@ export const calculatePayrollBatch = async (req, res) => {
       const actualGross = Math.round(((gross / wDays) * paidDays) * 100) / 100;
       const lopAmount = Math.round((gross - actualGross) * 100) / 100;
 
-      const basic = Math.round((gross * 0.5) * 100) / 100;
-      const hra = Math.round((basic * 0.4) * 100) / 100;
-      const special = Math.round(Math.max(0, gross - basic - hra) * 100) / 100;
+      // Master Prompt Formulas:
+      // Basic Pay = Gross Salary * Basic Pay Percentage / 100
+      // Other Allowance = Gross Salary * Other Allowance Percentage / 100
+      const basic = Math.round((gross * (basicPct / 100)) * 100) / 100;
+      const otherAllowance = Math.round((gross * (otherPct / 100)) * 100) / 100;
+      const actualBasic = Math.round((actualGross * (basicPct / 100)) * 100) / 100;
 
-      const actualBasic = Math.round((actualGross * 0.5) * 100) / 100;
-      const pf = Math.round((actualBasic * 0.12) * 100) / 100;
-      const esi = actualGross <= 21000 ? Math.round((actualGross * 0.0075) * 100) / 100 : 0;
+      // Employee PF = Basic Pay * 12 / 100 when enabled
+      const pf = pfEnabled ? Math.round((actualBasic * 0.12) * 100) / 100 : 0;
+
+      // Employee ESI = Gross Salary * 0.75 / 100 when enabled and Gross <= 21,000 wage ceiling
+      const esi = (esiEnabled && actualGross <= 21000) ? Math.round((actualGross * 0.0075) * 100) / 100 : 0;
 
       let pt = 0;
-      if (actualGross > 75000) pt = 208.33;
-      else if (actualGross > 60000) pt = 170.83;
-      else if (actualGross > 45000) pt = 155;
-      else if (actualGross > 30000) pt = 70.83;
-      else if (actualGross > 21000) pt = 30;
+      if (ptEnabled) {
+        if (actualGross > 75000) pt = 208.33;
+        else if (actualGross > 60000) pt = 170.83;
+        else if (actualGross > 45000) pt = 155;
+        else if (actualGross > 30000) pt = 70.83;
+        else if (actualGross > 21000) pt = 30;
+      }
 
-      const tds = actualGross > 50000 ? Math.round(((actualGross - pf - pt) * 0.05) * 100) / 100 : 0;
-      const totalDeductions = Math.round((pf + esi + pt + tds + lopAmount) * 100) / 100;
-      const netSalary = Math.round(Math.max(0, actualGross - (pf + esi + pt + tds)) * 100) / 100;
+      const insurance = insEnabled ? insAmount : 0;
+      const tds = actualGross > 50000 ? Math.round(((actualGross - pf - pt - insurance) * 0.05) * 100) / 100 : 0;
+      const totalDeductions = Math.round((pf + esi + pt + tds + insurance + lopAmount) * 100) / 100;
+      const netSalary = Math.round(Math.max(0, actualGross - (pf + esi + pt + tds + insurance)) * 100) / 100;
 
       const metadata = {
         workingDays: wDays,
         lopAmount,
         lopsDays,
         tds,
-        special,
+        insurance,
+        otherAllowance,
+        special: otherAllowance,
+        basicPercentageSnapshot: basicPct,
+        otherAllowancePercentageSnapshot: otherPct,
+        pfPercentageSnapshot: 12,
+        esiPercentageSnapshot: 0.75,
         calculatedAt: new Date().toISOString()
       };
 
@@ -463,7 +555,7 @@ export const calculatePayrollBatch = async (req, res) => {
            updated_at = CURRENT_TIMESTAMP`,
         [
           recordId, targetCompanyId, emp.id, month, Number(year),
-          basic, hra, special, gross, pf, esi, pt, totalDeductions, netSalary,
+          basic, 0, otherAllowance, gross, pf, esi, pt, totalDeductions, netSalary,
           paidDays, presentCount || paidDays, JSON.stringify(metadata)
         ]
       );
@@ -477,6 +569,12 @@ export const calculatePayrollBatch = async (req, res) => {
         grossSalary: gross,
         netSalary,
         basicSalary: basic,
+        basicPay: basic,
+        otherAllowance,
+        basicPercentageSnapshot: basicPct,
+        otherAllowancePercentageSnapshot: otherPct,
+        pf,
+        esi,
         totalDeductions,
         paidDays,
         status: "draft"

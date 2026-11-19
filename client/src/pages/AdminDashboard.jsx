@@ -264,20 +264,33 @@ export default function AdminDashboard() {
 
   const [users, setUsers] = useState([]);
   const [showPayrollSettingsModal, setShowPayrollSettingsModal] = useState(false);
-  const [companyPayrollSettings, setCompanyPayrollSettings] = useState({ pf: true, esi: true, pt: true, insurance: false, insuranceAmount: 0 });
+  const [companyPayrollSettings, setCompanyPayrollSettings] = useState({
+    pf: true,
+    esi: true,
+    pt: true,
+    insurance: false,
+    insuranceAmount: 0,
+    workingDays: 30,
+    basicPercentage: 50,
+    otherAllowancePercentage: 30
+  });
 
   const calculatePayroll = (gross, paidDays, wDays) => {
     const lopsDays = Math.max(0, wDays - paidDays);
     const actualGross = (gross / wDays) * paidDays;
-    const lopAmount = gross - actualGross;
+    const lopAmount = Math.max(0, gross - actualGross);
 
-    const basic = gross * 0.5;
-    const hra = basic * 0.4;
-    const special = gross - basic - hra;
+    const basicPct = companyPayrollSettings?.basicPercentage !== undefined ? Number(companyPayrollSettings.basicPercentage) : 50;
+    const otherPct = companyPayrollSettings?.otherAllowancePercentage !== undefined ? Number(companyPayrollSettings.otherAllowancePercentage) : 30;
+
+    const basic = Math.round((gross * (basicPct / 100)) * 100) / 100;
+    const otherAllowance = Math.round((gross * (otherPct / 100)) * 100) / 100;
     
-    const actualBasic = actualGross * 0.5;
-    const pf = companyPayrollSettings?.pf ? actualBasic * 0.12 : 0;
-    const esi = (companyPayrollSettings?.esi && actualGross <= 21000) ? actualGross * 0.0075 : 0;
+    const actualBasic = Math.round((actualGross * (basicPct / 100)) * 100) / 100;
+    const actualOtherAllowance = Math.round((actualGross * (otherPct / 100)) * 100) / 100;
+
+    const pf = companyPayrollSettings?.pf ? Math.round((actualBasic * 0.12) * 100) / 100 : 0;
+    const esi = (companyPayrollSettings?.esi && actualGross <= 21000) ? Math.round((actualGross * 0.0075) * 100) / 100 : 0;
     
     const getPTDeduction = (g) => {
       if (companyPayrollSettings && !companyPayrollSettings.pt) return 0;
@@ -291,9 +304,29 @@ export default function AdminDashboard() {
     const pt = getPTDeduction(actualGross);
     const insurance = companyPayrollSettings?.insurance ? Number(companyPayrollSettings.insuranceAmount || 0) : 0;
 
-    const tds = actualGross > 50000 ? (actualGross - pf - pt - insurance) * 0.05 : 0;
-    const net = actualGross - (pf + esi + pt + tds + insurance);
-    return { basic, hra, special, pf, esi, pt, tds, insurance, net, actualGross, lopAmount, lopsDays };
+    const tds = actualGross > 50000 ? Math.round(((actualGross - pf - pt - insurance) * 0.05) * 100) / 100 : 0;
+    const totalDeductions = Math.round((pf + esi + pt + tds + insurance + lopAmount) * 100) / 100;
+    const net = Math.max(0, Math.round((actualGross - (pf + esi + pt + tds + insurance)) * 100) / 100);
+    return {
+      basic,
+      hra: 0,
+      special: otherAllowance,
+      otherAllowance,
+      actualBasic,
+      actualOtherAllowance,
+      basicPercentage: basicPct,
+      otherAllowancePercentage: otherPct,
+      pf,
+      esi,
+      pt,
+      tds,
+      insurance,
+      totalDeductions,
+      net,
+      actualGross,
+      lopAmount,
+      lopsDays
+    };
   };
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -570,7 +603,12 @@ export default function AdminDashboard() {
           setCompanyLogo(data.logoBase64 || "");
           setCompanyAddress(data.address || "");
           if (data.payrollSettings) {
-            setCompanyPayrollSettings(data.payrollSettings);
+            setCompanyPayrollSettings({
+              basicPercentage: 50,
+              otherAllowancePercentage: 30,
+              workingDays: 30,
+              ...data.payrollSettings
+            });
           }
         }
       });
@@ -582,6 +620,7 @@ export default function AdminDashboard() {
   const [showDeletePayslipConfirm, setShowDeletePayslipConfirm] = useState(false);
   const [selectedPayrollUser, setSelectedPayrollUser] = useState(null);
   const [editSalaryValue, setEditSalaryValue] = useState("");
+  const [editSalaryEffectiveDate, setEditSalaryEffectiveDate] = useState(new Date().toISOString().split("T")[0]);
   const [editLeaveDaysValue, setEditLeaveDaysValue] = useState("");
   const [attendanceSummaryLoading, setAttendanceSummaryLoading] = useState(false);
   const [attendanceSummary, setAttendanceSummary] = useState(null);
@@ -6296,15 +6335,20 @@ export default function AdminDashboard() {
         const calculatePayroll = (gross, paidDays, workingDays) => {
           const lopsDays = Math.max(0, workingDays - paidDays);
           const actualGross = (gross / workingDays) * paidDays;
-          const lopAmount = gross - actualGross;
+          const lopAmount = Math.max(0, gross - actualGross);
 
-          const basic = gross * 0.5;
-          const hra = basic * 0.4;
-          const special = gross - basic - hra;
+          const basicPct = companyPayrollSettings?.basicPercentage !== undefined ? Number(companyPayrollSettings.basicPercentage) : 50;
+          const otherPct = companyPayrollSettings?.otherAllowancePercentage !== undefined ? Number(companyPayrollSettings.otherAllowancePercentage) : 30;
+
+          const basic = Math.round((gross * (basicPct / 100)) * 100) / 100;
+          const otherAllowance = Math.round((gross * (otherPct / 100)) * 100) / 100;
           
-          const actualBasic = actualGross * 0.5;
-          const pf = companyPayrollSettings?.pf ? actualBasic * 0.12 : 0;
-          const esi = (companyPayrollSettings?.esi && actualGross <= 21000) ? actualGross * 0.0075 : 0;
+          const actualBasic = Math.round((actualGross * (basicPct / 100)) * 100) / 100;
+          const actualOtherAllowance = Math.round((actualGross * (otherPct / 100)) * 100) / 100;
+
+          const pf = companyPayrollSettings?.pf ? Math.round((actualBasic * 0.12) * 100) / 100 : 0;
+          const isEsiEligible = actualGross <= 21000;
+          const esi = (companyPayrollSettings?.esi && isEsiEligible) ? Math.round((actualGross * 0.0075) * 100) / 100 : 0;
           
           const getPTDeduction = (g) => {
             if (companyPayrollSettings && !companyPayrollSettings.pt) return 0;
@@ -6318,19 +6362,51 @@ export default function AdminDashboard() {
           const pt = getPTDeduction(actualGross);
           const insurance = companyPayrollSettings?.insurance ? Number(companyPayrollSettings.insuranceAmount || 0) : 0;
 
-          const tds = actualGross > 50000 ? (actualGross - pf - pt - insurance) * 0.05 : 0;
-          const net = actualGross - (pf + esi + pt + tds + insurance);
-          return { basic, hra, special, pf, esi, pt, tds, insurance, net, actualGross, lopAmount, lopsDays };
+          const tds = actualGross > 50000 ? Math.round(((actualGross - pf - pt - insurance) * 0.05) * 100) / 100 : 0;
+          const totalDeductions = Math.round((pf + esi + pt + tds + insurance + lopAmount) * 100) / 100;
+          const net = Math.max(0, Math.round((actualGross - (pf + esi + pt + tds + insurance)) * 100) / 100);
+          return {
+            basic,
+            hra: 0,
+            special: otherAllowance,
+            otherAllowance,
+            actualBasic,
+            actualOtherAllowance,
+            basicPercentage: basicPct,
+            otherAllowancePercentage: otherPct,
+            pf,
+            esi,
+            isEsiEligible,
+            pt,
+            tds,
+            insurance,
+            totalDeductions,
+            net,
+            actualGross,
+            lopAmount,
+            lopsDays
+          };
         };
 
         const currentPayroll = staffUsers.map(user => {
           const savedPayslip = payrollData.find(p => p.employeeId === user.uid);
           
           if (savedPayslip) {
+            const basicPct = savedPayslip.basicPercentageSnapshot !== undefined ? Number(savedPayslip.basicPercentageSnapshot) : (companyPayrollSettings?.basicPercentage || 50);
+            const otherPct = savedPayslip.otherAllowancePercentageSnapshot !== undefined ? Number(savedPayslip.otherAllowancePercentageSnapshot) : (companyPayrollSettings?.otherAllowancePercentage || 30);
+            const gross = savedPayslip.grossSalary || savedPayslip.gross || user.grossSalary || 0;
+            const basic = savedPayslip.basicSalary !== undefined ? savedPayslip.basicSalary : (savedPayslip.basic !== undefined ? savedPayslip.basic : Math.round((gross * (basicPct / 100)) * 100) / 100);
+            const otherAllowance = savedPayslip.otherAllowance !== undefined ? savedPayslip.otherAllowance : (savedPayslip.allowances !== undefined ? savedPayslip.allowances : (savedPayslip.special !== undefined ? savedPayslip.special : Math.round((gross * (otherPct / 100)) * 100) / 100));
+
             return {
               ...user,
               ...savedPayslip,
-              gross: savedPayslip.grossSalary || savedPayslip.gross,
+              gross,
+              basic,
+              otherAllowance,
+              special: otherAllowance,
+              basicPercentage: basicPct,
+              otherAllowancePercentage: otherPct,
               paidDays: savedPayslip.paidDays,
               workingDays: savedPayslip.workingDays,
               isSaved: true
@@ -6361,9 +6437,9 @@ export default function AdminDashboard() {
           return matchesSearch && matchesDept;
         });
 
-        const totalGross = payrollData.reduce((acc, curr) => acc + (curr.grossSalary || 0), 0);
+        const totalGross = payrollData.reduce((acc, curr) => acc + (curr.grossSalary || curr.gross || 0), 0);
         const totalPF = payrollData.reduce((acc, curr) => acc + (curr.pf || 0), 0);
-        const totalNet = payrollData.reduce((acc, curr) => acc + (curr.net || 0), 0);
+        const totalNet = payrollData.reduce((acc, curr) => acc + (curr.netSalary || curr.net || 0), 0);
         
         return (
           <>
@@ -6494,15 +6570,16 @@ export default function AdminDashboard() {
 
             <div className="bg-bg-card border border-border-card rounded-[24px] p-6 shadow-sm overflow-hidden text-left">
               <div className="overflow-x-auto custom-scrollbar -mx-6 px-6">
-                <table className="w-full min-w-[900px] border-collapse">
+                <table className="w-full min-w-[950px] border-collapse">
                   <thead>
                     <tr className="border-b border-border-card">
-                      <th className="pb-3 px-4 text-left text-[10px] font-extrabold text-text-mut uppercase tracking-wider">Employee</th>
+                      <th className="pb-3 px-3 text-center text-[10px] font-extrabold text-text-mut uppercase tracking-wider w-12">S.No</th>
+                      <th className="pb-3 px-4 text-left text-[10px] font-extrabold text-text-mut uppercase tracking-wider">Employee Name</th>
                       <th className="pb-3 px-4 text-left text-[10px] font-extrabold text-text-mut uppercase tracking-wider">Gross Salary</th>
                       <th className="pb-3 px-4 text-left text-[10px] font-extrabold text-text-mut uppercase tracking-wider">Basic Pay</th>
-                      <th className="pb-3 px-4 text-left text-[10px] font-extrabold text-text-mut uppercase tracking-wider">HRA</th>
+                      <th className="pb-3 px-4 text-left text-[10px] font-extrabold text-text-mut uppercase tracking-wider">Other Allowance</th>
                       <th className="pb-3 px-4 text-left text-[10px] font-extrabold text-text-mut uppercase tracking-wider">PF (12%)</th>
-                      <th className="pb-3 px-4 text-left text-[10px] font-extrabold text-text-mut uppercase tracking-wider">ESI</th>
+                      <th className="pb-3 px-4 text-left text-[10px] font-extrabold text-text-mut uppercase tracking-wider">ESI (0.75%)</th>
                       <th className="pb-3 px-4 text-left text-[10px] font-extrabold text-text-mut uppercase tracking-wider">Net Salary</th>
                       <th className="pb-3 px-4 text-right text-[10px] font-extrabold text-text-mut uppercase tracking-wider">Actions</th>
                     </tr>
@@ -6510,11 +6587,14 @@ export default function AdminDashboard() {
                   <tbody>
                     {filteredPayroll.length === 0 ? (
                       <tr>
-                        <td colSpan="8" className="text-center py-12 text-sm text-text-mut">No payroll data found.</td>
+                        <td colSpan="9" className="text-center py-12 text-sm text-text-mut">No payroll data found.</td>
                       </tr>
                     ) : (
-                      filteredPayroll.map(user => (
+                      filteredPayroll.map((user, idx) => (
                         <tr key={user.uid} className="border-b border-border-card/50 hover:bg-bg-base/30 transition-colors">
+                          <td className="py-3 px-3 text-center text-xs font-bold text-text-mut">
+                            {idx + 1}
+                          </td>
                           <td className="py-3 px-4">
                             <div className="flex flex-col">
                               <span className="text-xs font-extrabold text-text-main">{user.name}</span>
@@ -6524,19 +6604,46 @@ export default function AdminDashboard() {
                           <td className="py-3 px-4">
                             <span className="text-xs font-extrabold text-text-main flex items-center gap-0.5"><IndianRupee size={12} /> {user.gross.toLocaleString('en-IN')}</span>
                           </td>
-                          <td className="py-3 px-4 text-xs font-bold text-text-sec">₹{user.basic.toLocaleString('en-IN')}</td>
-                          <td className="py-3 px-4 text-xs font-bold text-text-sec">₹{user.hra.toLocaleString('en-IN')}</td>
-                          <td className="py-3 px-4 text-xs font-bold text-brand-danger">₹{user.pf.toLocaleString('en-IN')}</td>
-                          <td className="py-3 px-4 text-xs font-bold text-brand-danger">₹{user.esi.toLocaleString('en-IN')}</td>
                           <td className="py-3 px-4">
-                            <span className="text-xs font-extrabold text-emerald-500 bg-emerald-500/10 px-2 py-1 rounded-[6px] border border-emerald-500/20">₹{user.net.toLocaleString('en-IN')}</span>
+                            <div className="flex flex-col">
+                              <span className="text-xs font-bold text-text-sec">₹{user.basic.toLocaleString('en-IN')}</span>
+                              <span className="text-[10px] font-medium text-text-mut font-mono">({user.basicPercentage || companyPayrollSettings?.basicPercentage || 50}%)</span>
+                            </div>
+                          </td>
+                          <td className="py-3 px-4">
+                            <div className="flex flex-col">
+                              <span className="text-xs font-bold text-text-sec">₹{(user.otherAllowance !== undefined ? user.otherAllowance : user.special || 0).toLocaleString('en-IN')}</span>
+                              <span className="text-[10px] font-medium text-text-mut font-mono">({user.otherAllowancePercentage || companyPayrollSettings?.otherAllowancePercentage || 30}%)</span>
+                            </div>
+                          </td>
+                          <td className="py-3 px-4">
+                            {companyPayrollSettings?.pf ? (
+                              <span className="text-xs font-bold text-brand-danger">₹{user.pf.toLocaleString('en-IN')}</span>
+                            ) : (
+                              <span className="text-xs text-text-mut">Disabled</span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4">
+                            {companyPayrollSettings?.esi ? (
+                              user.gross <= 21000 ? (
+                                <span className="text-xs font-bold text-brand-danger">₹{user.esi.toLocaleString('en-IN')}</span>
+                              ) : (
+                                <span className="text-[11px] font-semibold text-text-mut" title="Gross salary exceeds ₹21,000 wage ceiling">₹0 <span className="text-[10px] text-text-mut/70">(Not eligible)</span></span>
+                              )
+                            ) : (
+                              <span className="text-xs text-text-mut">Disabled</span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className="text-xs font-extrabold text-emerald-500 bg-emerald-500/10 px-2.5 py-1 rounded-[8px] border border-emerald-500/20">₹{user.net.toLocaleString('en-IN')}</span>
                           </td>
                           <td className="py-3 px-4 text-right">
-                            <div className="flex justify-end gap-2">
+                            <div className="flex justify-end gap-1.5">
                               <button 
                                 onClick={async () => {
                                   setSelectedPayrollUser(user);
                                   setEditSalaryValue(user.gross);
+                                  setEditSalaryEffectiveDate(user.effectiveDate || new Date().toISOString().split("T")[0]);
                                   setAttendanceSummary(null);
                                   setShowEditSalaryModal(true);
                                   setAttendanceSummaryLoading(true);
@@ -6562,7 +6669,7 @@ export default function AdminDashboard() {
                                   }
                                 }}
                                 className="p-1.5 text-text-mut hover:text-brand-primary bg-bg-base hover:bg-brand-primary/10 rounded-lg transition-colors border border-border-card/60"
-                                title="Edit Salary Structure"
+                                title="Edit Salary"
                               >
                                 <Edit size={14} />
                               </button>
@@ -6575,6 +6682,29 @@ export default function AdminDashboard() {
                                 title="View Payslip"
                               >
                                 <FileText size={14} />
+                              </button>
+                              <button 
+                                onClick={() => {
+                                  setSelectedPayrollUser(user);
+                                  setTimeout(() => {
+                                    const element = document.getElementById('payslip-content');
+                                    if (element) {
+                                      const opt = {
+                                        margin:       0,
+                                        filename:     `Payslip_${user.name}_${payrollMonth}_${payrollYear}.pdf`,
+                                        image:        { type: 'jpeg', quality: 0.98 },
+                                        html2canvas:  { scale: 2, useCORS: true },
+                                        jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
+                                      };
+                                      html2pdf().set(opt).from(element).save();
+                                      showToast(`Downloaded payslip for ${user.name}`, "success");
+                                    }
+                                  }, 100);
+                                }}
+                                className="p-1.5 text-text-mut hover:text-blue-500 bg-bg-base hover:bg-blue-500/10 rounded-lg transition-colors border border-border-card/60"
+                                title="Download Payslip PDF"
+                              >
+                                <Download size={14} />
                               </button>
                             </div>
                           </td>
@@ -6661,53 +6791,39 @@ export default function AdminDashboard() {
 
                     <div className="grid grid-cols-12 gap-y-1 gap-x-2 text-[10px] text-black pb-4 font-normal">
                       {/* Row 1 */}
-                      <div className="col-span-4">Basic</div>
+                      <div className="col-span-4">Basic Pay ({user.basicPercentage || companyPayrollSettings?.basicPercentage || 50}%)</div>
                       <div className="col-span-2 text-right">{(user.basic || 0).toFixed(2)}</div>
                       <div className="col-span-2 text-right">0.00</div>
-                      <div className="col-span-3 pl-4">Provident Fund</div>
+                      <div className="col-span-3 pl-4">Provident Fund (12%)</div>
                       <div className="col-span-1 text-right">{(user.pf || 0).toFixed(2)}</div>
 
                       {/* Row 2 */}
-                      <div className="col-span-4">House Rent Allowance</div>
-                      <div className="col-span-2 text-right">{(user.hra || 0).toFixed(2)}</div>
+                      <div className="col-span-4">Other Allowance ({user.otherAllowancePercentage || companyPayrollSettings?.otherAllowancePercentage || 30}%)</div>
+                      <div className="col-span-2 text-right">{((user.otherAllowance !== undefined ? user.otherAllowance : user.special) || 0).toFixed(2)}</div>
                       <div className="col-span-2 text-right">0.00</div>
-                      <div className="col-span-3 pl-4">Loss of Pay</div>
-                      <div className="col-span-1 text-right">{(user.lopAmount || 0).toFixed(2)}</div>
+                      <div className="col-span-3 pl-4">Employee ESI (0.75%)</div>
+                      <div className="col-span-1 text-right">{(user.esi || 0).toFixed(2)}</div>
 
                       {/* Row 3 */}
-                      <div className="col-span-4">Conveyance</div>
-                      <div className="col-span-2 text-right">0.00</div>
-                      <div className="col-span-2 text-right">0.00</div>
+                      <div className="col-span-4"></div>
+                      <div className="col-span-2 text-right"></div>
+                      <div className="col-span-2 text-right"></div>
                       <div className="col-span-3 pl-4">Professional Tax</div>
                       <div className="col-span-1 text-right">{(user.pt || 0).toFixed(2)}</div>
 
                       {/* Row 4 */}
-                      <div className="col-span-4">Special Allowance</div>
-                      <div className="col-span-2 text-right">{(user.special || 0).toFixed(2)}</div>
-                      <div className="col-span-2 text-right">0.00</div>
-                      <div className="col-span-3 pl-4">{(user.esi || 0) > 0 ? 'ESI' : ''}</div>
-                      <div className="col-span-1 text-right">{(user.esi || 0) > 0 ? user.esi.toFixed(2) : ''}</div>
+                      <div className="col-span-4"></div>
+                      <div className="col-span-2 text-right"></div>
+                      <div className="col-span-2 text-right"></div>
+                      <div className="col-span-3 pl-4">Loss of Pay</div>
+                      <div className="col-span-1 text-right">{(user.lopAmount || 0).toFixed(2)}</div>
 
                       {/* Row 5 */}
-                      <div className="col-span-4">Basic (Prorated)</div>
-                      <div className="col-span-2 text-right">0.00</div>
-                      <div className="col-span-2 text-right">0.00</div>
-                      <div className="col-span-3 pl-4">{(user.tds || 0) > 0 ? 'TDS' : ''}</div>
-                      <div className="col-span-1 text-right">{(user.tds || 0) > 0 ? user.tds.toFixed(2) : ''}</div>
-
-                      {/* Row 6 */}
-                      <div className="col-span-4">HRA (Prorated)</div>
-                      <div className="col-span-2 text-right">0.00</div>
-                      <div className="col-span-2 text-right">0.00</div>
-                      <div className="col-span-3 pl-4"></div>
-                      <div className="col-span-1 text-right"></div>
-
-                      {/* Row 7 */}
-                      <div className="col-span-4">Other Allowance</div>
-                      <div className="col-span-2 text-right">0.00</div>
-                      <div className="col-span-2 text-right">0.00</div>
-                      <div className="col-span-3 pl-4"></div>
-                      <div className="col-span-1 text-right"></div>
+                      <div className="col-span-4"></div>
+                      <div className="col-span-2 text-right"></div>
+                      <div className="col-span-2 text-right"></div>
+                      <div className="col-span-3 pl-4">{(user.insurance || 0) > 0 ? 'Health Insurance' : ''}</div>
+                      <div className="col-span-1 text-right">{(user.insurance || 0) > 0 ? Number(user.insurance).toFixed(2) : ''}</div>
                     </div>
                     
                     <div className="border-t-[3px] border-black w-full my-1"></div>
@@ -6784,22 +6900,121 @@ export default function AdminDashboard() {
               </div>
               <button onClick={() => setShowEditSalaryModal(false)} className="text-text-mut hover:text-text-main transition-colors p-1 rounded-lg hover:bg-bg-base"><X size={18} /></button>
             </div>
-                        <div className="p-6 space-y-4">
+                        <div className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+              {/* Employee Name (Read-Only) */}
               <div>
-                <label className="text-xs font-bold text-text-sec block mb-2">Gross Salary (Monthly)</label>
+                <label className="text-xs font-bold text-text-sec block mb-1.5">Employee Name</label>
+                <input 
+                  type="text"
+                  readOnly
+                  value={`${selectedPayrollUser.name} (${selectedPayrollUser.designation || selectedPayrollUser.role || 'Employee'})`}
+                  className="w-full px-4 py-2.5 bg-bg-base/70 border border-border-card rounded-[12px] text-xs text-text-sec outline-none font-bold cursor-not-allowed"
+                />
+              </div>
+
+              {/* Gross Salary (Editable) */}
+              <div>
+                <label className="text-xs font-bold text-text-sec block mb-1.5">Monthly Gross Salary (₹)</label>
                 <div className="relative">
                   <IndianRupee size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-text-mut" />
                   <input 
                     type="number"
+                    min="0"
                     value={editSalaryValue}
                     onChange={(e) => setEditSalaryValue(e.target.value)}
-                    className="w-full pl-10 pr-4 py-3 bg-bg-base/50 border border-border-card rounded-[12px] text-sm text-text-main outline-none focus:border-brand-primary transition-colors font-bold"
+                    placeholder="e.g. 30000"
+                    className="w-full pl-10 pr-4 py-2.5 bg-bg-base/50 border border-border-card rounded-[12px] text-sm text-text-main outline-none focus:border-brand-primary transition-colors font-bold"
                   />
                 </div>
               </div>
 
+              {/* Dynamic Components Calculation */}
+              {(() => {
+                const g = Number(editSalaryValue) || 0;
+                const basicPct = companyPayrollSettings?.basicPercentage !== undefined ? Number(companyPayrollSettings.basicPercentage) : 50;
+                const otherPct = companyPayrollSettings?.otherAllowancePercentage !== undefined ? Number(companyPayrollSettings.otherAllowancePercentage) : 30;
+                const calcBasic = Math.round((g * (basicPct / 100)) * 100) / 100;
+                const calcOther = Math.round((g * (otherPct / 100)) * 100) / 100;
+                const isPfOn = companyPayrollSettings?.pf !== false;
+                const isEsiOn = companyPayrollSettings?.esi !== false;
+                const isEsiEligible = g <= 21000;
+                const calcPf = isPfOn ? Math.round((calcBasic * 0.12) * 100) / 100 : 0;
+                const calcEsi = (isEsiOn && isEsiEligible) ? Math.round((g * 0.0075) * 100) / 100 : 0;
+
+                return (
+                  <>
+                    {/* Basic Pay & Other Allowance Percentages & Amounts */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="p-3 bg-bg-base/60 border border-border-card rounded-[12px] space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-bold text-text-mut uppercase">Basic Pay</span>
+                          <span className="text-[10px] font-mono font-bold text-brand-primary bg-brand-primary/10 px-2 py-0.5 rounded-full">{basicPct}%</span>
+                        </div>
+                        <div className="text-sm font-extrabold text-text-main">₹{calcBasic.toLocaleString('en-IN')}</div>
+                        <span className="text-[9px] text-text-mut block">Admin-configured percentage</span>
+                      </div>
+
+                      <div className="p-3 bg-bg-base/60 border border-border-card rounded-[12px] space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-bold text-text-mut uppercase">Other Allowance</span>
+                          <span className="text-[10px] font-mono font-bold text-brand-primary bg-brand-primary/10 px-2 py-0.5 rounded-full">{otherPct}%</span>
+                        </div>
+                        <div className="text-sm font-extrabold text-text-main">₹{calcOther.toLocaleString('en-IN')}</div>
+                        <span className="text-[9px] text-text-mut block">Admin-configured percentage</span>
+                      </div>
+                    </div>
+
+                    {/* PF & ESI Statutory Status */}
+                    <div className="grid grid-cols-2 gap-3 text-xs">
+                      <div className="p-3 bg-bg-base/40 border border-border-card rounded-[12px]">
+                        <span className="text-[10px] font-bold text-text-mut uppercase block mb-1">PF Status</span>
+                        {isPfOn ? (
+                          <div>
+                            <span className="inline-block text-[11px] font-bold text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded-[6px]">Enabled (12%)</span>
+                            <span className="text-[11px] text-brand-danger font-bold block mt-1">₹{calcPf.toLocaleString('en-IN')} / mo</span>
+                          </div>
+                        ) : (
+                          <span className="inline-block text-[11px] font-bold text-text-mut bg-bg-base px-2 py-0.5 rounded-[6px]">Disabled</span>
+                        )}
+                      </div>
+
+                      <div className="p-3 bg-bg-base/40 border border-border-card rounded-[12px]">
+                        <span className="text-[10px] font-bold text-text-mut uppercase block mb-1">ESI Status</span>
+                        {isEsiOn ? (
+                          isEsiEligible ? (
+                            <div>
+                              <span className="inline-block text-[11px] font-bold text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded-[6px]">Eligible (0.75%)</span>
+                              <span className="text-[11px] text-brand-danger font-bold block mt-1">₹{calcEsi.toLocaleString('en-IN')} / mo</span>
+                            </div>
+                          ) : (
+                            <div>
+                              <span className="inline-block text-[11px] font-bold text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded-[6px]" title="Gross exceeds ₹21,000 statutory limit">Not Eligible</span>
+                              <span className="text-[9px] text-text-mut block mt-1">Gross &gt; ₹21,000 ceiling</span>
+                            </div>
+                          )
+                        ) : (
+                          <span className="inline-block text-[11px] font-bold text-text-mut bg-bg-base px-2 py-0.5 rounded-[6px]">Disabled</span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Salary Effective Date */}
+                    <div>
+                      <label className="text-xs font-bold text-text-sec block mb-1.5">Salary Effective Date</label>
+                      <input 
+                        type="date"
+                        value={editSalaryEffectiveDate}
+                        onChange={(e) => setEditSalaryEffectiveDate(e.target.value)}
+                        className="w-full px-4 py-2.5 bg-bg-base/50 border border-border-card rounded-[12px] text-xs text-text-main outline-none focus:border-brand-primary transition-colors font-bold"
+                      />
+                    </div>
+                  </>
+                );
+              })()}
+
+              {/* Number of Leave / LOP Days */}
               <div>
-                <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center justify-between mb-1.5">
                   <label className="text-xs font-bold text-text-sec">Number of Leave (LOP Days)</label>
                   {attendanceSummary && (
                     <span className="text-[11px] font-bold text-brand-primary flex items-center gap-1">
@@ -6815,7 +7030,7 @@ export default function AdminDashboard() {
                     min="0"
                     value={editLeaveDaysValue}
                     onChange={(e) => setEditLeaveDaysValue(e.target.value)}
-                    className="w-full px-4 py-3 bg-bg-base/50 border border-border-card rounded-[12px] text-sm text-text-main outline-none focus:border-brand-primary transition-colors font-bold"
+                    className="w-full px-4 py-2.5 bg-bg-base/50 border border-border-card rounded-[12px] text-sm text-text-main outline-none focus:border-brand-primary transition-colors font-bold"
                   />
                 </div>
                 {attendanceSummaryLoading ? (
@@ -6848,25 +7063,25 @@ export default function AdminDashboard() {
                         <strong className="text-brand-danger font-extrabold text-xs">{attendanceSummary.lopDays} d</strong>
                       </div>
                     </div>
-                    <p className="text-[10px] text-text-mut font-medium">
-                      Based on daily check-ins, half-days (0.5), missed shifts, and approved leaves.
-                    </p>
                   </div>
                 ) : null}
               </div>
 
+              {/* Live Salary Breakdown */}
               {(() => {
                 const wDays = companyPayrollSettings?.workingDays || 30;
                 const leaves = Number(editLeaveDaysValue) || 0;
                 const paid = Math.max(0, wDays - leaves);
                 const g = Number(editSalaryValue) || 0;
                 const actualGross = (g / wDays) * paid;
-                const lop = g - actualGross;
+                const lop = Math.max(0, g - actualGross);
 
-                // Full calculation for Net Salary
-                const basic = actualGross * 0.5;
-                const pf = companyPayrollSettings?.pf ? basic * 0.12 : 0;
-                const esi = (companyPayrollSettings?.esi && actualGross <= 21000) ? actualGross * 0.0075 : 0;
+                const basicPct = companyPayrollSettings?.basicPercentage !== undefined ? Number(companyPayrollSettings.basicPercentage) : 50;
+                const otherPct = companyPayrollSettings?.otherAllowancePercentage !== undefined ? Number(companyPayrollSettings.otherAllowancePercentage) : 30;
+                const basic = Math.round((actualGross * (basicPct / 100)) * 100) / 100;
+                const other = Math.round((actualGross * (otherPct / 100)) * 100) / 100;
+                const pf = companyPayrollSettings?.pf ? Math.round((basic * 0.12) * 100) / 100 : 0;
+                const esi = (companyPayrollSettings?.esi && actualGross <= 21000) ? Math.round((actualGross * 0.0075) * 100) / 100 : 0;
                 const getPTDeduction = (grossAmt) => {
                   if (companyPayrollSettings && !companyPayrollSettings.pt) return 0;
                   if (grossAmt <= 21000) return 0;
@@ -6878,28 +7093,61 @@ export default function AdminDashboard() {
                 };
                 const pt = getPTDeduction(actualGross);
                 const insurance = companyPayrollSettings?.insurance ? Number(companyPayrollSettings.insuranceAmount || 0) : 0;
-                const tds = actualGross > 50000 ? (actualGross - pf - pt - insurance) * 0.05 : 0;
-                const net = actualGross - (pf + esi + pt + tds + insurance);
+                const tds = actualGross > 50000 ? Math.round(((actualGross - pf - pt - insurance) * 0.05) * 100) / 100 : 0;
+                const totalDeductions = Math.round((pf + esi + pt + tds + insurance + lop) * 100) / 100;
+                const net = Math.max(0, Math.round((actualGross - (pf + esi + pt + tds + insurance)) * 100) / 100);
 
                 return (
-                  <div className="bg-bg-base border border-border-card rounded-[12px] p-4 flex flex-col gap-2 mt-2">
-                    <div className="flex justify-between items-center text-xs">
-                      <span className="font-bold text-text-sec">Loss of Pay (LOP Amount):</span>
-                      <span className="font-extrabold text-brand-danger">₹{lop.toFixed(2)}</span>
+                  <div className="bg-bg-base/80 border border-border-card rounded-[14px] p-4 flex flex-col gap-2 mt-2">
+                    <div className="text-[11px] font-extrabold text-text-main pb-2 border-b border-border-card/60 flex items-center justify-between">
+                      <span>Live Salary Breakdown</span>
+                      <span className="text-[10px] text-text-mut font-normal">Prorated for {paid}/{wDays} paid days</span>
                     </div>
-                    <div className="flex justify-between items-center text-xs">
-                      <span className="font-bold text-text-sec">Final Net Salary:</span>
-                      <span className="font-extrabold text-emerald-500">₹{net.toFixed(2)}</span>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs pt-1">
+                      <div className="flex justify-between items-center">
+                        <span className="text-text-sec">Gross Salary:</span>
+                        <span className="font-bold text-text-main">₹{g.toLocaleString('en-IN')}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-text-sec">Basic Pay ({basicPct}%):</span>
+                        <span className="font-bold text-text-main">₹{basic.toLocaleString('en-IN')}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-text-sec">Other Allowance ({otherPct}%):</span>
+                        <span className="font-bold text-text-main">₹{other.toLocaleString('en-IN')}</span>
+                      </div>
+                      {lop > 0 && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-text-sec">Loss of Pay (LOP):</span>
+                          <span className="font-bold text-brand-danger">₹{lop.toFixed(2)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between items-center">
+                        <span className="text-text-sec">PF (12%):</span>
+                        <span className="font-bold text-brand-danger">₹{pf.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-text-sec">ESI (0.75%):</span>
+                        <span className="font-bold text-brand-danger">₹{esi.toFixed(2)}</span>
+                      </div>
+                      {pt > 0 && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-text-sec">Prof. Tax (PT):</span>
+                          <span className="font-bold text-brand-danger">₹{pt.toFixed(2)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between items-center border-t border-border-card/40 pt-1 col-span-2">
+                        <span className="font-bold text-text-sec">Total Deductions:</span>
+                        <span className="font-extrabold text-brand-danger">₹{totalDeductions.toFixed(2)}</span>
+                      </div>
+                    </div>
+                    <div className="flex justify-between items-center text-sm pt-2 border-t border-border-card/60">
+                      <span className="font-extrabold text-text-main">Final Net Salary:</span>
+                      <span className="text-base font-extrabold text-emerald-500 bg-emerald-500/10 px-3 py-1 rounded-[8px] border border-emerald-500/20">₹{net.toLocaleString('en-IN')}</span>
                     </div>
                   </div>
                 );
               })()}
-
-              <div className="mt-2 p-3 bg-amber-500/10 border border-amber-500/20 rounded-[12px]">
-                <p className="text-[10px] text-amber-600 font-semibold leading-relaxed">
-                  Saving this will recalculate EPF, ESI, HRA, and PT dynamically.
-                </p>
-              </div>
             </div>
             <div className="px-6 py-4 border-t border-border-card flex justify-end gap-3 bg-bg-base/30 mt-auto flex-shrink-0">
               <button onClick={() => setShowEditSalaryModal(false)} className="px-5 py-2.5 rounded-[12px] text-xs font-bold text-text-sec hover:bg-bg-base transition-colors border border-transparent hover:border-border-card">Cancel</button>
@@ -6919,13 +7167,16 @@ export default function AdminDashboard() {
                       workingDays: wDays,
                       paidDays,
                       grossSalary: gross,
+                      effectiveDate: editSalaryEffectiveDate,
+                      basicPercentage: companyPayrollSettings?.basicPercentage || 50,
+                      otherAllowancePercentage: companyPayrollSettings?.otherAllowancePercentage || 30,
                       ...calc
                     });
 
                     // Update employee permanent gross salary
                     await updateEmployeeGrossSalary(targetEmpId, gross).catch(() => {});
 
-                    showToast("Salary updated successfully", "success");
+                    showToast("Salary and payroll structure updated successfully", "success");
                     setShowEditSalaryModal(false);
                     loadDirectoryData();
                   } catch (e) {
@@ -7027,53 +7278,39 @@ export default function AdminDashboard() {
 
               <div className="grid grid-cols-12 gap-y-1 gap-x-2 text-[10px] text-black pb-4 font-normal">
                 {/* Row 1 */}
-                <div className="col-span-4">Basic</div>
+                <div className="col-span-4">Basic Pay ({selectedPayrollUser.basicPercentage || companyPayrollSettings?.basicPercentage || 50}%)</div>
                 <div className="col-span-2 text-right">{(selectedPayrollUser.basic || 0).toFixed(2)}</div>
                 <div className="col-span-2 text-right">0.00</div>
-                <div className="col-span-3 pl-4">Provident Fund</div>
+                <div className="col-span-3 pl-4">Provident Fund (12%)</div>
                 <div className="col-span-1 text-right">{(selectedPayrollUser.pf || 0).toFixed(2)}</div>
 
                 {/* Row 2 */}
-                <div className="col-span-4">House Rent Allowance</div>
-                <div className="col-span-2 text-right">{(selectedPayrollUser.hra || 0).toFixed(2)}</div>
+                <div className="col-span-4">Other Allowance ({selectedPayrollUser.otherAllowancePercentage || companyPayrollSettings?.otherAllowancePercentage || 30}%)</div>
+                <div className="col-span-2 text-right">{((selectedPayrollUser.otherAllowance !== undefined ? selectedPayrollUser.otherAllowance : selectedPayrollUser.special) || 0).toFixed(2)}</div>
                 <div className="col-span-2 text-right">0.00</div>
-                <div className="col-span-3 pl-4">Loss of Pay</div>
-                <div className="col-span-1 text-right">{(selectedPayrollUser.lopAmount || 0).toFixed(2)}</div>
+                <div className="col-span-3 pl-4">Employee ESI (0.75%)</div>
+                <div className="col-span-1 text-right">{(selectedPayrollUser.esi || 0).toFixed(2)}</div>
 
                 {/* Row 3 */}
-                <div className="col-span-4">Conveyance</div>
-                <div className="col-span-2 text-right">0.00</div>
-                <div className="col-span-2 text-right">0.00</div>
+                <div className="col-span-4"></div>
+                <div className="col-span-2 text-right"></div>
+                <div className="col-span-2 text-right"></div>
                 <div className="col-span-3 pl-4">Professional Tax</div>
                 <div className="col-span-1 text-right">{(selectedPayrollUser.pt || 0).toFixed(2)}</div>
 
                 {/* Row 4 */}
-                <div className="col-span-4">Special Allowance</div>
-                <div className="col-span-2 text-right">{(selectedPayrollUser.special || 0).toFixed(2)}</div>
-                <div className="col-span-2 text-right">0.00</div>
-                <div className="col-span-3 pl-4">{(selectedPayrollUser.esi || 0) > 0 ? 'ESI' : ''}</div>
-                <div className="col-span-1 text-right">{(selectedPayrollUser.esi || 0) > 0 ? selectedPayrollUser.esi.toFixed(2) : ''}</div>
+                <div className="col-span-4"></div>
+                <div className="col-span-2 text-right"></div>
+                <div className="col-span-2 text-right"></div>
+                <div className="col-span-3 pl-4">Loss of Pay</div>
+                <div className="col-span-1 text-right">{(selectedPayrollUser.lopAmount || 0).toFixed(2)}</div>
 
                 {/* Row 5 */}
-                <div className="col-span-4">Basic (Prorated)</div>
-                <div className="col-span-2 text-right">0.00</div>
-                <div className="col-span-2 text-right">0.00</div>
-                <div className="col-span-3 pl-4">{(selectedPayrollUser.tds || 0) > 0 ? 'TDS' : ''}</div>
-                <div className="col-span-1 text-right">{(selectedPayrollUser.tds || 0) > 0 ? selectedPayrollUser.tds.toFixed(2) : ''}</div>
-
-                {/* Row 6 */}
-                <div className="col-span-4">HRA (Prorated)</div>
-                <div className="col-span-2 text-right">0.00</div>
-                <div className="col-span-2 text-right">0.00</div>
-                <div className="col-span-3 pl-4"></div>
-                <div className="col-span-1 text-right"></div>
-
-                {/* Row 7 */}
-                <div className="col-span-4">Other Allowance</div>
-                <div className="col-span-2 text-right">0.00</div>
-                <div className="col-span-2 text-right">0.00</div>
-                <div className="col-span-3 pl-4"></div>
-                <div className="col-span-1 text-right"></div>
+                <div className="col-span-4"></div>
+                <div className="col-span-2 text-right"></div>
+                <div className="col-span-2 text-right"></div>
+                <div className="col-span-3 pl-4">{(selectedPayrollUser.insurance || 0) > 0 ? 'Health Insurance' : ''}</div>
+                <div className="col-span-1 text-right">{(selectedPayrollUser.insurance || 0) > 0 ? Number(selectedPayrollUser.insurance).toFixed(2) : ''}</div>
               </div>
               
               <div className="border-t-[3px] border-black w-full my-1"></div>
@@ -7083,7 +7320,7 @@ export default function AdminDashboard() {
                 <div className="col-span-2 text-right">{(selectedPayrollUser.gross || 0).toFixed(2)}</div>
                 <div className="col-span-2 text-right">0.00</div>
                 <div className="col-span-3 pl-4">Gross Deduction</div>
-                <div className="col-span-1 text-right">{(selectedPayrollUser.pf + selectedPayrollUser.pt + selectedPayrollUser.esi + selectedPayrollUser.tds + (selectedPayrollUser.lopAmount || 0)).toFixed(2)}</div>
+                <div className="col-span-1 text-right">{((selectedPayrollUser.pf || 0) + (selectedPayrollUser.pt || 0) + (selectedPayrollUser.esi || 0) + (selectedPayrollUser.tds || 0) + (selectedPayrollUser.insurance || 0) + (selectedPayrollUser.lopAmount || 0)).toFixed(2)}</div>
               </div>
 
               <div className="border-t-[3px] border-black w-full my-1"></div>
@@ -7126,12 +7363,15 @@ export default function AdminDashboard() {
                     year: payrollYear,
                     grossSalary: selectedPayrollUser.gross,
                     basic: selectedPayrollUser.basic,
-                    hra: selectedPayrollUser.hra,
-                    special: selectedPayrollUser.special,
+                    otherAllowance: selectedPayrollUser.otherAllowance,
+                    special: selectedPayrollUser.otherAllowance,
+                    basicPercentage: selectedPayrollUser.basicPercentage || companyPayrollSettings?.basicPercentage || 50,
+                    otherAllowancePercentage: selectedPayrollUser.otherAllowancePercentage || companyPayrollSettings?.otherAllowancePercentage || 30,
                     pf: selectedPayrollUser.pf,
                     esi: selectedPayrollUser.esi,
                     pt: selectedPayrollUser.pt,
                     tds: selectedPayrollUser.tds,
+                    insurance: selectedPayrollUser.insurance || 0,
                     lopAmount: selectedPayrollUser.lopAmount || 0,
                     lopsDays: selectedPayrollUser.lopsDays || 0,
                     net: selectedPayrollUser.net,
@@ -7147,15 +7387,15 @@ export default function AdminDashboard() {
               </button>
               <button 
                 onClick={() => {
-                                      const element = document.getElementById('payslip-content');
-                    const opt = {
-                      margin:       0,
-                      filename:     `Payslip_${selectedPayrollUser.name}_${payrollMonth}_${payrollYear}.pdf`,
-                      image:        { type: 'jpeg', quality: 0.98 },
-                      html2canvas:  { scale: 2, useCORS: true },
-                      jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
-                    };
-                    html2pdf().set(opt).from(element).save(); 
+                  const element = document.getElementById('payslip-content');
+                  const opt = {
+                    margin:       0,
+                    filename:     `Payslip_${selectedPayrollUser.name}_${payrollMonth}_${payrollYear}.pdf`,
+                    image:        { type: 'jpeg', quality: 0.98 },
+                    html2canvas:  { scale: 2, useCORS: true },
+                    jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
+                  };
+                  html2pdf().set(opt).from(element).save(); 
                 }} 
                 className="w-full sm:w-auto px-6 py-2.5 flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-[12px] text-xs font-bold shadow-lg shadow-emerald-500/20 transition-all active:scale-95 cursor-pointer"
               >
@@ -7256,6 +7496,102 @@ export default function AdminDashboard() {
                   <input type="checkbox" className="hidden" checked={companyPayrollSettings.insurance} onChange={(e) => setCompanyPayrollSettings(prev => ({ ...prev, insurance: e.target.checked }))} />
                 </label>
                 
+                {/* Two New Percentage Settings */}
+                <div className="pt-3 border-t border-border-card/40 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-text-sec uppercase tracking-wider">Salary Structure Percentages</span>
+                    {(() => {
+                      const bp = Number(companyPayrollSettings.basicPercentage !== undefined ? companyPayrollSettings.basicPercentage : 50);
+                      const oa = Number(companyPayrollSettings.otherAllowancePercentage !== undefined ? companyPayrollSettings.otherAllowancePercentage : 30);
+                      const sum = bp + oa;
+                      return (
+                        <span className={`text-[11px] font-mono font-bold px-2 py-0.5 rounded-full ${sum > 100 ? 'bg-brand-danger/20 text-brand-danger' : 'bg-brand-primary/10 text-brand-primary'}`}>
+                          Total: {sum}% / 100%
+                        </span>
+                      );
+                    })()}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-text-sec mb-1.5">
+                        Basic Pay Percentage (%)
+                      </label>
+                      <div className="relative">
+                        <input 
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="1"
+                          value={companyPayrollSettings.basicPercentage !== undefined ? companyPayrollSettings.basicPercentage : 50}
+                          onChange={(e) => {
+                            const val = e.target.value === "" ? "" : Number(e.target.value);
+                            setCompanyPayrollSettings(prev => ({ ...prev, basicPercentage: val }));
+                          }}
+                          className="w-full bg-bg-base border border-border-card text-text-main text-sm font-bold rounded-[12px] px-4 py-2.5 focus:outline-none focus:border-brand-primary transition-all"
+                          placeholder="50"
+                        />
+                        <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-text-mut">%</span>
+                      </div>
+                      <p className="text-[10px] text-text-mut mt-1">Default: 50% of gross salary.</p>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-text-sec mb-1.5">
+                        Other Allowance Percentage (%)
+                      </label>
+                      <div className="relative">
+                        <input 
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="1"
+                          value={companyPayrollSettings.otherAllowancePercentage !== undefined ? companyPayrollSettings.otherAllowancePercentage : 30}
+                          onChange={(e) => {
+                            const val = e.target.value === "" ? "" : Number(e.target.value);
+                            setCompanyPayrollSettings(prev => ({ ...prev, otherAllowancePercentage: val }));
+                          }}
+                          className="w-full bg-bg-base border border-border-card text-text-main text-sm font-bold rounded-[12px] px-4 py-2.5 focus:outline-none focus:border-brand-primary transition-all"
+                          placeholder="30"
+                        />
+                        <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-text-mut">%</span>
+                      </div>
+                      <p className="text-[10px] text-text-mut mt-1">Default: 30% of gross salary.</p>
+                    </div>
+                  </div>
+
+                  {/* Percentage Validation Error Alert */}
+                  {(() => {
+                    const bp = Number(companyPayrollSettings.basicPercentage !== undefined ? companyPayrollSettings.basicPercentage : 50);
+                    const oa = Number(companyPayrollSettings.otherAllowancePercentage !== undefined ? companyPayrollSettings.otherAllowancePercentage : 30);
+                    if (isNaN(bp) || bp < 0 || bp > 100) {
+                      return (
+                        <div className="p-3 bg-brand-danger/10 border border-brand-danger/20 rounded-[12px] text-[11px] text-brand-danger font-bold">
+                          Basic Pay percentage must be between 0 and 100.
+                        </div>
+                      );
+                    }
+                    if (isNaN(oa) || oa < 0 || oa > 100) {
+                      return (
+                        <div className="p-3 bg-brand-danger/10 border border-brand-danger/20 rounded-[12px] text-[11px] text-brand-danger font-bold">
+                          Other Allowance percentage must be between 0 and 100.
+                        </div>
+                      );
+                    }
+                    if (bp + oa > 100) {
+                      return (
+                        <div className="p-3 bg-brand-danger/10 border border-brand-danger/20 rounded-[12px] text-[11px] text-brand-danger font-bold flex items-start gap-2">
+                          <AlertTriangle size={15} className="flex-shrink-0 mt-0.5" />
+                          <span>
+                            Validation Error: Basic Pay ({bp}%) + Other Allowance ({oa}%) = {bp + oa}%. Combined percentages cannot exceed 100%.
+                          </span>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
+                </div>
+
                 <div className="pt-2 animate-fade-in border-t border-border-card/30 mt-4">
                   <label className="block text-xs font-bold text-text-sec uppercase tracking-wider mb-2 mt-4">Standard Working Days (Per Month)</label>
                   <input 
@@ -7286,16 +7622,35 @@ export default function AdminDashboard() {
               <button onClick={() => setShowPayrollSettingsModal(false)} className="flex-1 py-2.5 rounded-[12px] font-bold text-xs bg-bg-base text-text-main hover:bg-border-card transition-colors">Cancel</button>
               <button 
                 onClick={async () => {
+                  const bp = Number(companyPayrollSettings.basicPercentage !== undefined ? companyPayrollSettings.basicPercentage : 50);
+                  const oa = Number(companyPayrollSettings.otherAllowancePercentage !== undefined ? companyPayrollSettings.otherAllowancePercentage : 30);
+                  if (isNaN(bp) || bp < 0 || bp > 100 || isNaN(oa) || oa < 0 || oa > 100) {
+                    return showToast("Percentages must be between 0 and 100.", "error");
+                  }
+                  if (bp + oa > 100) {
+                    return showToast("Basic Pay + Other Allowance percentage cannot exceed 100%.", "error");
+                  }
                   try {
-                    await updateCompanyDetails(currentUser.companyId, { payrollSettings: companyPayrollSettings });
+                    await updateCompanyDetails(currentUser.companyId, { 
+                      payrollSettings: {
+                        ...companyPayrollSettings,
+                        basicPercentage: bp,
+                        otherAllowancePercentage: oa
+                      }
+                    });
                     setShowPayrollSettingsModal(false);
                     showToast("Payroll settings updated successfully", "success");
                   } catch (e) {
                     console.error('Update Settings Error:', e);
-                    showToast("Failed to update settings", "error");
+                    showToast(e.message || "Failed to update settings", "error");
                   }
                 }} 
-                className="flex-1 py-2.5 rounded-[12px] font-bold text-xs bg-brand-primary text-white hover:bg-brand-hover transition-colors shadow-lg shadow-brand-primary/20"
+                disabled={(() => {
+                  const bp = Number(companyPayrollSettings.basicPercentage !== undefined ? companyPayrollSettings.basicPercentage : 50);
+                  const oa = Number(companyPayrollSettings.otherAllowancePercentage !== undefined ? companyPayrollSettings.otherAllowancePercentage : 30);
+                  return isNaN(bp) || bp < 0 || bp > 100 || isNaN(oa) || oa < 0 || oa > 100 || (bp + oa > 100);
+                })()}
+                className="flex-1 py-2.5 rounded-[12px] font-bold text-xs bg-brand-primary text-white hover:bg-brand-hover transition-colors shadow-lg shadow-brand-primary/20 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Save Settings
               </button>
