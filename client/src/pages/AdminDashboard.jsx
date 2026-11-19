@@ -264,6 +264,13 @@ export default function AdminDashboard() {
 
   const [users, setUsers] = useState([]);
   const [showPayrollSettingsModal, setShowPayrollSettingsModal] = useState(false);
+  const [payrollSettingsForm, setPayrollSettingsForm] = useState({
+    pf: true,
+    esi: true,
+    workingDays: 30,
+    basicPercentage: 50,
+    otherAllowancePercentage: 30
+  });
   const [companyPayrollSettings, setCompanyPayrollSettings] = useState({
     pf: true,
     esi: true,
@@ -2372,8 +2379,8 @@ export default function AdminDashboard() {
                           type="button"
                           onClick={() => setLiveViewMode("live")}
                           className={`px-3 py-1.5 rounded-[9px] text-xs font-bold transition-all cursor-pointer ${liveViewMode === "live"
-                              ? "bg-brand-primary text-white shadow-sm"
-                              : "text-text-sec hover:text-text-main"
+                            ? "bg-brand-primary text-white shadow-sm"
+                            : "text-text-sec hover:text-text-main"
                             }`}
                         >
                           Today's Live
@@ -2382,8 +2389,8 @@ export default function AdminDashboard() {
                           type="button"
                           onClick={() => setLiveViewMode("all-logs")}
                           className={`px-3 py-1.5 rounded-[9px] text-xs font-bold transition-all cursor-pointer ${liveViewMode === "all-logs"
-                              ? "bg-brand-primary text-white shadow-sm"
-                              : "text-text-sec hover:text-text-main"
+                            ? "bg-brand-primary text-white shadow-sm"
+                            : "text-text-sec hover:text-text-main"
                             }`}
                         >
                           All Registry Logs
@@ -2789,8 +2796,8 @@ export default function AdminDashboard() {
                               key={p}
                               onClick={() => setLivePage(p)}
                               className={`w-8 h-8 rounded-[8px] border transition-all cursor-pointer font-bold ${livePage === p
-                                  ? "bg-brand-primary border-brand-primary text-white"
-                                  : "border-border-card bg-bg-card text-text-sec hover:bg-bg-base"
+                                ? "bg-brand-primary border-brand-primary text-white"
+                                : "border-border-card bg-bg-card text-text-sec hover:bg-bg-base"
                                 }`}
                             >
                               {p}
@@ -3204,8 +3211,8 @@ export default function AdminDashboard() {
                           key={p}
                           onClick={() => setUsersPage(p)}
                           className={`w-8 h-8 rounded-[8px] border transition-all cursor-pointer font-bold ${usersPage === p
-                              ? "bg-brand-primary border-brand-primary text-white"
-                              : "border-border-card bg-bg-card text-text-sec hover:bg-bg-base"
+                            ? "bg-brand-primary border-brand-primary text-white"
+                            : "border-border-card bg-bg-card text-text-sec hover:bg-bg-base"
                             }`}
                         >
                           {p}
@@ -3343,8 +3350,8 @@ export default function AdminDashboard() {
               <button
                 onClick={() => setApprovalsSubTab("leaves")}
                 className={`py-3 px-6 text-sm font-bold border-b-2 transition-all cursor-pointer ${approvalsSubTab === "leaves"
-                    ? "border-brand-primary text-brand-primary"
-                    : "border-transparent text-text-sec hover:text-text-main"
+                  ? "border-brand-primary text-brand-primary"
+                  : "border-transparent text-text-sec hover:text-text-main"
                   }`}
               >
                 Leave Requests ({leaveRequests.length})
@@ -3352,8 +3359,8 @@ export default function AdminDashboard() {
               <button
                 onClick={() => setApprovalsSubTab("regularization")}
                 className={`py-3 px-6 text-sm font-bold border-b-2 transition-all cursor-pointer ${approvalsSubTab === "regularization"
-                    ? "border-brand-primary text-brand-primary"
-                    : "border-transparent text-text-sec hover:text-text-main"
+                  ? "border-brand-primary text-brand-primary"
+                  : "border-transparent text-text-sec hover:text-text-main"
                   }`}
               >
                 Regularization Requests ({regularizationRequests.length})
@@ -3361,8 +3368,8 @@ export default function AdminDashboard() {
               <button
                 onClick={() => setApprovalsSubTab("history")}
                 className={`py-3 px-6 text-sm font-bold border-b-2 transition-all cursor-pointer ${approvalsSubTab === "history"
-                    ? "border-brand-primary text-brand-primary"
-                    : "border-transparent text-text-sec hover:text-text-main"
+                  ? "border-brand-primary text-brand-primary"
+                  : "border-transparent text-text-sec hover:text-text-main"
                   }`}
               >
                 Request History ({allRequests.filter(r => r.status !== "pending").length + allRegularizationRequests.filter(r => r.status !== "pending").length})
@@ -3499,8 +3506,8 @@ export default function AdminDashboard() {
                               key={p}
                               onClick={() => setLeavesPendingPage(p)}
                               className={`w-8 h-8 rounded-[8px] border transition-all cursor-pointer font-bold ${leavesPendingPage === p
-                                  ? "bg-brand-primary border-brand-primary text-white"
-                                  : "border-border-card bg-bg-card text-text-sec hover:bg-bg-base"
+                                ? "bg-brand-primary border-brand-primary text-white"
+                                : "border-border-card bg-bg-card text-text-sec hover:bg-bg-base"
                                 }`}
                             >
                               {p}
@@ -3842,8 +3849,8 @@ export default function AdminDashboard() {
                               key={p}
                               onClick={() => setRegsPendingPage(p)}
                               className={`w-8 h-8 rounded-[8px] border transition-all cursor-pointer font-bold ${regsPendingPage === p
-                                  ? "bg-brand-primary border-brand-primary text-white"
-                                  : "border-border-card bg-bg-card text-text-sec hover:bg-bg-base"
+                                ? "bg-brand-primary border-brand-primary text-white"
+                                : "border-border-card bg-bg-card text-text-sec hover:bg-bg-base"
                                 }`}
                             >
                               {p}
@@ -4069,8 +4076,8 @@ export default function AdminDashboard() {
                             key={p}
                             onClick={() => setHistoryPage(p)}
                             className={`w-8 h-8 rounded-[8px] border transition-all cursor-pointer font-bold ${historyPage === p
-                                ? "bg-brand-primary border-brand-primary text-white"
-                                : "border-border-card bg-bg-card text-text-sec hover:bg-bg-base"
+                              ? "bg-brand-primary border-brand-primary text-white"
+                              : "border-border-card bg-bg-card text-text-sec hover:bg-bg-base"
                               }`}
                           >
                             {p}
@@ -4490,8 +4497,8 @@ export default function AdminDashboard() {
                               type="button"
                               onClick={() => handleTogglePaidLeaveStatus(pl.id, pl.title, pl.status)}
                               className={`text-[9px] font-black px-2.5 py-0.5 rounded-full uppercase transition-all cursor-pointer ${(pl.status || "active") === "active"
-                                  ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 hover:bg-emerald-500/20"
-                                  : "bg-slate-500/10 text-slate-500 border border-slate-500/20 hover:bg-slate-500/20"
+                                ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 hover:bg-emerald-500/20"
+                                : "bg-slate-500/10 text-slate-500 border border-slate-500/20 hover:bg-slate-500/20"
                                 }`}
                               title="Click to toggle status"
                             >
@@ -6431,7 +6438,19 @@ export default function AdminDashboard() {
                   >
                     <Download size={16} /> {actionLoading ? 'Exporting...' : 'Bulk Export PDF'}
                   </button>
-                  <button onClick={() => setShowPayrollSettingsModal(true)} className="flex items-center justify-center gap-2 px-4 h-10 whitespace-nowrap bg-bg-card border border-border-card text-text-main text-sm font-bold rounded-[14px] hover:bg-bg-base transition-colors shadow-sm">
+                  <button
+                    onClick={() => {
+                      setPayrollSettingsForm({
+                        pf: companyPayrollSettings?.pf !== false,
+                        esi: companyPayrollSettings?.esi !== false,
+                        workingDays: companyPayrollSettings?.workingDays || 30,
+                        basicPercentage: companyPayrollSettings?.basicPercentage !== undefined ? Number(companyPayrollSettings.basicPercentage) : 50,
+                        otherAllowancePercentage: companyPayrollSettings?.otherAllowancePercentage !== undefined ? Number(companyPayrollSettings.otherAllowancePercentage) : 30
+                      });
+                      setShowPayrollSettingsModal(true);
+                    }}
+                    className="flex items-center justify-center gap-2 px-4 h-10 whitespace-nowrap bg-bg-card border border-border-card text-text-main text-sm font-bold rounded-[14px] hover:bg-bg-base transition-colors shadow-sm"
+                  >
                     <Edit size={16} /> Payroll Settings
                   </button>
                 </div>
@@ -7360,35 +7379,57 @@ export default function AdminDashboard() {
             </div>
             <div className="p-6 overflow-y-auto max-h-[70vh] space-y-6">
               <div className="space-y-4">
-                <label className="flex items-center justify-between cursor-pointer group">
+                <div
+                  onClick={() => setPayrollSettingsForm(prev => ({ ...prev, pf: !prev.pf }))}
+                  className="flex items-center justify-between cursor-pointer group p-2.5 -mx-2.5 rounded-xl hover:bg-bg-base/40 transition-colors select-none"
+                >
                   <div>
                     <span className="text-sm font-bold text-text-main group-hover:text-brand-primary transition-colors block">Employee Provident Fund (EPF)</span>
                     <span className="text-xs text-text-sec">Enable 12% EPF deduction</span>
                   </div>
-                  <div className={`w-12 h-6 rounded-full p-1 transition-colors ${companyPayrollSettings.pf ? 'bg-brand-primary' : 'bg-border-card'}`}>
-                    <div className={`w-4 h-4 rounded-full bg-white transition-transform ${companyPayrollSettings.pf ? 'translate-x-6' : 'translate-x-0'}`} />
-                  </div>
-                  <input type="checkbox" className="hidden" checked={companyPayrollSettings.pf} onChange={(e) => setCompanyPayrollSettings(prev => ({ ...prev, pf: e.target.checked }))} />
-                </label>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={Boolean(payrollSettingsForm.pf)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPayrollSettingsForm(prev => ({ ...prev, pf: !prev.pf }));
+                    }}
+                    className={`w-12 h-6 rounded-full p-1 transition-colors duration-200 cursor-pointer flex items-center flex-shrink-0 ${payrollSettingsForm.pf ? 'bg-brand-primary' : 'bg-slate-300 dark:bg-slate-700'}`}
+                  >
+                    <div className={`w-4 h-4 rounded-full bg-white shadow-md transition-transform duration-200 ease-in-out ${payrollSettingsForm.pf ? 'translate-x-6' : 'translate-x-0'}`} />
+                  </button>
+                </div>
 
-                <label className="flex items-center justify-between cursor-pointer group">
+                <div
+                  onClick={() => setPayrollSettingsForm(prev => ({ ...prev, esi: !prev.esi }))}
+                  className="flex items-center justify-between cursor-pointer group p-2.5 -mx-2.5 rounded-xl hover:bg-bg-base/40 transition-colors select-none"
+                >
                   <div>
                     <span className="text-sm font-bold text-text-main group-hover:text-brand-primary transition-colors block">Employee State Insurance (ESI)</span>
                     <span className="text-xs text-text-sec">Enable 0.75% ESI deduction</span>
                   </div>
-                  <div className={`w-12 h-6 rounded-full p-1 transition-colors ${companyPayrollSettings.esi ? 'bg-brand-primary' : 'bg-border-card'}`}>
-                    <div className={`w-4 h-4 rounded-full bg-white transition-transform ${companyPayrollSettings.esi ? 'translate-x-6' : 'translate-x-0'}`} />
-                  </div>
-                  <input type="checkbox" className="hidden" checked={companyPayrollSettings.esi} onChange={(e) => setCompanyPayrollSettings(prev => ({ ...prev, esi: e.target.checked }))} />
-                </label>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={Boolean(payrollSettingsForm.esi)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPayrollSettingsForm(prev => ({ ...prev, esi: !prev.esi }));
+                    }}
+                    className={`w-12 h-6 rounded-full p-1 transition-colors duration-200 cursor-pointer flex items-center flex-shrink-0 ${payrollSettingsForm.esi ? 'bg-brand-primary' : 'bg-slate-300 dark:bg-slate-700'}`}
+                  >
+                    <div className={`w-4 h-4 rounded-full bg-white shadow-md transition-transform duration-200 ease-in-out ${payrollSettingsForm.esi ? 'translate-x-6' : 'translate-x-0'}`} />
+                  </button>
+                </div>
 
                 {/* Two New Percentage Settings */}
                 <div className="pt-3 border-t border-border-card/40 space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-text-sec uppercase tracking-wider">Salary Structure Percentages</span>
                     {(() => {
-                      const bp = Number(companyPayrollSettings.basicPercentage !== undefined ? companyPayrollSettings.basicPercentage : 50);
-                      const oa = Number(companyPayrollSettings.otherAllowancePercentage !== undefined ? companyPayrollSettings.otherAllowancePercentage : 30);
+                      const bp = Number(payrollSettingsForm.basicPercentage !== undefined ? payrollSettingsForm.basicPercentage : 50);
+                      const oa = Number(payrollSettingsForm.otherAllowancePercentage !== undefined ? payrollSettingsForm.otherAllowancePercentage : 30);
                       const sum = bp + oa;
                       return (
                         <span className={`text-[11px] font-mono font-bold px-2 py-0.5 rounded-full ${sum > 100 ? 'bg-brand-danger/20 text-brand-danger' : 'bg-brand-primary/10 text-brand-primary'}`}>
@@ -7409,10 +7450,10 @@ export default function AdminDashboard() {
                           min="0"
                           max="100"
                           step="1"
-                          value={companyPayrollSettings.basicPercentage !== undefined ? companyPayrollSettings.basicPercentage : 50}
+                          value={payrollSettingsForm.basicPercentage !== undefined ? payrollSettingsForm.basicPercentage : 50}
                           onChange={(e) => {
                             const val = e.target.value === "" ? "" : Number(e.target.value);
-                            setCompanyPayrollSettings(prev => ({ ...prev, basicPercentage: val }));
+                            setPayrollSettingsForm(prev => ({ ...prev, basicPercentage: val }));
                           }}
                           className="w-full bg-bg-base border border-border-card text-text-main text-sm font-bold rounded-[12px] px-4 py-2.5 focus:outline-none focus:border-brand-primary transition-all"
                           placeholder="50"
@@ -7432,10 +7473,10 @@ export default function AdminDashboard() {
                           min="0"
                           max="100"
                           step="1"
-                          value={companyPayrollSettings.otherAllowancePercentage !== undefined ? companyPayrollSettings.otherAllowancePercentage : 30}
+                          value={payrollSettingsForm.otherAllowancePercentage !== undefined ? payrollSettingsForm.otherAllowancePercentage : 30}
                           onChange={(e) => {
                             const val = e.target.value === "" ? "" : Number(e.target.value);
-                            setCompanyPayrollSettings(prev => ({ ...prev, otherAllowancePercentage: val }));
+                            setPayrollSettingsForm(prev => ({ ...prev, otherAllowancePercentage: val }));
                           }}
                           className="w-full bg-bg-base border border-border-card text-text-main text-sm font-bold rounded-[12px] px-4 py-2.5 focus:outline-none focus:border-brand-primary transition-all"
                           placeholder="30"
@@ -7448,8 +7489,8 @@ export default function AdminDashboard() {
 
                   {/* Percentage Validation Error Alert */}
                   {(() => {
-                    const bp = Number(companyPayrollSettings.basicPercentage !== undefined ? companyPayrollSettings.basicPercentage : 50);
-                    const oa = Number(companyPayrollSettings.otherAllowancePercentage !== undefined ? companyPayrollSettings.otherAllowancePercentage : 30);
+                    const bp = Number(payrollSettingsForm.basicPercentage !== undefined ? payrollSettingsForm.basicPercentage : 50);
+                    const oa = Number(payrollSettingsForm.otherAllowancePercentage !== undefined ? payrollSettingsForm.otherAllowancePercentage : 30);
                     if (isNaN(bp) || bp < 0 || bp > 100) {
                       return (
                         <div className="p-3 bg-brand-danger/10 border border-brand-danger/20 rounded-[12px] text-[11px] text-brand-danger font-bold">
@@ -7482,8 +7523,8 @@ export default function AdminDashboard() {
                   <label className="block text-xs font-bold text-text-sec uppercase tracking-wider mb-2 mt-4">Standard Working Days (Per Month)</label>
                   <input
                     type="number"
-                    value={companyPayrollSettings.workingDays || 30}
-                    onChange={(e) => setCompanyPayrollSettings(prev => ({ ...prev, workingDays: Number(e.target.value) }))}
+                    value={payrollSettingsForm.workingDays || 30}
+                    onChange={(e) => setPayrollSettingsForm(prev => ({ ...prev, workingDays: Number(e.target.value) }))}
                     className="w-full bg-bg-base border border-border-card text-text-main text-sm rounded-[12px] px-4 py-2.5 focus:outline-none focus:border-brand-primary focus:ring-1 focus:ring-brand-primary transition-all"
                     placeholder="e.g. 26 or 30"
                   />
@@ -7495,8 +7536,8 @@ export default function AdminDashboard() {
               <button onClick={() => setShowPayrollSettingsModal(false)} className="flex-1 py-2.5 rounded-[12px] font-bold text-xs bg-bg-base text-text-main hover:bg-border-card transition-colors">Cancel</button>
               <button
                 onClick={async () => {
-                  const bp = Number(companyPayrollSettings.basicPercentage !== undefined ? companyPayrollSettings.basicPercentage : 50);
-                  const oa = Number(companyPayrollSettings.otherAllowancePercentage !== undefined ? companyPayrollSettings.otherAllowancePercentage : 30);
+                  const bp = Number(payrollSettingsForm.basicPercentage !== undefined ? payrollSettingsForm.basicPercentage : 50);
+                  const oa = Number(payrollSettingsForm.otherAllowancePercentage !== undefined ? payrollSettingsForm.otherAllowancePercentage : 30);
                   if (isNaN(bp) || bp < 0 || bp > 100 || isNaN(oa) || oa < 0 || oa > 100) {
                     return showToast("Percentages must be between 0 and 100.", "error");
                   }
@@ -7504,13 +7545,16 @@ export default function AdminDashboard() {
                     return showToast("Basic Pay + Other Allowance percentage cannot exceed 100%.", "error");
                   }
                   try {
+                    const updated = {
+                      ...payrollSettingsForm,
+                      basicPercentage: bp,
+                      otherAllowancePercentage: oa,
+                      workingDays: Number(payrollSettingsForm.workingDays || 30)
+                    };
                     await updateCompanyDetails(currentUser.companyId, {
-                      payrollSettings: {
-                        ...companyPayrollSettings,
-                        basicPercentage: bp,
-                        otherAllowancePercentage: oa
-                      }
+                      payrollSettings: updated
                     });
+                    setCompanyPayrollSettings(updated);
                     setShowPayrollSettingsModal(false);
                     showToast("Payroll settings updated successfully", "success");
                   } catch (e) {
@@ -7519,8 +7563,8 @@ export default function AdminDashboard() {
                   }
                 }}
                 disabled={(() => {
-                  const bp = Number(companyPayrollSettings.basicPercentage !== undefined ? companyPayrollSettings.basicPercentage : 50);
-                  const oa = Number(companyPayrollSettings.otherAllowancePercentage !== undefined ? companyPayrollSettings.otherAllowancePercentage : 30);
+                  const bp = Number(payrollSettingsForm.basicPercentage !== undefined ? payrollSettingsForm.basicPercentage : 50);
+                  const oa = Number(payrollSettingsForm.otherAllowancePercentage !== undefined ? payrollSettingsForm.otherAllowancePercentage : 30);
                   return isNaN(bp) || bp < 0 || bp > 100 || isNaN(oa) || oa < 0 || oa > 100 || (bp + oa > 100);
                 })()}
                 className="flex-1 py-2.5 rounded-[12px] font-bold text-xs bg-brand-primary text-white hover:bg-brand-hover transition-colors shadow-lg shadow-brand-primary/20 disabled:opacity-50 disabled:cursor-not-allowed"
