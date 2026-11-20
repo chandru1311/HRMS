@@ -484,8 +484,28 @@ export const calculatePayrollBatch = async (req, res) => {
         }
       });
 
+      const now = new Date();
+      const currentYear = now.getFullYear();
+      const currentMonthIdx = now.getMonth();
+      const currentDay = now.getDate();
+
+      const isCurrentMonth = Number(year) === currentYear && mIdx === currentMonthIdx;
+      const isPastMonth = Number(year) < currentYear || (Number(year) === currentYear && (mIdx !== -1 && mIdx < currentMonthIdx));
+      const totalDaysInMonth = mIdx !== -1 ? new Date(Number(year), mIdx + 1, 0).getDate() : 30;
+
+      let elapsedDays = 0;
+      if (isPastMonth) {
+        elapsedDays = Math.min(wDays, totalDaysInMonth);
+      } else if (isCurrentMonth) {
+        elapsedDays = Math.min(currentDay, Math.min(wDays, totalDaysInMonth));
+      }
+
+      const accounted = presentCount + (halfDayCount * 0.5) + onLeaveCount;
+      const unrecordedAbsent = Math.max(0, Math.round((elapsedDays - accounted) * 10) / 10);
+      const finalAbsentCount = Math.max(absentCount, unrecordedAbsent);
+
       // Loss of Pay (LOP) Days = absent days + 0.5 of half-days
-      const lopsDays = Math.round((absentCount + (halfDayCount * 0.5)) * 10) / 10;
+      const lopsDays = Math.round((finalAbsentCount + (halfDayCount * 0.5)) * 10) / 10;
       const paidDays = Math.max(0, Math.round((wDays - lopsDays) * 10) / 10);
 
       const actualGross = Math.round(((gross / wDays) * paidDays) * 100) / 100;
@@ -733,17 +753,26 @@ export const getEmployeeAttendancePayrollSummary = async (req, res) => {
     // Deduplicate attendance by distinct date (YYYY-MM-DD)
     const dateMap = new Map();
     attRes.rows.forEach(r => {
-      const dateKey = r.date ? (typeof r.date === "string" ? r.date.split("T")[0] : new Date(r.date).toISOString().split("T")[0]) : r.id;
+      let dateKey = null;
+      if (typeof r.id === "string") {
+        const idMatch = r.id.match(/\d{4}-\d{2}-\d{2}/);
+        if (idMatch) dateKey = idMatch[0];
+      }
+      if (!dateKey && r.date) {
+        const d = new Date(r.date);
+        dateKey = !isNaN(d.getTime()) ? new Date(d.getTime() + (5.5 * 60 * 60 * 1000)).toISOString().split("T")[0] : String(r.date).split("T")[0];
+      }
+      if (!dateKey) dateKey = r.id;
       const st = String(r.status || "").toLowerCase();
       // If day was present, prioritize present over other status
-      if (!dateMap.has(dateKey) || st === "present" || st === "completed" || st === "checked-in") {
+      if (!dateMap.has(dateKey) || st === "present" || st === "completed" || st === "checked-in" || st === "checked-out" || st === "in-progress" || st === "on-break") {
         dateMap.set(dateKey, st);
       }
     });
 
     let presentDays = 0;
     let halfDays = 0;
-    let absentDays = 0;
+    let explicitAbsentDays = 0;
     let onLeaveDays = 0;
 
     dateMap.forEach(st => {
@@ -754,38 +783,36 @@ export const getEmployeeAttendancePayrollSummary = async (req, res) => {
       } else if (st === "on-leave") {
         onLeaveDays += 1;
       } else if (st === "absent") {
-        absentDays += 1;
+        explicitAbsentDays += 1;
       }
     });
 
     const totalApprovedLeave = onLeaveDays + approvedLeaveDays;
 
-    // Calculate LOP (Loss of Pay) days
-    let lopDays;
-    let paidDays;
+    // Calculate elapsed days for accurate absent & LOP calculation
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonthIdx = now.getMonth();
+    const currentDay = now.getDate();
 
-    if (savedPayroll) {
-      // If the admin already customized/saved this payroll record, preserve the saved LOP & paid days
-      const savedMeta = (typeof savedPayroll.metadata === "object" && savedPayroll.metadata !== null) ? savedPayroll.metadata : {};
-      lopDays = (savedMeta.lopsDays !== undefined && savedMeta.lopsDays !== null)
-        ? Number(savedMeta.lopsDays)
-        : Math.max(0, wDays - Number(savedPayroll.paid_days || wDays));
-      paidDays = Number(savedPayroll.paid_days !== null ? savedPayroll.paid_days : (wDays - lopDays));
-    } else {
-      // Automatic calculation from live attendance & leaves:
-      const now = new Date();
-      const isPastMonth = Number(year) < now.getFullYear() || (Number(year) === now.getFullYear() && (mIdx !== -1 && mIdx < now.getMonth()));
+    const isCurrentMonth = Number(year) === currentYear && mIdx === currentMonthIdx;
+    const isPastMonth = Number(year) < currentYear || (Number(year) === currentYear && (mIdx !== -1 && mIdx < currentMonthIdx));
+    const totalDaysInMonth = mIdx !== -1 ? new Date(Number(year), mIdx + 1, 0).getDate() : 30;
 
-      const explicitLop = Math.round((absentDays + (halfDays * 0.5)) * 10) / 10;
-      if (isPastMonth && presentDays > 0) {
-        // In a past month with recorded attendance, unworked/unapproved days count as LOP
-        const accounted = presentDays + (halfDays * 0.5) + totalApprovedLeave;
-        lopDays = Math.max(explicitLop, Math.max(0, wDays - accounted));
-      } else {
-        lopDays = explicitLop;
-      }
-      paidDays = Math.max(0, Math.round((wDays - lopDays) * 10) / 10);
+    let elapsedDays = 0;
+    if (isPastMonth) {
+      elapsedDays = Math.min(wDays, totalDaysInMonth);
+    } else if (isCurrentMonth) {
+      // Elapsed days up to today (e.g. on 20.11.2026, 20 days elapsed)
+      elapsedDays = Math.min(currentDay, Math.min(wDays, totalDaysInMonth));
     }
+
+    const accountedDays = presentDays + (halfDays * 0.5) + totalApprovedLeave;
+    const unrecordedAbsentDays = Math.max(0, Math.round((elapsedDays - accountedDays) * 10) / 10);
+    const calculatedAbsentDays = Math.max(explicitAbsentDays, unrecordedAbsentDays);
+
+    const calculatedLopDays = Math.round((calculatedAbsentDays + (halfDays * 0.5)) * 10) / 10;
+    const calculatedPaidDays = Math.max(0, Math.round((wDays - calculatedLopDays) * 10) / 10);
 
     res.json({
       userId: targetUserId,
@@ -795,9 +822,9 @@ export const getEmployeeAttendancePayrollSummary = async (req, res) => {
       presentDays,
       halfDays,
       onLeaveDays: totalApprovedLeave,
-      absentDays,
-      lopDays,
-      paidDays,
+      absentDays: calculatedAbsentDays,
+      lopDays: calculatedLopDays,
+      paidDays: calculatedPaidDays,
       isSaved: Boolean(savedPayroll),
       totalLogs: attRes.rows.length,
       logs: attRes.rows
