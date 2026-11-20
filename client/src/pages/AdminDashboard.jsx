@@ -3260,8 +3260,8 @@ export default function AdminDashboard() {
             return ymUtc === targetYearMonth || ymLocal === targetYearMonth;
           };
           return matchDate(req.startDate) || matchDate(req.start_date) ||
-                 matchDate(req.endDate) || matchDate(req.end_date) ||
-                 matchDate(req.appliedAt) || matchDate(req.created_at);
+            matchDate(req.endDate) || matchDate(req.end_date) ||
+            matchDate(req.appliedAt) || matchDate(req.created_at);
         };
 
         const approvedThisMonthRequests = allRequests.filter(r => r.status === "approved" && isRequestInSelectedMonth(r));
@@ -3620,27 +3620,39 @@ export default function AdminDashboard() {
                             <div className="p-2 bg-bg-card rounded-[10px] border border-border-card text-center">
                               <span className="text-[8px] font-bold text-text-mut uppercase block">Annual</span>
                               <span className="text-sm font-extrabold text-text-main mt-0.5 block">
-                                {users.find(u => u.uid === selectedRequest.userId)?.annualLeaves !== undefined
-                                  ? users.find(u => u.uid === selectedRequest.userId).annualLeaves
-                                  : 25}
+                                {(() => {
+                                  const u = users.find(u => u.uid === selectedRequest.userId);
+                                  const val = u?.annualLeaves !== undefined 
+                                    ? u.annualLeaves 
+                                    : (u?.casual_leave_quota !== undefined ? u.casual_leave_quota : 25);
+                                  return Number(val);
+                                })()}
                                 <span className="text-[8px] font-semibold text-text-sec">d</span>
                               </span>
                             </div>
                             <div className="p-2 bg-bg-card rounded-[10px] border border-border-card text-center">
                               <span className="text-[8px] font-bold text-text-mut uppercase block">Sick</span>
                               <span className="text-sm font-extrabold text-text-main mt-0.5 block">
-                                {users.find(u => u.uid === selectedRequest.userId)?.sickLeaves !== undefined
-                                  ? users.find(u => u.uid === selectedRequest.userId).sickLeaves
-                                  : 10}
+                                {(() => {
+                                  const u = users.find(u => u.uid === selectedRequest.userId);
+                                  const val = u?.sickLeaves !== undefined 
+                                    ? u.sickLeaves 
+                                    : (u?.sick_leave_quota !== undefined ? u.sick_leave_quota : 10);
+                                  return Number(val);
+                                })()}
                                 <span className="text-[8px] font-semibold text-text-sec">d</span>
                               </span>
                             </div>
                             <div className="p-2 bg-bg-card rounded-[10px] border border-border-card text-center">
                               <span className="text-[8px] font-bold text-text-mut uppercase block">Casual</span>
                               <span className="text-sm font-extrabold text-text-main mt-0.5 block">
-                                {users.find(u => u.uid === selectedRequest.userId)?.casualLeaves !== undefined
-                                  ? users.find(u => u.uid === selectedRequest.userId).casualLeaves
-                                  : 6}
+                                {(() => {
+                                  const u = users.find(u => u.uid === selectedRequest.userId);
+                                  const val = u?.casualLeaves !== undefined 
+                                    ? u.casualLeaves 
+                                    : (u?.paid_leave_quota !== undefined ? u.paid_leave_quota : 6);
+                                  return Number(val);
+                                })()}
                                 <span className="text-[8px] font-semibold text-text-sec">d</span>
                               </span>
                             </div>

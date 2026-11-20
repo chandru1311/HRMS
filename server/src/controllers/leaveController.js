@@ -229,16 +229,25 @@ export const updateLeaveStatus = async (req, res) => {
     const totalDays = Number(updatedLeave.total_days || 1);
     const leaveTypeLower = String(updatedLeave.leave_type || "").toLowerCase();
 
-    let quotaColumn = "casual_leave_quota";
-    if (leaveTypeLower.includes("sick")) quotaColumn = "sick_leave_quota";
-    else if (leaveTypeLower.includes("paid")) quotaColumn = "paid_leave_quota";
+    let quotaColumn = "casual_leave_quota"; // Default: Annual Leave (25 days)
+    let defaultQuota = 25;
+    if (leaveTypeLower.includes("sick")) {
+      quotaColumn = "sick_leave_quota";
+      defaultQuota = 10;
+    } else if (leaveTypeLower.includes("casual") || leaveTypeLower.includes("paid")) {
+      quotaColumn = "paid_leave_quota";
+      defaultQuota = 6;
+    } else if (leaveTypeLower.includes("annual")) {
+      quotaColumn = "casual_leave_quota";
+      defaultQuota = 25;
+    }
 
     // 1. Quota & Attendance Synchronization
     if (status === "approved" && prevStatus !== "approved") {
       // Deduct from employee's quota
       await query(
         `UPDATE users
-         SET ${quotaColumn} = GREATEST(0, COALESCE(${quotaColumn}, 25) - $1),
+         SET ${quotaColumn} = GREATEST(0, COALESCE(${quotaColumn}, ${defaultQuota}) - $1),
              updated_at = CURRENT_TIMESTAMP
          WHERE id = $2`,
         [totalDays, updatedLeave.user_id]
@@ -286,7 +295,7 @@ export const updateLeaveStatus = async (req, res) => {
       // Restore previously deducted quota
       await query(
         `UPDATE users
-         SET ${quotaColumn} = COALESCE(${quotaColumn}, 0) + $1,
+         SET ${quotaColumn} = LEAST(${defaultQuota}, COALESCE(${quotaColumn}, 0) + $1),
              updated_at = CURRENT_TIMESTAMP
          WHERE id = $2`,
         [totalDays, updatedLeave.user_id]

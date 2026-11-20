@@ -8,6 +8,7 @@ import { useToast } from "../context/ToastContext";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell } from 'recharts';
 import {
+  apiFetch,
   checkIn,
   checkOut,
   startBreak,
@@ -89,7 +90,7 @@ const numberToWords = (num) => {
 };
 
 export default function UserDashboard() {
-  const { currentUser } = useAuth();
+  const { currentUser, updateCurrentUserState } = useAuth();
   const { showToast } = useToast();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -496,6 +497,15 @@ export default function UserDashboard() {
         r.endDate >= todayStr
       );
       setTeamOnLeaveCount(deptOnLeave.length);
+
+      // Re-sync user's latest leave quota balances from PostgreSQL
+      if (currentUser?.uid && typeof updateCurrentUserState === "function") {
+        apiFetch(`/users/${currentUser.uid}`).then(fresh => {
+          if (fresh && fresh.id) {
+            updateCurrentUserState(fresh);
+          }
+        }).catch(() => {});
+      }
     });
 
     getAllRegisteredUsers(currentUser.companyId).then(usersList => {
@@ -1010,6 +1020,11 @@ export default function UserDashboard() {
       );
       if (createdLeave) {
         setMyLeaveRequests(prev => [createdLeave, ...prev.filter(r => r.id !== createdLeave.id)]);
+        if (currentUser?.uid && typeof updateCurrentUserState === "function") {
+          apiFetch(`/users/${currentUser.uid}`).then(fresh => {
+            if (fresh && fresh.id) updateCurrentUserState(fresh);
+          }).catch(() => {});
+        }
       }
       showToast("Leave request submitted successfully.", "success");
       setLeaveType("Annual Leave");
@@ -2037,80 +2052,141 @@ export default function UserDashboard() {
                 <h3 className="font-extrabold text-lg text-white mt-0.5">Leave Balances</h3>
               </div>
 
-              <div className="p-6 space-y-4">
-                {/* Annual Leave circular progress */}
-                <div className="flex items-center justify-between p-3.5 rounded-[16px] bg-bg-base/20 border border-border-card">
-                  <div className="flex items-center gap-3.5">
-                    <div className="w-10 h-10 rounded-[12px] bg-brand-primary/10 text-brand-primary flex items-center justify-center flex-shrink-0">
-                      <Umbrella size={20} />
-                    </div>
-                    <div className="text-left">
-                      <span className="text-[10px] font-bold text-text-mut uppercase block">Annual Leave</span>
-                      <div className="flex items-baseline gap-1 mt-0.5">
-                        <span className="text-xl font-black text-text-main">{currentUser.annualLeaves !== undefined ? currentUser.annualLeaves : 25}</span>
-                        <span className="text-[10px] font-semibold text-text-sec">days</span>
-                      </div>
-                    </div>
-                  </div>
-                  {/* Circular progress SVG */}
-                  <div className="w-10 h-10 relative flex items-center justify-center">
-                    <svg className="w-full h-full transform -rotate-90">
-                      <circle cx="20" cy="20" r="16" className="text-border-card" strokeWidth="3" fill="transparent" stroke="currentColor" />
-                      <circle cx="20" cy="20" r="16" className="text-brand-primary" strokeWidth="3" fill="transparent" strokeDasharray="100" strokeDashoffset={100 - ((currentUser.annualLeaves !== undefined ? currentUser.annualLeaves : 25) / 25.0) * 100} strokeLinecap="round" stroke="currentColor" />
-                    </svg>
-                  </div>
-                </div>
+              {(() => {
+                const annualLeavesTaken = myLeaveRequests
+                  .filter(r => r.status === "approved" && (r.leaveType || r.leave_type || "").toLowerCase().includes("annual"))
+                  .reduce((sum, r) => sum + (Number(r.totalDays || r.total_days || parseInt(r.duration)) || 0), 0);
 
-                {/* Sick Leave circular progress */}
-                <div className="flex items-center justify-between p-3.5 rounded-[16px] bg-bg-base/20 border border-border-card">
-                  <div className="flex items-center gap-3.5">
-                    <div className="w-10 h-10 rounded-[12px] bg-brand-danger/10 text-brand-danger flex items-center justify-center flex-shrink-0">
-                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-                      </svg>
-                    </div>
-                    <div className="text-left">
-                      <span className="text-[10px] font-bold text-text-mut uppercase block">Sick Leave</span>
-                      <div className="flex items-baseline gap-1 mt-0.5">
-                        <span className="text-xl font-black text-text-main">{currentUser.sickLeaves !== undefined ? currentUser.sickLeaves : 10}</span>
-                        <span className="text-[10px] font-semibold text-text-sec">days</span>
-                      </div>
-                    </div>
-                  </div>
-                  {/* Circular progress SVG */}
-                  <div className="w-10 h-10 relative flex items-center justify-center">
-                    <svg className="w-full h-full transform -rotate-90">
-                      <circle cx="20" cy="20" r="16" className="text-border-card" strokeWidth="3" fill="transparent" stroke="currentColor" />
-                      <circle cx="20" cy="20" r="16" className="text-brand-danger" strokeWidth="3" fill="transparent" strokeDasharray="100" strokeDashoffset={100 - ((currentUser.sickLeaves !== undefined ? currentUser.sickLeaves : 10) / 10.0) * 100} strokeLinecap="round" stroke="currentColor" />
-                    </svg>
-                  </div>
-                </div>
+                const pendingAnnualDays = myLeaveRequests
+                  .filter(r => r.status === "pending" && (r.leaveType || r.leave_type || "").toLowerCase().includes("annual"))
+                  .reduce((sum, r) => sum + (Number(r.totalDays || r.total_days || parseInt(r.duration)) || 0), 0);
 
-                {/* Casual Leave circular progress */}
-                <div className="flex items-center justify-between p-3.5 rounded-[16px] bg-bg-base/20 border border-border-card">
-                  <div className="flex items-center gap-3.5">
-                    <div className="w-10 h-10 rounded-[12px] bg-brand-success/10 text-brand-success flex items-center justify-center flex-shrink-0">
-                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                      </svg>
+                const rawAnnualQuota = currentUser?.annualLeaves !== undefined 
+                  ? Number(currentUser.annualLeaves) 
+                  : (currentUser?.casual_leave_quota !== undefined ? Number(currentUser.casual_leave_quota) : Math.max(0, 25 - annualLeavesTaken));
+
+                const availableAnnualDays = Math.max(0, rawAnnualQuota - pendingAnnualDays);
+
+                const sickLeavesTaken = myLeaveRequests
+                  .filter(r => r.status === "approved" && (r.leaveType || r.leave_type || "").toLowerCase().includes("sick"))
+                  .reduce((sum, r) => sum + (Number(r.totalDays || r.total_days || parseInt(r.duration)) || 0), 0);
+
+                const pendingSickDays = myLeaveRequests
+                  .filter(r => r.status === "pending" && (r.leaveType || r.leave_type || "").toLowerCase().includes("sick"))
+                  .reduce((sum, r) => sum + (Number(r.totalDays || r.total_days || parseInt(r.duration)) || 0), 0);
+
+                const rawSickQuota = currentUser?.sickLeaves !== undefined 
+                  ? Number(currentUser.sickLeaves) 
+                  : (currentUser?.sick_leave_quota !== undefined ? Number(currentUser.sick_leave_quota) : Math.max(0, 10 - sickLeavesTaken));
+
+                const availableSickDays = Math.max(0, rawSickQuota - pendingSickDays);
+
+                const casualLeavesTaken = myLeaveRequests
+                  .filter(r => r.status === "approved" && ((r.leaveType || r.leave_type || "").toLowerCase().includes("casual") || (r.leaveType || r.leave_type || "").toLowerCase().includes("paid")))
+                  .reduce((sum, r) => sum + (Number(r.totalDays || r.total_days || parseInt(r.duration)) || 0), 0);
+
+                const pendingCasualDays = myLeaveRequests
+                  .filter(r => r.status === "pending" && ((r.leaveType || r.leave_type || "").toLowerCase().includes("casual") || (r.leaveType || r.leave_type || "").toLowerCase().includes("paid")))
+                  .reduce((sum, r) => sum + (Number(r.totalDays || r.total_days || parseInt(r.duration)) || 0), 0);
+
+                const rawCasualQuota = currentUser?.casualLeaves !== undefined 
+                  ? Number(currentUser.casualLeaves) 
+                  : (currentUser?.paid_leave_quota !== undefined ? Number(currentUser.paid_leave_quota) : Math.max(0, 6 - casualLeavesTaken));
+
+                const availableCasualDays = Math.max(0, rawCasualQuota - pendingCasualDays);
+
+                return (
+                  <div className="p-6 space-y-4">
+                    {/* Annual Leave circular progress */}
+                    <div className="flex items-center justify-between p-3.5 rounded-[16px] bg-bg-base/20 border border-border-card">
+                      <div className="flex items-center gap-3.5">
+                        <div className="w-10 h-10 rounded-[12px] bg-brand-primary/10 text-brand-primary flex items-center justify-center flex-shrink-0">
+                          <Umbrella size={20} />
+                        </div>
+                        <div className="text-left">
+                          <span className="text-[10px] font-bold text-text-mut uppercase block">Annual Leave</span>
+                          <div className="flex items-baseline gap-1 mt-0.5">
+                            <span className="text-xl font-black text-text-main">{availableAnnualDays}</span>
+                            <span className="text-[10px] font-semibold text-text-sec">days</span>
+                            {pendingAnnualDays > 0 && (
+                              <span className="text-[10px] font-bold text-amber-500 ml-1">
+                                ({pendingAnnualDays} pend.)
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      {/* Circular progress SVG */}
+                      <div className="w-10 h-10 relative flex items-center justify-center">
+                        <svg className="w-full h-full transform -rotate-90">
+                          <circle cx="20" cy="20" r="16" className="text-border-card" strokeWidth="3" fill="transparent" stroke="currentColor" />
+                          <circle cx="20" cy="20" r="16" className="text-brand-primary" strokeWidth="3" fill="transparent" strokeDasharray="100" strokeDashoffset={100 - (Math.max(0, Math.min(25, availableAnnualDays)) / 25.0) * 100} strokeLinecap="round" stroke="currentColor" />
+                        </svg>
+                      </div>
                     </div>
-                    <div className="text-left">
-                      <span className="text-[10px] font-bold text-text-mut uppercase block">Casual Leave</span>
-                      <div className="flex items-baseline gap-1 mt-0.5">
-                        <span className="text-xl font-black text-text-main">{currentUser.casualLeaves !== undefined ? currentUser.casualLeaves : 6}</span>
-                        <span className="text-[10px] font-semibold text-text-sec">days</span>
+
+                    {/* Sick Leave circular progress */}
+                    <div className="flex items-center justify-between p-3.5 rounded-[16px] bg-bg-base/20 border border-border-card">
+                      <div className="flex items-center gap-3.5">
+                        <div className="w-10 h-10 rounded-[12px] bg-brand-danger/10 text-brand-danger flex items-center justify-center flex-shrink-0">
+                          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                          </svg>
+                        </div>
+                        <div className="text-left">
+                          <span className="text-[10px] font-bold text-text-mut uppercase block">Sick Leave</span>
+                          <div className="flex items-baseline gap-1 mt-0.5">
+                            <span className="text-xl font-black text-text-main">{availableSickDays}</span>
+                            <span className="text-[10px] font-semibold text-text-sec">days</span>
+                            {pendingSickDays > 0 && (
+                              <span className="text-[10px] font-bold text-amber-500 ml-1">
+                                ({pendingSickDays} pend.)
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      {/* Circular progress SVG */}
+                      <div className="w-10 h-10 relative flex items-center justify-center">
+                        <svg className="w-full h-full transform -rotate-90">
+                          <circle cx="20" cy="20" r="16" className="text-border-card" strokeWidth="3" fill="transparent" stroke="currentColor" />
+                          <circle cx="20" cy="20" r="16" className="text-brand-danger" strokeWidth="3" fill="transparent" strokeDasharray="100" strokeDashoffset={100 - (Math.max(0, Math.min(10, availableSickDays)) / 10.0) * 100} strokeLinecap="round" stroke="currentColor" />
+                        </svg>
+                      </div>
+                    </div>
+
+                    {/* Casual Leave circular progress */}
+                    <div className="flex items-center justify-between p-3.5 rounded-[16px] bg-bg-base/20 border border-border-card">
+                      <div className="flex items-center gap-3.5">
+                        <div className="w-10 h-10 rounded-[12px] bg-brand-success/10 text-brand-success flex items-center justify-center flex-shrink-0">
+                          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                        </div>
+                        <div className="text-left">
+                          <span className="text-[10px] font-bold text-text-mut uppercase block">Casual Leave</span>
+                          <div className="flex items-baseline gap-1 mt-0.5">
+                            <span className="text-xl font-black text-text-main">{availableCasualDays}</span>
+                            <span className="text-[10px] font-semibold text-text-sec">days</span>
+                            {pendingCasualDays > 0 && (
+                              <span className="text-[10px] font-bold text-amber-500 ml-1">
+                                ({pendingCasualDays} pend.)
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      {/* Circular progress SVG */}
+                      <div className="w-10 h-10 relative flex items-center justify-center">
+                        <svg className="w-full h-full transform -rotate-90">
+                          <circle cx="20" cy="20" r="16" className="text-border-card" strokeWidth="3" fill="transparent" stroke="currentColor" />
+                          <circle cx="20" cy="20" r="16" className="text-brand-success" strokeWidth="3" fill="transparent" strokeDasharray="100" strokeDashoffset={100 - (Math.max(0, Math.min(6, availableCasualDays)) / 6.0) * 100} strokeLinecap="round" stroke="currentColor" />
+                        </svg>
                       </div>
                     </div>
                   </div>
-                  {/* Circular progress SVG */}
-                  <div className="w-10 h-10 relative flex items-center justify-center">
-                    <svg className="w-full h-full transform -rotate-90">
-                      <circle cx="20" cy="20" r="16" className="text-border-card" strokeWidth="3" fill="transparent" stroke="currentColor" />
-                      <circle cx="20" cy="20" r="16" className="text-brand-success" strokeWidth="3" fill="transparent" strokeDasharray="100" strokeDashoffset={100 - ((currentUser.casualLeaves !== undefined ? currentUser.casualLeaves : 6) / 6.0) * 100} strokeLinecap="round" stroke="currentColor" />
-                    </svg>
-                  </div>
-                </div>
-              </div>
+                );
+              })()}
 
               <div className="px-6 pb-6">
                 <button

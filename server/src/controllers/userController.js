@@ -44,9 +44,12 @@ export const getUsers = async (req, res) => {
         company_id: row.company_id,
         shiftStart: row.shift_start,
         shiftEnd: row.shift_end,
-        annualLeaves: Number(row.casual_leave_quota || 25),
-        sickLeaves: Number(row.sick_leave_quota || 10),
-        casualLeaves: Number(row.paid_leave_quota || 6),
+        annualLeaves: row.casual_leave_quota !== null && row.casual_leave_quota !== undefined ? Number(row.casual_leave_quota) : 25,
+        sickLeaves: row.sick_leave_quota !== null && row.sick_leave_quota !== undefined ? Number(row.sick_leave_quota) : 10,
+        casualLeaves: row.paid_leave_quota !== null && row.paid_leave_quota !== undefined ? Number(row.paid_leave_quota) : 6,
+        casual_leave_quota: row.casual_leave_quota !== null && row.casual_leave_quota !== undefined ? Number(row.casual_leave_quota) : 25,
+        sick_leave_quota: row.sick_leave_quota !== null && row.sick_leave_quota !== undefined ? Number(row.sick_leave_quota) : 10,
+        paid_leave_quota: row.paid_leave_quota !== null && row.paid_leave_quota !== undefined ? Number(row.paid_leave_quota) : 6,
         isProjectManager: row.is_project_manager,
         projects: Array.isArray(row.projects) ? row.projects : (meta.projects || []),
         tasks: Array.isArray(meta.tasks) ? meta.tasks : [],
@@ -118,6 +121,10 @@ export const getUserById = async (req, res) => {
       }
     }
 
+    const annualLeaves = u.casual_leave_quota !== null && u.casual_leave_quota !== undefined ? Number(u.casual_leave_quota) : 25;
+    const sickLeaves = u.sick_leave_quota !== null && u.sick_leave_quota !== undefined ? Number(u.sick_leave_quota) : 10;
+    const casualLeaves = u.paid_leave_quota !== null && u.paid_leave_quota !== undefined ? Number(u.paid_leave_quota) : 6;
+
     res.json({
       ...u,
       ...meta,
@@ -127,8 +134,18 @@ export const getUserById = async (req, res) => {
       employee_id: empId,
       companyId: u.company_id,
       company_id: u.company_id,
+      shiftStart: u.shift_start,
+      shiftEnd: u.shift_end,
+      annualLeaves,
+      sickLeaves,
+      casualLeaves,
+      casual_leave_quota: annualLeaves,
+      sick_leave_quota: sickLeaves,
+      paid_leave_quota: casualLeaves,
       projects: Array.isArray(u.projects) && u.projects.length > 0 ? u.projects : (meta.projects || []),
-      tasks: tasksList
+      tasks: tasksList,
+      grossSalary: Number(u.gross_salary || 0),
+      paidDays: Number(u.paid_days || 0)
     });
   } catch (err) {
     console.error("getUserById error:", err);
@@ -324,6 +341,9 @@ export const updateUser = async (req, res) => {
 
     const { password_hash, metadata = {}, ...updatedUser } = result.rows[0];
     const meta = metadata && typeof metadata === "object" ? metadata : {};
+    const annualLeaves = updatedUser.casual_leave_quota !== null && updatedUser.casual_leave_quota !== undefined ? Number(updatedUser.casual_leave_quota) : 25;
+    const sickLeaves = updatedUser.sick_leave_quota !== null && updatedUser.sick_leave_quota !== undefined ? Number(updatedUser.sick_leave_quota) : 10;
+    const casualLeaves = updatedUser.paid_leave_quota !== null && updatedUser.paid_leave_quota !== undefined ? Number(updatedUser.paid_leave_quota) : 6;
     res.json({
       ...updatedUser,
       ...meta,
@@ -331,6 +351,14 @@ export const updateUser = async (req, res) => {
       id: updatedUser.id,
       companyId: updatedUser.company_id,
       company_id: updatedUser.company_id,
+      shiftStart: updatedUser.shift_start,
+      shiftEnd: updatedUser.shift_end,
+      annualLeaves,
+      sickLeaves,
+      casualLeaves,
+      casual_leave_quota: annualLeaves,
+      sick_leave_quota: sickLeaves,
+      paid_leave_quota: casualLeaves,
       projects: Array.isArray(updatedUser.projects) ? updatedUser.projects : (meta.projects || []),
       tasks: Array.isArray(meta.tasks) ? meta.tasks : [],
       grossSalary: Number(updatedUser.gross_salary || 0),
