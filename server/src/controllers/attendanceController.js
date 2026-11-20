@@ -1511,7 +1511,33 @@ export const getAttendance = async (req, res) => {
             totalBreakMins += Math.max(0, Math.floor((new Date(b.end) - new Date(b.start)) / 60000));
           }
         });
-        totalMins = Math.max(0, Math.floor((checkOutDate.getTime() - checkInDate.getTime()) / 60000) - totalBreakMins);
+        const rawDiffMins = Math.floor((checkOutDate.getTime() - checkInDate.getTime()) / 60000);
+        if (rawDiffMins >= 1440) {
+          // If checkOut was stamped on a subsequent day (e.g. employee forgot to check out),
+          // calculate true shift duration based on shift time-of-day
+          const inMinsOfDay = checkInDate.getHours() * 60 + checkInDate.getMinutes();
+          const outMinsOfDay = checkOutDate.getHours() * 60 + checkOutDate.getMinutes();
+          const sameDayMins = outMinsOfDay >= inMinsOfDay
+            ? (outMinsOfDay - inMinsOfDay)
+            : (1440 - inMinsOfDay + outMinsOfDay);
+          totalMins = Math.min(1440, Math.max(0, sameDayMins - totalBreakMins));
+        } else {
+          totalMins = Math.max(0, rawDiffMins - totalBreakMins);
+        }
+      }
+
+      // Single-day shift safety constraint: working minutes cannot exceed 24 hours (1440 minutes)
+      if (totalMins > 1440) {
+        if (checkInDate && checkOutDate) {
+          const inMinsOfDay = checkInDate.getHours() * 60 + checkInDate.getMinutes();
+          const outMinsOfDay = checkOutDate.getHours() * 60 + checkOutDate.getMinutes();
+          const sameDayMins = outMinsOfDay >= inMinsOfDay
+            ? (outMinsOfDay - inMinsOfDay)
+            : (1440 - inMinsOfDay + outMinsOfDay);
+          totalMins = Math.min(1440, Math.max(0, sameDayMins));
+        } else {
+          totalMins = 1440;
+        }
       }
 
       const durationHours = totalMins > 0 
@@ -1891,11 +1917,18 @@ export const checkOut = async (req, res) => {
     let thisSessionMins = 0;
     if (rowData.check_in) {
       const checkInTime = new Date(rowData.check_in);
-      const rawElapsed = Math.max(0, Math.floor((new Date(now) - checkInTime) / 60000));
-      thisSessionMins = Math.max(0, rawElapsed - totalBreakMinutes);
+      const nowDate = new Date(now);
+      let rawElapsed = Math.max(0, Math.floor((nowDate - checkInTime) / 60000));
+      if (rawElapsed >= 1440) {
+        const inMinsOfDay = checkInTime.getHours() * 60 + checkInTime.getMinutes();
+        const outMinsOfDay = nowDate.getHours() * 60 + nowDate.getMinutes();
+        const sameDayMins = outMinsOfDay >= inMinsOfDay ? (outMinsOfDay - inMinsOfDay) : (1440 - inMinsOfDay + outMinsOfDay);
+        rawElapsed = Math.min(1440, sameDayMins);
+      }
+      thisSessionMins = Math.min(1440, Math.max(0, rawElapsed - totalBreakMinutes));
     }
 
-    const totalDayMins = accumulatedMins + thisSessionMins;
+    const totalDayMins = Math.min(1440, accumulatedMins + thisSessionMins);
 
     // Update open session in sessions array
     const activeIdx = sessions.findIndex(s => !s.checkOut);

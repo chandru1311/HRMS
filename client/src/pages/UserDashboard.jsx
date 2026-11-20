@@ -1082,14 +1082,27 @@ export default function UserDashboard() {
         if (targetDateStr === todayStr && !isCheckedOut) {
           hrs = getElapsedWorkingMs() / (1000 * 60 * 60);
         } else {
-          const logMins = (typeof log.totalWorkingMinutes === "number" && log.totalWorkingMinutes >= 0)
+          let logMins = (typeof log.totalWorkingMinutes === "number" && log.totalWorkingMinutes >= 0)
             ? log.totalWorkingMinutes
             : (typeof log.duration_minutes === "number" && log.duration_minutes >= 0)
               ? log.duration_minutes
               : (typeof log.durationMinutes === "number" && log.durationMinutes >= 0)
                 ? log.durationMinutes
                 : (log.totalHours && !isNaN(parseFloat(log.totalHours)) ? parseFloat(log.totalHours) * 60 : 0);
-          hrs = (logMins || 0) / 60;
+          if (logMins >= 1440) {
+            const inTime = log.checkInTime || log.check_in;
+            const outTime = log.checkOutTime || log.check_out;
+            if (inTime && outTime) {
+              const inDate = new Date(inTime);
+              const outDate = new Date(outTime);
+              if (!isNaN(inDate.getTime()) && !isNaN(outDate.getTime())) {
+                const inMinsOfDay = inDate.getHours() * 60 + inDate.getMinutes();
+                const outMinsOfDay = outDate.getHours() * 60 + outDate.getMinutes();
+                logMins = outMinsOfDay >= inMinsOfDay ? (outMinsOfDay - inMinsOfDay) : (1440 - inMinsOfDay + outMinsOfDay);
+              }
+            }
+          }
+          hrs = Math.min(24, (logMins || 0) / 60);
         }
       }
       return {

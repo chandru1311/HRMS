@@ -149,19 +149,50 @@ export default function History() {
   // Helper: compute working minutes with robust fallback across formats
   const getLogWorkingMinutes = (log) => {
     if (!log) return 0;
-    if (typeof log.totalWorkingMinutes === "number" && log.totalWorkingMinutes > 0) return log.totalWorkingMinutes;
-    if (typeof log.durationMinutes === "number" && log.durationMinutes > 0) return log.durationMinutes;
-    if (typeof log.duration_minutes === "number" && log.duration_minutes > 0) return log.duration_minutes;
-    if (log.totalHours && !isNaN(parseFloat(log.totalHours)) && parseFloat(log.totalHours) > 0) {
-      return Math.round(parseFloat(log.totalHours) * 60);
+    let mins = 0;
+    if (typeof log.totalWorkingMinutes === "number" && log.totalWorkingMinutes > 0) {
+      mins = log.totalWorkingMinutes;
+    } else if (typeof log.durationMinutes === "number" && log.durationMinutes > 0) {
+      mins = log.durationMinutes;
+    } else if (typeof log.duration_minutes === "number" && log.duration_minutes > 0) {
+      mins = log.duration_minutes;
+    } else if (log.totalHours && !isNaN(parseFloat(log.totalHours)) && parseFloat(log.totalHours) > 0) {
+      mins = Math.round(parseFloat(log.totalHours) * 60);
+    } else {
+      const inTime = log.checkInTime || log.check_in;
+      const outTime = log.checkOutTime || log.check_out;
+      if (inTime && outTime) {
+        const inDate = new Date(inTime);
+        const outDate = new Date(outTime);
+        if (!isNaN(inDate.getTime()) && !isNaN(outDate.getTime())) {
+          let diff = Math.max(0, Math.floor((outDate - inDate) / 60000));
+          if (diff >= 1440) {
+            const inMinsOfDay = inDate.getHours() * 60 + inDate.getMinutes();
+            const outMinsOfDay = outDate.getHours() * 60 + outDate.getMinutes();
+            diff = outMinsOfDay >= inMinsOfDay ? (outMinsOfDay - inMinsOfDay) : (1440 - inMinsOfDay + outMinsOfDay);
+          }
+          mins = diff;
+        }
+      }
     }
-    const inTime = log.checkInTime || log.check_in;
-    const outTime = log.checkOutTime || log.check_out;
-    if (inTime && outTime) {
-      const diff = Math.max(0, Math.floor((new Date(outTime) - new Date(inTime)) / 60000));
-      if (diff > 0 && diff < 24 * 60) return diff;
+
+    // Safety guard: if stored minutes exceeds 24 hours (e.g. check-out recorded on next day),
+    // normalize based on shift time-of-day
+    if (mins >= 1440) {
+      const inTime = log.checkInTime || log.check_in;
+      const outTime = log.checkOutTime || log.check_out;
+      if (inTime && outTime) {
+        const inDate = new Date(inTime);
+        const outDate = new Date(outTime);
+        if (!isNaN(inDate.getTime()) && !isNaN(outDate.getTime())) {
+          const inMinsOfDay = inDate.getHours() * 60 + inDate.getMinutes();
+          const outMinsOfDay = outDate.getHours() * 60 + outDate.getMinutes();
+          mins = outMinsOfDay >= inMinsOfDay ? (outMinsOfDay - inMinsOfDay) : (1440 - inMinsOfDay + outMinsOfDay);
+        }
+      }
     }
-    return 0;
+
+    return Math.min(1440, Math.max(0, mins));
   };
 
   const parseBreaksList = (log) => {

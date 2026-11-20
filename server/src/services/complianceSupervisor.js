@@ -258,8 +258,15 @@ export const runHourlyReportingComplianceCheck = async (io = null, targetCompany
 
           // If cleanSessions had no sessions but check_in exists, record it
           if (cleanSessions.length === 0 && attRecord.check_in) {
-            const inMs = new Date(attRecord.check_in).getTime();
-            const dur = Math.max(1, Math.floor((now.getTime() - inMs) / 60000) - totalBreakMinutes);
+            const inDate = new Date(attRecord.check_in);
+            const inMs = inDate.getTime();
+            let dur = Math.max(1, Math.floor((now.getTime() - inMs) / 60000) - totalBreakMinutes);
+            if (dur >= 1440) {
+              const inMinsOfDay = inDate.getHours() * 60 + inDate.getMinutes();
+              const outMinsOfDay = now.getHours() * 60 + now.getMinutes();
+              const sameDayMins = outMinsOfDay >= inMinsOfDay ? (outMinsOfDay - inMinsOfDay) : (1440 - inMinsOfDay + outMinsOfDay);
+              dur = Math.min(1440, Math.max(1, sameDayMins - totalBreakMinutes));
+            }
             cleanSessions.push({
               sessionId: `sess_${inMs}_1`,
               checkIn: new Date(attRecord.check_in).toISOString(),
@@ -270,7 +277,7 @@ export const runHourlyReportingComplianceCheck = async (io = null, targetCompany
             computedTotalDayMins = dur;
           }
 
-          totalDayMins = computedTotalDayMins;
+          totalDayMins = Math.min(1440, computedTotalDayMins);
           finalSessions = cleanSessions;
           finalCheckout = nowIso;
 
