@@ -1531,7 +1531,7 @@ export default function UserDashboard() {
                   <div className="col-span-2 text-right">{(selectedPayslip.grossSalary || 0).toFixed(2)}</div>
                   <div className="col-span-2 text-right">0.00</div>
                   <div className="col-span-3 pl-4">Gross Deduction</div>
-                  <div className="col-span-1 text-right">{(selectedPayslip.pf + selectedPayslip.esi + (selectedPayslip.lopAmount || 0)).toFixed(2)}</div>
+                  <div className="col-span-1 text-right">{(((selectedPayslip.otherAllowance !== undefined ? selectedPayslip.otherAllowance : selectedPayslip.special) || 0) + (selectedPayslip.pf || 0) + (selectedPayslip.esi || 0) + (selectedPayslip.lopAmount || 0)).toFixed(2)}</div>
                 </div>
 
                 <div className="border-t-[3px] border-black w-full my-1"></div>

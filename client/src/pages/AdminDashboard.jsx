@@ -299,8 +299,8 @@ export default function AdminDashboard() {
     const pt = 0;
     const insurance = 0;
     const tds = 0;
-    const totalDeductions = Math.round((pf + esi + lopAmount) * 100) / 100;
-    const net = Math.max(0, Math.round((actualGross - (pf + esi)) * 100) / 100);
+    const totalDeductions = Math.round((actualOtherAllowance + pf + esi + lopAmount) * 100) / 100;
+    const net = Math.max(0, Math.round((actualGross - actualOtherAllowance - pf - esi) * 100) / 100);
     return {
       basic,
       hra: 0,
@@ -1441,7 +1441,8 @@ export default function AdminDashboard() {
         const pt = 0;
         const insurance = 0;
         const tds = 0;
-        const net = Math.max(0, actualGross - (pf + esi));
+        const actualOther = actualGross * ((companyPayrollSettings?.otherAllowancePercentage || 30) / 100);
+        const net = Math.max(0, actualGross - actualOther - pf - esi);
         return { basic, hra, special, pf, esi, pt, tds, insurance, net, actualGross, lopAmount, lopsDays };
       };
 
@@ -6324,8 +6325,8 @@ export default function AdminDashboard() {
           const pt = 0;
           const insurance = 0;
           const tds = 0;
-          const totalDeductions = Math.round((pf + esi + lopAmount) * 100) / 100;
-          const net = Math.max(0, Math.round((actualGross - (pf + esi)) * 100) / 100);
+          const totalDeductions = Math.round((actualOtherAllowance + pf + esi + lopAmount) * 100) / 100;
+          const net = Math.max(0, Math.round((actualGross - actualOtherAllowance - pf - esi) * 100) / 100);
           return {
             basic,
             hra: 0,
@@ -6792,7 +6793,7 @@ export default function AdminDashboard() {
                         <div className="col-span-2 text-right">{(user.gross || 0).toFixed(2)}</div>
                         <div className="col-span-2 text-right">0.00</div>
                         <div className="col-span-3 pl-4">Gross Deduction</div>
-                        <div className="col-span-1 text-right">{(user.pf + user.esi + (user.lopAmount || 0)).toFixed(2)}</div>
+                        <div className="col-span-1 text-right">{(((user.otherAllowance !== undefined ? user.otherAllowance : user.special) || 0) + (user.pf || 0) + (user.esi || 0) + (user.lopAmount || 0)).toFixed(2)}</div>
                       </div>
 
                       <div className="border-t-[3px] border-black w-full my-1"></div>
@@ -7041,8 +7042,9 @@ export default function AdminDashboard() {
                 const other = Math.round((actualGross * (otherPct / 100)) * 100) / 100;
                 const pf = companyPayrollSettings?.pf ? Math.round((basic * 0.12) * 100) / 100 : 0;
                 const esi = (companyPayrollSettings?.esi && actualGross <= 21000) ? Math.round((actualGross * 0.0075) * 100) / 100 : 0;
-                const totalDeductions = Math.round((pf + esi + lop) * 100) / 100;
-                const net = Math.max(0, Math.round((actualGross - (pf + esi)) * 100) / 100);
+                const totalDeductions = Math.round((other + pf + esi + lop) * 100) / 100;
+                const rawNet = Math.round((actualGross - other - pf - esi) * 100) / 100;
+                const net = Math.max(0, rawNet);
 
                 return (
                   <div className="bg-bg-base/80 border border-border-card rounded-[14px] p-4 flex flex-col gap-2 mt-2">
@@ -7082,6 +7084,11 @@ export default function AdminDashboard() {
                         <span className="font-extrabold text-brand-danger">₹{totalDeductions.toFixed(2)}</span>
                       </div>
                     </div>
+                    {rawNet < 0 && (
+                      <div className="p-2.5 bg-brand-danger/10 border border-brand-danger/20 rounded-[10px] text-[11px] text-brand-danger font-bold">
+                        Warning: Deductions (Other Allowance + PF + ESI) exceed Gross Salary. Net Salary cannot be negative.
+                      </div>
+                    )}
                     <div className="flex justify-between items-center text-sm pt-2 border-t border-border-card/60">
                       <span className="font-extrabold text-text-main">Final Net Salary:</span>
                       <span className="text-base font-extrabold text-emerald-500 bg-emerald-500/10 px-3 py-1 rounded-[8px] border border-emerald-500/20">₹{net.toLocaleString('en-IN')}</span>
@@ -7100,6 +7107,9 @@ export default function AdminDashboard() {
                     const paidDays = Math.max(0, wDays - leaves);
                     const gross = Number(editSalaryValue) || 0;
                     const calc = calculatePayroll(gross, paidDays, wDays);
+                    if (calc.net <= 0 && gross > 0 && (gross - calc.actualOtherAllowance - calc.pf - calc.esi) < 0) {
+                      return showToast("Net Salary cannot be negative. Deductions exceed gross salary.", "error");
+                    }
                     const targetEmpId = selectedPayrollUser.employeeId || selectedPayrollUser.uid || selectedPayrollUser.id;
 
                     await saveEmployeePayroll(currentUser.companyId, targetEmpId, {
@@ -7247,7 +7257,7 @@ export default function AdminDashboard() {
                 <div className="col-span-2 text-right">{(selectedPayrollUser.gross || 0).toFixed(2)}</div>
                 <div className="col-span-2 text-right">0.00</div>
                 <div className="col-span-3 pl-4">Gross Deduction</div>
-                <div className="col-span-1 text-right">{((selectedPayrollUser.pf || 0) + (selectedPayrollUser.esi || 0) + (selectedPayrollUser.lopAmount || 0)).toFixed(2)}</div>
+                <div className="col-span-1 text-right">{(((selectedPayrollUser.otherAllowance !== undefined ? selectedPayrollUser.otherAllowance : selectedPayrollUser.special) || 0) + (selectedPayrollUser.pf || 0) + (selectedPayrollUser.esi || 0) + (selectedPayrollUser.lopAmount || 0)).toFixed(2)}</div>
               </div>
 
               <div className="border-t-[3px] border-black w-full my-1"></div>

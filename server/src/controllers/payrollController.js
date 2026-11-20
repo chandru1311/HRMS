@@ -220,9 +220,13 @@ export const savePayroll = async (req, res) => {
     const numPresentDays = Number(presentDays !== undefined ? presentDays : 30);
     const numWorkingDays = Number(workingDays !== undefined ? workingDays : (companySettings.workingDays || 30));
 
-    const calculatedDeductions = Math.round((numPf + numEsi + numLopAmount) * 100) / 100;
+    const calculatedDeductions = Math.round((numOtherAllowance + numPf + numEsi + numLopAmount) * 100) / 100;
     const numTotalDeductions = Number(totalDeductions !== undefined ? totalDeductions : calculatedDeductions);
-    const numNet = Number(netSalary !== undefined ? netSalary : (net !== undefined ? net : Math.max(0, Math.round((numGross - numTotalDeductions) * 100) / 100)));
+    const calculatedNet = Math.round((numGross - numOtherAllowance - numPf - numEsi) * 100) / 100;
+    if (calculatedNet < 0) {
+      return res.status(400).json({ error: "Net Salary cannot be negative. Deductions exceed gross earnings." });
+    }
+    const numNet = Number(netSalary !== undefined ? netSalary : (net !== undefined ? net : Math.max(0, calculatedNet)));
 
     const id = `payroll_${targetEmpId}_${month}_${year}`;
 
@@ -527,8 +531,8 @@ export const calculatePayrollBatch = async (req, res) => {
       const pt = 0;
       const insurance = 0;
       const tds = 0;
-      const totalDeductions = Math.round((pf + esi + lopAmount) * 100) / 100;
-      const netSalary = Math.round(Math.max(0, actualGross - (pf + esi)) * 100) / 100;
+      const totalDeductions = Math.round((actualOtherAllowance + pf + esi + lopAmount) * 100) / 100;
+      const netSalary = Math.round(Math.max(0, actualGross - actualOtherAllowance - pf - esi) * 100) / 100;
 
       const metadata = {
         workingDays: wDays,
