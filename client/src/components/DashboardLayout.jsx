@@ -941,15 +941,6 @@ export default function DashboardLayout({ children }) {
         onClick: () => { navigate("/admin?tab=payroll"); setIsMobileOpen(false); }
       });
     }
-    if (isAdminUser || can("read", "GlobalPayroll") || can("read", "Payroll")) {
-      menuItems.push({
-        label: "Global Payroll Management",
-        icon: Globe2,
-        active: location.pathname === "/admin" && activeTabParam === "global-payroll",
-        module: "payroll",
-        onClick: () => { navigate("/admin?tab=global-payroll"); setIsMobileOpen(false); }
-      });
-    }
     if (isAdminUser || can("read", "CustomDomains")) {
       menuItems.push({
         label: "Custom Domains",
@@ -1155,15 +1146,6 @@ export default function DashboardLayout({ children }) {
         onClick: () => { navigate("/admin?tab=payroll"); setIsMobileOpen(false); }
       });
     }
-    if (can("read", "GlobalPayroll") || can("read", "Payroll")) {
-      menuItems.push({
-        label: "Global Payroll Management",
-        icon: Globe2,
-        active: location.pathname === "/admin" && activeTabParam === "global-payroll",
-        module: "payroll",
-        onClick: () => { navigate("/admin?tab=global-payroll"); setIsMobileOpen(false); }
-      });
-    }
     if (can("read", "CustomDomains")) {
       menuItems.push({
         label: "Custom Domains",
@@ -1241,7 +1223,7 @@ export default function DashboardLayout({ children }) {
       }
     }
     if (path === "/admin") {
-      if (tab === "payroll" || tab === "global-payroll") {
+      if (tab === "payroll") {
         return true;
       }
       if (tab === "live" || tab === "analytics" || tab === "rules" || tab === "logs") {

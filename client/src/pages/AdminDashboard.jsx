@@ -106,7 +106,6 @@ import ExternalLinksTab from "../components/ExternalLinksTab";
 import RolesTab from "../components/RolesTab";
 import AuditLogsAndSecurityTab from "../components/AuditLogsAndSecurityTab";
 import FaceEnrollmentPanel from "../components/FaceEnrollmentPanel";
-import GlobalPayrollPanel from "../components/GlobalPayroll/GlobalPayrollPanel";
 import { usePermissions } from "../hooks/usePermissions";
 import { subscribeToRoles } from "../firebase";
 import {
@@ -253,7 +252,6 @@ export default function AdminDashboard() {
     else if (can("read", "Assets")) defaultTab = "assets";
     else if (can("read", "ExternalLinks")) defaultTab = "external-links";
     else if (can("read", "Payroll")) defaultTab = "payroll";
-    else if (can("read", "GlobalPayroll")) defaultTab = "global-payroll";
     else if (can("read", "CustomDomains")) defaultTab = "domains";
     else if (can("read", "RolesPermissions")) defaultTab = "roles";
     else if (can("read", "EnvironmentSetup")) defaultTab = "environmental-setup";
@@ -261,6 +259,12 @@ export default function AdminDashboard() {
 
   const activeTab = activeTabParam || defaultTab;
   const setActiveTab = (tab) => setSearchParams({ tab });
+
+  useEffect(() => {
+    if (activeTabParam === "global-payroll") {
+      setSearchParams({ tab: "payroll" }, { replace: true });
+    }
+  }, [activeTabParam, setSearchParams]);
 
   const [users, setUsers] = useState([]);
   const [showPayrollSettingsModal, setShowPayrollSettingsModal] = useState(false);
@@ -6825,13 +6829,6 @@ export default function AdminDashboard() {
           </>
         );
       })()}
-
-      {/* ------------------ VIEW: GLOBAL PAYROLL MANAGEMENT ------------------ */}
-      {(activeTab === "global-payroll" && (isAdminUser || can("read", "GlobalPayroll") || can("read", "Payroll"))) && (
-        <div className="animate-fade-in">
-          <GlobalPayrollPanel />
-        </div>
-      )}
 
       {/* ------------------ VIEW: EXTERNAL LINKS ------------------ */}
       {(activeTab === "external-links" && (isAdminUser || can("read", "ExternalLinks"))) && (
