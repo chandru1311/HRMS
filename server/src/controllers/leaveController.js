@@ -246,20 +246,38 @@ export const updateLeaveStatus = async (req, res) => {
 
       // Populate attendance records as 'on-leave'
       try {
-        const start = new Date(updatedLeave.start_date);
-        const end = new Date(updatedLeave.end_date);
-        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-          const dayStr = d.toISOString().split("T")[0];
-          const attId = `${updatedLeave.user_id}_${dayStr}`;
-          await query(
-            `INSERT INTO attendance (id, user_id, company_id, date, status, notes)
-             VALUES ($1, $2, $3, $4, 'on-leave', $5)
-             ON CONFLICT (id) DO UPDATE SET
-               status = 'on-leave',
-               notes = EXCLUDED.notes,
-               updated_at = CURRENT_TIMESTAMP`,
-            [attId, updatedLeave.user_id, updatedLeave.company_id, dayStr, `Approved ${updatedLeave.leave_type || "Leave"}`]
-          );
+        const toLocalDateStr = (val) => {
+          if (!val) return "";
+          if (typeof val === "string" && /^\d{4}-\d{2}-\d{2}/.test(val)) return val.substring(0, 10);
+          const d = new Date(val);
+          if (isNaN(d.getTime())) return "";
+          const ist = new Date(d.getTime() + (5.5 * 60 * 60 * 1000));
+          return ist.toISOString().split("T")[0];
+        };
+
+        const startStr = toLocalDateStr(updatedLeave.start_date);
+        const endStr = toLocalDateStr(updatedLeave.end_date);
+
+        if (startStr && endStr) {
+          let curr = new Date(startStr + "T00:00:00Z");
+          const endLimit = new Date(endStr + "T00:00:00Z");
+          while (curr <= endLimit) {
+            const dayStr = curr.toISOString().split("T")[0];
+            const attId = `${updatedLeave.user_id}_${dayStr}`;
+            await query(
+              `INSERT INTO attendance (id, user_id, company_id, date, status, notes)
+               VALUES ($1, $2, $3, $4, 'on-leave', $5)
+               ON CONFLICT (id) DO UPDATE SET
+                 status = CASE 
+                   WHEN attendance.status IN ('present', 'completed', 'checked-in', 'working', 'in-progress') THEN attendance.status 
+                   ELSE 'on-leave' 
+                 END,
+                 notes = EXCLUDED.notes,
+                 updated_at = CURRENT_TIMESTAMP`,
+              [attId, updatedLeave.user_id, updatedLeave.company_id, dayStr, `Approved ${updatedLeave.leave_type || "Leave"}`]
+            );
+            curr.setUTCDate(curr.getUTCDate() + 1);
+          }
         }
       } catch (attErr) {
         console.error("Error populating on-leave attendance records:", attErr);
@@ -276,14 +294,25 @@ export const updateLeaveStatus = async (req, res) => {
 
       // Remove on-leave attendance entries
       try {
-        const start = new Date(updatedLeave.start_date);
-        const end = new Date(updatedLeave.end_date);
-        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-          const dayStr = d.toISOString().split("T")[0];
-          const attId = `${updatedLeave.user_id}_${dayStr}`;
+        const toLocalDateStr = (val) => {
+          if (!val) return "";
+          if (typeof val === "string" && /^\d{4}-\d{2}-\d{2}/.test(val)) return val.substring(0, 10);
+          const d = new Date(val);
+          if (isNaN(d.getTime())) return "";
+          const ist = new Date(d.getTime() + (5.5 * 60 * 60 * 1000));
+          return ist.toISOString().split("T")[0];
+        };
+
+        const startStr = toLocalDateStr(updatedLeave.start_date);
+        const endStr = toLocalDateStr(updatedLeave.end_date);
+
+        if (startStr && endStr) {
           await query(
-            `DELETE FROM attendance WHERE id = $1 AND status = 'on-leave'`,
-            [attId]
+            `DELETE FROM attendance 
+             WHERE user_id = $1 
+               AND date >= $2 AND date <= $3 
+               AND status = 'on-leave'`,
+            [updatedLeave.user_id, startStr, endStr]
           );
         }
       } catch (attErr) {

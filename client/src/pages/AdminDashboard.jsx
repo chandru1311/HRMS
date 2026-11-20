@@ -469,6 +469,8 @@ export default function AdminDashboard() {
   const [historySearch, setHistorySearch] = useState("");
   const [historyType, setHistoryType] = useState("all");
   const [historyStatus, setHistoryStatus] = useState("all");
+  const [approvalsMonth, setApprovalsMonth] = useState(new Date().toLocaleString('default', { month: 'long' }));
+  const [approvalsYear, setApprovalsYear] = useState(new Date().getFullYear());
 
   // Pagination states
   const [livePage, setLivePage] = useState(1);
@@ -3242,17 +3244,39 @@ export default function AdminDashboard() {
       {/* ------------------ VIEW 3: LEAVE APPROVAL CENTER ------------------ */}
       {(activeTab === "logs" && (isAdminUser || can("read", "LeaveApprovals") || can("read", "Regularization"))) && (() => {
         const pendingCount = leaveRequests.length + regularizationRequests.length;
-        const approvedThisMonth = allRequests.filter(r => r.status === "approved").length;
+
+        const monthNames = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+        const mIdx = monthNames.indexOf(String(approvalsMonth).toLowerCase());
+        const targetYearMonth = `${approvalsYear}-${String(mIdx !== -1 ? mIdx + 1 : new Date().getMonth() + 1).padStart(2, '0')}`;
+
+        const isRequestInSelectedMonth = (req) => {
+          const matchDate = (dVal) => {
+            if (!dVal) return false;
+            if (typeof dVal === "string" && dVal.startsWith(targetYearMonth)) return true;
+            const d = new Date(dVal);
+            if (isNaN(d.getTime())) return false;
+            const ymUtc = d.toISOString().slice(0, 7);
+            const ymLocal = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+            return ymUtc === targetYearMonth || ymLocal === targetYearMonth;
+          };
+          return matchDate(req.startDate) || matchDate(req.start_date) ||
+                 matchDate(req.endDate) || matchDate(req.end_date) ||
+                 matchDate(req.appliedAt) || matchDate(req.created_at);
+        };
+
+        const approvedThisMonthRequests = allRequests.filter(r => r.status === "approved" && isRequestInSelectedMonth(r));
+        const approvedThisMonth = approvedThisMonthRequests.length;
 
         let totalApprovedDays = 0;
-        allRequests.filter(r => r.status === "approved").forEach(r => {
-          const dVal = parseInt(r.duration);
+        approvedThisMonthRequests.forEach(r => {
+          const dVal = parseFloat(r.totalDays || r.total_days || r.duration);
           if (!isNaN(dVal)) {
             totalApprovedDays += dVal;
           } else {
             totalApprovedDays += 1;
           }
         });
+        totalApprovedDays = Math.round(totalApprovedDays * 10) / 10;
 
         const selectedRequest = leaveRequests.find(r => r.id === selectedRequestId);
         const selectedRegRequest = regularizationRequests.find(r => r.id === selectedRegRequestId);
@@ -3278,17 +3302,38 @@ export default function AdminDashboard() {
                 <p className="text-sm text-text-sec mt-1">Review and manage time-off and regularization requests from your direct reports.</p>
               </div>
 
-              <div className="flex gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Month & Year Selectors for Approved Leaves */}
+                <select
+                  value={approvalsMonth}
+                  onChange={(e) => setApprovalsMonth(e.target.value)}
+                  className="px-3 py-2 bg-bg-card border border-border-card rounded-[12px] text-xs font-bold text-text-main outline-none focus:border-brand-primary cursor-pointer shadow-sm"
+                >
+                  {["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"].map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+
+                <select
+                  value={approvalsYear}
+                  onChange={(e) => setApprovalsYear(Number(e.target.value))}
+                  className="px-3 py-2 bg-bg-card border border-border-card rounded-[12px] text-xs font-bold text-text-main outline-none focus:border-brand-primary cursor-pointer shadow-sm"
+                >
+                  {[2024, 2025, 2026, 2027, 2028].map((y) => (
+                    <option key={y} value={y}>{y}</option>
+                  ))}
+                </select>
+
                 <button
                   onClick={handleExportExcel}
-                  className="flex items-center gap-1.5 py-2.5 px-4 border border-emerald-500/30 text-xs font-bold rounded-[12px] bg-emerald-500/5 hover:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 transition-colors cursor-pointer"
+                  className="flex items-center gap-1.5 py-2 px-3.5 border border-emerald-500/30 text-xs font-bold rounded-[12px] bg-emerald-500/5 hover:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 transition-colors cursor-pointer"
                 >
                   <Download size={14} />
                   <span>Excel</span>
                 </button>
                 <button
                   onClick={handleExportPDF}
-                  className="flex items-center gap-1.5 py-2.5 px-4 border border-red-500/30 text-xs font-bold rounded-[12px] bg-red-500/5 hover:bg-red-500/10 text-red-600 dark:text-red-400 transition-colors cursor-pointer"
+                  className="flex items-center gap-1.5 py-2 px-3.5 border border-red-500/30 text-xs font-bold rounded-[12px] bg-red-500/5 hover:bg-red-500/10 text-red-600 dark:text-red-400 transition-colors cursor-pointer"
                 >
                   <FileText size={14} />
                   <span>PDF</span>
@@ -3319,7 +3364,7 @@ export default function AdminDashboard() {
               <div className="bg-bg-card border border-border-card rounded-[24px] p-6 shadow-sm flex flex-col justify-between relative overflow-hidden">
                 <div className="flex justify-between items-start">
                   <div>
-                    <span className="text-[10px] font-bold text-text-mut uppercase tracking-wider block">APPROVED LEAVES (MONTH)</span>
+                    <span className="text-[10px] font-bold text-text-mut uppercase tracking-wider block">APPROVED LEAVES ({approvalsMonth.toUpperCase()})</span>
                     <span className="text-4xl font-black text-text-main block mt-2">{String(approvedThisMonth).padStart(2, '0')}</span>
                   </div>
                   <div className="w-12 h-12 rounded-[16px] bg-brand-success/10 text-brand-success flex items-center justify-center flex-shrink-0">
@@ -3328,7 +3373,7 @@ export default function AdminDashboard() {
                 </div>
                 <div className="mt-4 text-xs font-semibold text-text-sec flex items-center gap-1.5">
                   <span className="text-brand-success font-bold">Total {totalApprovedDays}</span>
-                  <span className="text-text-mut font-semibold">days approved</span>
+                  <span className="text-text-mut font-semibold">days approved in {approvalsMonth} {approvalsYear}</span>
                 </div>
               </div>
 

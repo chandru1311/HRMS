@@ -3,9 +3,9 @@ import { createPortal } from "react-dom";
 import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
-import { 
-  subscribeToUserLogs, 
-  requestRegularization, 
+import {
+  subscribeToUserLogs,
+  requestRegularization,
   subscribeToRegularizationRequests,
   subscribeToLeaveRequests
 } from "../firebase";
@@ -20,11 +20,11 @@ export default function History() {
   const { showToast } = useToast();
   const [searchParams] = useSearchParams();
   const searchQuery = searchParams.get("q") || "";
-  
+
   const [logs, setLogs] = useState([]);
   const [filteredLogs, setFilteredLogs] = useState([]);
   const [loading, setLoading] = useState(true);
-  
+
   // Filters
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -83,8 +83,8 @@ export default function History() {
       result = result.filter(log => log.date <= endDate);
     }
     if (searchQuery) {
-      result = result.filter(log => 
-        log.date.includes(searchQuery) || 
+      result = result.filter(log =>
+        log.date.includes(searchQuery) ||
         (log.status || "").toLowerCase().includes(searchQuery.toLowerCase())
       );
     }
@@ -271,11 +271,11 @@ export default function History() {
       startY: startY + 2,
       styles: { fontSize: 8.5, font: "helvetica", cellPadding: 4, lineColor: [226, 232, 240], lineWidth: 0.1 },
       headStyles: { fillColor: [79, 70, 229], textColor: [255, 255, 255], fontStyle: "bold", halign: 'center', fontSize: 9 },
-      columnStyles: { 
-        0: { halign: 'left', cellWidth: 35 }, 
-        1: { halign: 'center', cellWidth: 35 }, 
-        2: { halign: 'center', cellWidth: 35 }, 
-        3: { halign: 'center', cellWidth: 40 }, 
+      columnStyles: {
+        0: { halign: 'left', cellWidth: 35 },
+        1: { halign: 'center', cellWidth: 35 },
+        2: { halign: 'center', cellWidth: 35 },
+        3: { halign: 'center', cellWidth: 40 },
         4: { halign: 'center', cellWidth: 35 }
       },
       theme: 'grid',
@@ -299,7 +299,7 @@ export default function History() {
         }
       }
     });
-    
+
     addPDFFooter(doc);
     doc.save(`Attendance_Report_${(currentUser?.name || "Employee").replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`);
     showToast("Attendance report PDF exported successfully.", "success");
@@ -307,7 +307,7 @@ export default function History() {
 
   const handleDownloadExcel = () => {
     if (filteredLogs.length === 0) return showToast("No logs available to download.", "warning");
-    
+
     const excelData = filteredLogs.map((log) => {
       const mins = getLogWorkingMinutes(log);
       const checkInRaw = log.checkInTime || log.check_in;
@@ -448,11 +448,11 @@ export default function History() {
       {chartData.length > 0 && (
         <div className="bg-bg-card border border-border-card rounded-[24px] p-6 shadow-sm">
           <h3 className="font-extrabold text-base text-text-main mb-1.5 flex items-center gap-2">
-            <BarChart2 size={18} className="text-brand-primary" /> 
+            <BarChart2 size={18} className="text-brand-primary" />
             <span>Daily Working Hours Chart (Last 7 Shifts)</span>
           </h3>
           <p className="text-[10px] text-text-mut font-semibold mb-6">Visual tracking of completed shift hours per logged day</p>
-          
+
           <div className="flex items-end justify-around h-[190px] border-b border-border-card pb-2 pt-6 px-4">
             {chartData.map((c, idx) => {
               const barHeight = c.hours > 0 ? Math.max(14, Math.round((c.hours / maxChartHours) * 100)) : 6;
@@ -461,18 +461,18 @@ export default function History() {
                   <div className="opacity-0 group-hover:opacity-100 absolute transform -translate-y-12 z-10 bg-slate-900 text-white text-[9px] font-extrabold px-1.5 py-0.5 rounded shadow pointer-events-none transition-opacity duration-150">
                     {c.hours} hours
                   </div>
-                  
+
                   <span className="text-[10px] font-bold text-brand-primary tracking-tight">
                     {c.hours > 0 ? `${c.hours}h` : "0h"}
                   </span>
 
-                  <div 
+                  <div
                     className="w-6 rounded-t-[6px] bg-brand-primary hover:bg-brand-hover transition-all duration-300 relative overflow-hidden"
                     style={{ height: `${barHeight}%` }}
                   >
                     <div className="absolute inset-x-0 top-0 h-1 bg-white/20" />
                   </div>
-                  
+
                   <span className="text-[10px] font-bold text-text-sec tracking-tight text-center">{c.dateLabel}</span>
                 </div>
               );
@@ -485,31 +485,28 @@ export default function History() {
       <div className="flex border-b border-border-card mb-6">
         <button
           onClick={() => setActiveHistoryTab("logs")}
-          className={`py-3 px-6 text-sm font-bold border-b-2 transition-all cursor-pointer ${
-            activeHistoryTab === "logs"
+          className={`py-3 px-6 text-sm font-bold border-b-2 transition-all cursor-pointer ${activeHistoryTab === "logs"
               ? "border-brand-primary text-brand-primary"
               : "border-transparent text-text-sec hover:text-text-main"
-          }`}
+            }`}
         >
           Attendance Shift Logs ({filteredLogs.length})
         </button>
         <button
           onClick={() => setActiveHistoryTab("leaves")}
-          className={`py-3 px-6 text-sm font-bold border-b-2 transition-all cursor-pointer ${
-            activeHistoryTab === "leaves"
+          className={`py-3 px-6 text-sm font-bold border-b-2 transition-all cursor-pointer ${activeHistoryTab === "leaves"
               ? "border-brand-primary text-brand-primary"
               : "border-transparent text-text-sec hover:text-text-main"
-          }`}
+            }`}
         >
           Leave History ({myLeaves.length})
         </button>
         <button
           onClick={() => setActiveHistoryTab("regularization")}
-          className={`py-3 px-6 text-sm font-bold border-b-2 transition-all cursor-pointer ${
-            activeHistoryTab === "regularization"
+          className={`py-3 px-6 text-sm font-bold border-b-2 transition-all cursor-pointer ${activeHistoryTab === "regularization"
               ? "border-brand-primary text-brand-primary"
               : "border-transparent text-text-sec hover:text-text-main"
-          }`}
+            }`}
         >
           Regularization Requests ({myRegularizations.length})
         </button>
@@ -560,14 +557,14 @@ export default function History() {
                     </div>
 
                     <div className="flex gap-2">
-                      <button 
-                        onClick={handleFilter} 
+                      <button
+                        onClick={handleFilter}
                         className="py-2.5 px-6 bg-brand-primary hover:bg-brand-hover text-white text-xs font-bold rounded-[12px] flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
                       >
                         <Search size={14} /> Filter
                       </button>
-                      <button 
-                        onClick={handleReset} 
+                      <button
+                        onClick={handleReset}
                         className="py-2.5 px-5 border border-border-card rounded-[12px] hover:bg-bg-base text-xs font-bold text-text-sec transition-colors cursor-pointer"
                       >
                         Reset
@@ -579,7 +576,7 @@ export default function History() {
                 {/* Records table */}
                 <div className="bg-bg-card border border-border-card rounded-[24px] p-6 shadow-sm">
                   <h3 className="font-extrabold text-base text-text-main tracking-tight mb-5">Log History</h3>
-                  
+
                   {filteredLogs.length === 0 ? (
                     <div className="text-center py-16 text-text-mut text-sm">No historical attendance records found.</div>
                   ) : (
@@ -606,7 +603,7 @@ export default function History() {
                             const checkOutTime = checkOutRaw && !isNaN(new Date(checkOutRaw).getTime())
                               ? new Date(checkOutRaw).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                               : (log.checkOut || "—");
-                            
+
                             const bList = parseBreaksList(log);
                             const shorts = bList.filter(b => b.type === "short" || b.breakType === "short").length;
                             const longs = bList.filter(b => b.type === "long" || b.breakType === "long").length;
@@ -620,7 +617,7 @@ export default function History() {
                                   <div>{checkInTime}</div>
                                   <div className="text-[10px] text-text-mut mt-0.5">
                                     {log.checkInLocation && (
-                                      <a 
+                                      <a
                                         href={`https://www.google.com/maps?q=${log.checkInLocation.latitude || log.checkInLocation.lat},${log.checkInLocation.longitude || log.checkInLocation.lng}`}
                                         target="_blank"
                                         rel="noreferrer"
@@ -635,7 +632,7 @@ export default function History() {
                                   <div>{checkOutTime}</div>
                                   <div className="text-[10px] text-text-mut mt-0.5">
                                     {log.checkOutLocation && (
-                                      <a 
+                                      <a
                                         href={`https://www.google.com/maps?q=${log.checkOutLocation.latitude || log.checkOutLocation.lat},${log.checkOutLocation.longitude || log.checkOutLocation.lng}`}
                                         target="_blank"
                                         rel="noreferrer"
@@ -721,11 +718,10 @@ export default function History() {
                             <button
                               key={p}
                               onClick={() => setLogsPage(p)}
-                              className={`w-8 h-8 rounded-[8px] border transition-all cursor-pointer font-bold ${
-                                logsPage === p
+                              className={`w-8 h-8 rounded-[8px] border transition-all cursor-pointer font-bold ${logsPage === p
                                   ? "bg-brand-primary border-brand-primary text-white"
                                   : "border-border-card bg-bg-card text-text-sec hover:bg-bg-base"
-                              }`}
+                                }`}
                             >
                               {p}
                             </button>
@@ -821,11 +817,10 @@ export default function History() {
                           <button
                             key={p}
                             onClick={() => setLeavesPage(p)}
-                            className={`w-8 h-8 rounded-[8px] border transition-all cursor-pointer font-bold ${
-                              leavesPage === p
+                            className={`w-8 h-8 rounded-[8px] border transition-all cursor-pointer font-bold ${leavesPage === p
                                 ? "bg-brand-primary border-brand-primary text-white"
                                 : "border-border-card bg-bg-card text-text-sec hover:bg-bg-base"
-                            }`}
+                              }`}
                           >
                             {p}
                           </button>
@@ -913,11 +908,10 @@ export default function History() {
                           <button
                             key={p}
                             onClick={() => setRegsPage(p)}
-                            className={`w-8 h-8 rounded-[8px] border transition-all cursor-pointer font-bold ${
-                              regsPage === p
+                            className={`w-8 h-8 rounded-[8px] border transition-all cursor-pointer font-bold ${regsPage === p
                                 ? "bg-brand-primary border-brand-primary text-white"
                                 : "border-border-card bg-bg-card text-text-sec hover:bg-bg-base"
-                            }`}
+                              }`}
                           >
                             {p}
                           </button>
@@ -954,7 +948,7 @@ export default function History() {
             <form onSubmit={handleRegSubmit} className="space-y-4">
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-bold text-text-sec">Forgot Date</label>
-                <input 
+                <input
                   type="date"
                   className="w-full px-3.5 py-2.5 border border-border-card rounded-[12px] bg-bg-base/30 text-xs text-text-main outline-none focus:bg-bg-card focus:border-brand-primary transition-all"
                   value={regDate}
@@ -966,7 +960,7 @@ export default function History() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="flex flex-col gap-1">
                   <label className="text-xs font-bold text-text-sec">Check-In Time</label>
-                  <input 
+                  <input
                     type="time"
                     className="w-full px-3 py-2 border border-border-card rounded-[8px] bg-bg-card text-text-main text-xs outline-none focus:border-brand-primary transition-all"
                     value={regCheckIn}
@@ -977,7 +971,7 @@ export default function History() {
 
                 <div className="flex flex-col gap-1">
                   <label className="text-xs font-bold text-text-sec">Check-Out Time</label>
-                  <input 
+                  <input
                     type="time"
                     className="w-full px-3 py-2 border border-border-card rounded-[8px] bg-bg-card text-text-main text-xs outline-none focus:border-brand-primary transition-all"
                     value={regCheckOut}
@@ -989,7 +983,7 @@ export default function History() {
 
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-bold text-text-sec">Reason / Explanation</label>
-                <textarea 
+                <textarea
                   placeholder="Explain why you missed your check-in/out..."
                   className="w-full h-24 p-3 border border-border-card rounded-[12px] bg-bg-base/30 text-xs text-text-main outline-none focus:bg-bg-card focus:border-brand-primary transition-all resize-none"
                   value={regReason}
@@ -999,7 +993,7 @@ export default function History() {
               </div>
 
               <div className="flex justify-end gap-3 border-t border-border-card pt-4">
-                <button 
+                <button
                   type="button"
                   onClick={() => setShowRegModal(false)}
                   className="py-2 px-4 border border-border-card rounded-[12px] bg-bg-card hover:bg-bg-base text-text-sec text-xs font-bold cursor-pointer"
@@ -1007,7 +1001,7 @@ export default function History() {
                 >
                   Cancel
                 </button>
-                <button 
+                <button
                   type="submit"
                   className="py-2 px-5 bg-brand-primary text-white text-xs font-bold rounded-[12px] hover:bg-brand-hover transition-colors cursor-pointer"
                   disabled={regLoading}

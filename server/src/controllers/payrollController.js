@@ -471,7 +471,7 @@ export const calculatePayrollBatch = async (req, res) => {
 
       let presentCount = 0;
       let halfDayCount = 0;
-      let onLeaveCount = Number(leaveRes.rows[0]?.approved_leave_days || 0);
+      let attOnLeaveCount = 0;
       let absentCount = 0;
 
       attRes.rows.forEach(r => {
@@ -482,11 +482,14 @@ export const calculatePayrollBatch = async (req, res) => {
         } else if (st === "half-day") {
           halfDayCount += count;
         } else if (st === "on-leave") {
-          onLeaveCount += count;
+          attOnLeaveCount += count;
         } else if (st === "absent") {
           absentCount += count;
         }
       });
+
+      const approvedLeaveDays = Number(leaveRes.rows[0]?.approved_leave_days || 0);
+      const onLeaveCount = Math.max(attOnLeaveCount, approvedLeaveDays);
 
       const now = new Date();
       const currentYear = now.getFullYear();
@@ -791,7 +794,7 @@ export const getEmployeeAttendancePayrollSummary = async (req, res) => {
       }
     });
 
-    const totalApprovedLeave = onLeaveDays + approvedLeaveDays;
+    const totalApprovedLeave = Math.max(onLeaveDays, approvedLeaveDays);
 
     // Calculate elapsed days for accurate absent & LOP calculation
     const now = new Date();
