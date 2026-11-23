@@ -7,7 +7,6 @@ import { query } from "../config/db.js";
 import { generateToken } from "../middlewares/auth.js";
 import { hashToken } from "../services/livenessVerification.js";
 
-const PORT = 5098;
 let server;
 let baseUrl;
 
@@ -55,8 +54,9 @@ let adminTokenB;
 describe("Face Biometric Status in Admin Attendance Monitoring (10 Scenarios)", () => {
   before(async () => {
     server = http.createServer(app);
-    await new Promise(resolve => server.listen(PORT, resolve));
-    baseUrl = `http://localhost:${PORT}/api`;
+    await new Promise(resolve => server.listen(0, resolve));
+    const port = server.address().port;
+    baseUrl = `http://localhost:${port}/api`;
 
     // Seed companies
     await query(`INSERT INTO companies (id, name, slug) VALUES ($1, 'Bio Corp A', 'bio-corp-a') ON CONFLICT (id) DO NOTHING`, [companyA]);

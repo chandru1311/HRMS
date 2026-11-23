@@ -1,7 +1,13 @@
 import pg from "pg";
 import dotenv from "dotenv";
 import path from "path";
+import dns from "node:dns";
 import { fileURLToPath } from "url";
+
+// Prioritize IPv4 to avoid NAT64/IPv6 proxy timeouts on cellular/Wi-Fi networks
+try {
+  dns.setDefaultResultOrder("ipv4first");
+} catch (_) {}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -17,10 +23,10 @@ const pool = new Pool({
   connectionString: activeDbUrl,
   ssl: { rejectUnauthorized: false },
   max: 15,
-  idleTimeoutMillis: 20000,
-  connectionTimeoutMillis: 8000,
-  statement_timeout: 15000,
-  query_timeout: 15000,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 30000,
+  statement_timeout: 30000,
+  query_timeout: 30000,
   keepAlive: true,
   keepAliveInitialDelayMillis: 10000
 });
@@ -34,15 +40,26 @@ pool.on("error", (err, client) => {
 });
 
 export const query = async (text, params) => {
-  try {
-    return await pool.query(text, params);
-  } catch (err) {
-    // If connection was dropped or timed out, retry once
-    if (err.code === 'ECONNRESET' || (err.message && (err.message.includes("timeout") || err.message.includes("Connection terminated") || err.message.includes("closed") || err.message.includes("ECONNRESET")))) {
-      console.warn("⚠️ Retrying query after connection reset:", text.slice(0, 50));
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
       return await pool.query(text, params);
+    } catch (err) {
+      const isTransient = err.code === 'ECONNRESET' ||
+        err.code === '57P01' ||
+        (err.message && (
+          err.message.includes("timeout") ||
+          err.message.includes("Connection terminated") ||
+          err.message.includes("closed") ||
+          err.message.includes("ECONNRESET") ||
+          err.message.includes("Connection ended")
+        ));
+      if (isTransient && attempt < 2) {
+        console.warn(`⚠️ Retrying query after connection issue (attempt ${attempt + 1}/3):`, text.slice(0, 50));
+        await new Promise(r => setTimeout(r, 600 * (attempt + 1)));
+        continue;
+      }
+      throw err;
     }
-    throw err;
   }
 };
 export default pool;

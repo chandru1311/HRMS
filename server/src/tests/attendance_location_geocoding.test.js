@@ -8,7 +8,6 @@ import { generateToken } from "../middlewares/auth.js";
 import { hashToken } from "../services/livenessVerification.js";
 import { setCachedAddress, clearAddressCache, formatNominatimAddress } from "../services/reverseGeocodingService.js";
 
-const PORT = 5097;
 let server;
 let baseUrl;
 
@@ -56,8 +55,9 @@ let adminTokenB;
 describe("Attendance Location Reverse Geocoding & Date Column Suite", () => {
   before(async () => {
     server = http.createServer(app);
-    await new Promise(resolve => server.listen(PORT, resolve));
-    baseUrl = `http://localhost:${PORT}/api`;
+    await new Promise(resolve => server.listen(0, resolve));
+    const port = server.address().port;
+    baseUrl = `http://localhost:${port}/api`;
 
     // 1. Seed companies
     await query(

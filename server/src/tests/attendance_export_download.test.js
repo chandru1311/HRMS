@@ -6,7 +6,6 @@ import app from "../app.js";
 import { query } from "../config/db.js";
 import { generateToken } from "../middlewares/auth.js";
 
-const PORT = 5098;
 let server;
 let baseUrl;
 
@@ -69,8 +68,9 @@ let empTokenA1;
 describe("Admin Attendance Report Download & Export Suite", () => {
   before(async () => {
     server = http.createServer(app);
-    await new Promise(resolve => server.listen(PORT, resolve));
-    baseUrl = `http://localhost:${PORT}/api`;
+    await new Promise(resolve => server.listen(0, resolve));
+    const port = server.address().port;
+    baseUrl = `http://localhost:${port}/api`;
 
     // 1. Seed companies
     await query(
