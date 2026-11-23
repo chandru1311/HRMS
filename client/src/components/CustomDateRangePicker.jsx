@@ -1,10 +1,19 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { ChevronLeft, ChevronRight, Calendar, CheckCircle2, AlertCircle } from 'lucide-react';
+import { formatDisplayDate, calculateLeaveDuration, getCleanDateOnly, hasDateOverlap } from '../utils/dateUtils';
 
 export default function CustomDateRangePicker({ startDate, endDate, setStartDate, setEndDate, minDate, existingLeaves = [], onOverlapChange }) {
-  const [currentMonth, setCurrentMonth] = useState(
-    startDate ? new Date(startDate) : new Date()
-  );
+  const [currentMonth, setCurrentMonth] = useState(() => {
+    if (startDate) {
+      const parts = String(startDate).split('-');
+      if (parts.length === 3) {
+        const y = Number(parts[0]);
+        const m = Number(parts[1]) - 1;
+        if (!isNaN(y) && !isNaN(m)) return new Date(y, m, 1);
+      }
+    }
+    return new Date();
+  });
   const [hoverDate, setHoverDate] = useState(null);
 
   const prevMonth = () => {
@@ -25,39 +34,45 @@ export default function CustomDateRangePicker({ startDate, endDate, setStartDate
     // Previous month padding
     const prevMonthDays = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 0).getDate();
     for (let i = startOffset - 1; i >= 0; i--) {
+      const dayNum = prevMonthDays - i;
+      const prevDate = new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, dayNum, 12, 0, 0);
+      const y = prevDate.getFullYear();
+      const m = String(prevDate.getMonth() + 1).padStart(2, '0');
+      const d = String(prevDate.getDate()).padStart(2, '0');
       arr.push({
-        date: new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, prevMonthDays - i),
+        dateStr: `${y}-${m}-${d}`,
+        dayNumber: dayNum,
         isCurrentMonth: false
       });
     }
     // Current month days
     for (let i = 1; i <= daysInMonth; i++) {
+      const y = currentMonth.getFullYear();
+      const m = String(currentMonth.getMonth() + 1).padStart(2, '0');
+      const d = String(i).padStart(2, '0');
       arr.push({
-        date: new Date(currentMonth.getFullYear(), currentMonth.getMonth(), i),
+        dateStr: `${y}-${m}-${d}`,
+        dayNumber: i,
         isCurrentMonth: true
       });
     }
     // Next month padding
     const remaining = 42 - arr.length; // 6 rows of 7 days
     for (let i = 1; i <= remaining; i++) {
+      const nextDate = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, i, 12, 0, 0);
+      const y = nextDate.getFullYear();
+      const m = String(nextDate.getMonth() + 1).padStart(2, '0');
+      const d = String(nextDate.getDate()).padStart(2, '0');
       arr.push({
-        date: new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, i),
+        dateStr: `${y}-${m}-${d}`,
+        dayNumber: i,
         isCurrentMonth: false
       });
     }
     return arr;
   }, [currentMonth, daysInMonth, startOffset]);
 
-  const formatDateStr = (dateObj) => {
-    const d = dateObj.getDate().toString().padStart(2, '0');
-    const m = (dateObj.getMonth() + 1).toString().padStart(2, '0');
-    const y = dateObj.getFullYear();
-    return `${y}-${m}-${d}`;
-  };
-
-  const handleDateClick = (dateObj) => {
-    const dateStr = formatDateStr(dateObj);
-    
+  const handleDateClick = (dateStr) => {
     // Disable past dates if minDate is provided
     if (minDate && dateStr < minDate) return;
 
@@ -95,17 +110,6 @@ export default function CustomDateRangePicker({ startDate, endDate, setStartDate
     return false;
   };
 
-  const startObj = startDate ? new Date(startDate) : null;
-  const endObj = endDate ? new Date(endDate) : null;
-
-  const getCleanDate = (val) => {
-    if (!val) return "";
-    if (typeof val === "string" && /^\d{4}-\d{2}-\d{2}/.test(val)) return val.substring(0, 10);
-    const d = new Date(val);
-    if (isNaN(d.getTime())) return "";
-    return d.toISOString().split("T")[0];
-  };
-
   const overlappingLeave = useMemo(() => {
     if (!startDate) return null;
     const newStart = startDate;
@@ -114,11 +118,11 @@ export default function CustomDateRangePicker({ startDate, endDate, setStartDate
     return (existingLeaves || []).find(leave => {
       const st = String(leave.status || "").toLowerCase();
       if (st !== "pending" && st !== "approved") return false;
-      const exStart = getCleanDate(leave.startDate || leave.start_date);
-      const exEnd = getCleanDate(leave.endDate || leave.end_date) || exStart;
+      const exStart = getCleanDateOnly(leave.startDate || leave.start_date);
+      const exEnd = getCleanDateOnly(leave.endDate || leave.end_date) || exStart;
       if (!exStart) return false;
 
-      return newStart <= exEnd && newEnd >= exStart;
+      return hasDateOverlap(newStart, newEnd, exStart, exEnd);
     });
   }, [startDate, endDate, existingLeaves]);
 
@@ -134,17 +138,15 @@ export default function CustomDateRangePicker({ startDate, endDate, setStartDate
     // 1. Before calculating leave duration, check employee's existing leave requests.
     // 4. If an overlap is detected, do not calculate or add duplicate leave days.
     if (!startDate || isOverlapping) return 0;
-    if (!endDate) return 1;
-    const diffTime = Math.abs(endObj - startObj);
-    return Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
-  }, [startDate, endDate, startObj, endObj, isOverlapping]);
+    return calculateLeaveDuration(startDate, endDate || startDate);
+  }, [startDate, endDate, isOverlapping]);
 
   const getExistingLeaveForDate = (dateStr) => {
     return (existingLeaves || []).find(leave => {
       const st = String(leave.status || "").toLowerCase();
       if (st !== "pending" && st !== "approved") return false;
-      const exStart = getCleanDate(leave.startDate || leave.start_date);
-      const exEnd = getCleanDate(leave.endDate || leave.end_date) || exStart;
+      const exStart = getCleanDateOnly(leave.startDate || leave.start_date);
+      const exEnd = getCleanDateOnly(leave.endDate || leave.end_date) || exStart;
       if (!exStart) return false;
       return dateStr >= exStart && dateStr <= exEnd;
     });
@@ -152,17 +154,18 @@ export default function CustomDateRangePicker({ startDate, endDate, setStartDate
 
   const includesWeekend = useMemo(() => {
     if (!startDate) return false;
-    const current = new Date(startDate);
-    const last = endDate ? new Date(endDate) : new Date(startDate);
-    
-    // Make sure current <= last
-    let start = current <= last ? current : last;
-    let end = current <= last ? last : current;
+    const finalEnd = endDate || startDate;
+    const [y1, m1, d1] = startDate.split('-').map(Number);
+    const [y2, m2, d2] = finalEnd.split('-').map(Number);
+    if (!y1 || !y2) return false;
 
-    while (start <= end) {
-      const day = start.getDay();
+    let curr = new Date(y1, m1 - 1, d1, 12, 0, 0);
+    const end = new Date(y2, m2 - 1, d2, 12, 0, 0);
+
+    while (curr <= end) {
+      const day = curr.getDay();
       if (day === 0 || day === 6) return true;
-      start.setDate(start.getDate() + 1);
+      curr.setDate(curr.getDate() + 1);
     }
     return false;
   }, [startDate, endDate]);
@@ -205,7 +208,7 @@ export default function CustomDateRangePicker({ startDate, endDate, setStartDate
 
         <div className="grid grid-cols-7 text-center gap-y-2 relative">
           {days.map((dayObj, i) => {
-            const dateStr = formatDateStr(dayObj.date);
+            const dateStr = dayObj.dateStr;
             const isMinDisabled = minDate && dateStr < minDate;
             const selected = isSelected(dateStr);
             const between = isBetween(dateStr) || isHoverRange(dateStr);
@@ -220,7 +223,7 @@ export default function CustomDateRangePicker({ startDate, endDate, setStartDate
                 key={i} 
                 className="relative py-1 flex items-center justify-center cursor-pointer"
                 onMouseEnter={() => setHoverDate(dateStr)}
-                onClick={() => handleDateClick(dayObj.date)}
+                onClick={() => handleDateClick(dateStr)}
               >
                 {/* Connecting Trail Background */}
                 {between && (
@@ -260,7 +263,7 @@ export default function CustomDateRangePicker({ startDate, endDate, setStartDate
                       : "text-text-main hover:bg-bg-base"
                   }`}
                 >
-                  {dayObj.date.getDate()}
+                  {dayObj.dayNumber}
                   {existingForDay && !selected && (
                     <span 
                       className={`absolute bottom-1 w-1.5 h-1.5 rounded-full ${
@@ -283,14 +286,14 @@ export default function CustomDateRangePicker({ startDate, endDate, setStartDate
           <span className="text-[11px] font-bold text-text-sec block mb-2">Selected Dates</span>
           {startDate ? (
             <div className={`text-xl sm:text-2xl font-black tracking-tight ${isOverlapping ? "text-red-500" : "text-text-main"}`}>
-              {startObj.toLocaleDateString([], { day: 'numeric', month: 'short' })}
+              {formatDisplayDate(startDate)}
               {endDate && endDate !== startDate ? (
                 <>
                   <span className="text-text-mut mx-2">—</span>
-                  {endObj.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })}
+                  {formatDisplayDate(endDate, { includeYear: true })}
                 </>
               ) : (
-                <span className={isOverlapping ? "text-red-500" : "text-text-main"}> {startObj.getFullYear()}</span>
+                <span className={isOverlapping ? "text-red-500" : "text-text-main"}> {String(startDate).split('-')[0]}</span>
               )}
             </div>
           ) : (
@@ -322,7 +325,7 @@ export default function CustomDateRangePicker({ startDate, endDate, setStartDate
               <span className="leading-snug">You already have a leave request for some of these dates. Please select a different date range.</span>
               {overlappingLeave && (
                 <span className="text-[10px] font-semibold text-text-mut">
-                  Conflict with: <strong className="text-text-main">{overlappingLeave.leaveType || overlappingLeave.leave_type || "Leave"}</strong> ({overlappingLeave.startDate} to {overlappingLeave.endDate}) - <span className="uppercase font-extrabold text-amber-500">{overlappingLeave.status}</span>
+                  Conflict with: <strong className="text-text-main">{overlappingLeave.leaveType || overlappingLeave.leave_type || "Leave"}</strong> ({formatDisplayDate(overlappingLeave.startDate, { includeYear: true })} to {formatDisplayDate(overlappingLeave.endDate, { includeYear: true })}) - <span className="uppercase font-extrabold text-amber-500">{overlappingLeave.status}</span>
                 </span>
               )}
             </div>
@@ -344,4 +347,3 @@ export default function CustomDateRangePicker({ startDate, endDate, setStartDate
     </div>
   );
 }
-

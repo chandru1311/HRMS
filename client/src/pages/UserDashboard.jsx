@@ -70,6 +70,7 @@ import {
   ShieldAlert
 } from "lucide-react";
 import CustomDateRangePicker from "../components/CustomDateRangePicker";
+import { formatDisplayDate, calculateLeaveDuration, getCleanDateOnly, hasDateOverlap } from "../utils/dateUtils";
 
 
 const numberToWords = (num) => {
@@ -961,25 +962,17 @@ export default function UserDashboard() {
     const todayString = getLocalDateString();
     const tomorrowString = getTomorrowDateString();
 
-    const startD = new Date(startDate);
-    startD.setHours(0, 0, 0, 0);
-    const endD = new Date(finalEndDate);
-    endD.setHours(0, 0, 0, 0);
-
-    const todayDateObj = new Date(todayString);
-    todayDateObj.setHours(0, 0, 0, 0);
-
-    const tomorrowDateObj = new Date(tomorrowString);
-    tomorrowDateObj.setHours(0, 0, 0, 0);
+    const cleanStart = getCleanDateOnly(startDate);
+    const cleanEnd = getCleanDateOnly(finalEndDate) || cleanStart;
 
     // Validate standard leaves vs emergency leaves start date limits
     if (!isEmergency) {
-      if (startDate === todayString || startD < tomorrowDateObj) {
+      if (cleanStart === todayString || cleanStart < tomorrowString) {
         return showToast("Standard leave requests must start from tomorrow. Choose Emergency Leave to apply for today.", "warning");
       }
     } else {
       // Validate emergency leaves applied for today must be before shift start
-      if (startDate === todayString) {
+      if (cleanStart === todayString) {
         if (currentUser?.shiftStart) {
           const now = new Date();
           const [shiftH, shiftM] = String(currentUser.shiftStart).split(":").map(Number);
@@ -991,26 +984,23 @@ export default function UserDashboard() {
             return showToast(`Emergency leave for today must be applied before your shift starts at ${formattedShiftTime}.`, "warning");
           }
         }
-      } else if (startD < todayDateObj) {
+      } else if (cleanStart < todayString) {
         return showToast("Emergency leave cannot start in the past.", "warning");
       }
     }
 
-    if (endD < startD) {
+    if (cleanEnd < cleanStart) {
       return showToast("End Date cannot be before Start Date.", "warning");
     }
 
     // 1 & 2 & 3. Before calculating leave duration, check employee's existing leave requests (Pending and Approved)
-    const cleanStart = startDate;
-    const cleanEnd = finalEndDate || startDate;
-
     const hasOverlap = myLeaveRequests.some(leave => {
       const st = String(leave.status || "").toLowerCase();
       if (st !== "pending" && st !== "approved") return false;
-      const exStart = String(leave.startDate || leave.start_date || "").split("T")[0];
-      const exEnd = String(leave.endDate || leave.end_date || exStart).split("T")[0];
+      const exStart = getCleanDateOnly(leave.startDate || leave.start_date);
+      const exEnd = getCleanDateOnly(leave.endDate || leave.end_date) || exStart;
       if (!exStart) return false;
-      return cleanStart <= exEnd && cleanEnd >= exStart;
+      return hasDateOverlap(cleanStart, cleanEnd, exStart, exEnd);
     });
 
     if (hasOverlap || isLeaveOverlapping) {
@@ -1018,8 +1008,7 @@ export default function UserDashboard() {
     }
 
     // 5. If there is no overlap, calculate the leave duration correctly
-    const diffTime = Math.abs(endD - startD);
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+    const diffDays = calculateLeaveDuration(cleanStart, cleanEnd);
     const durationStr = `${diffDays} Day${diffDays > 1 ? "s" : ""}`;
 
     setActionLoading(true);
@@ -1030,8 +1019,8 @@ export default function UserDashboard() {
         currentUser.department || "Engineering",
         leaveType,
         durationStr,
-        startDate,
-        finalEndDate,
+        cleanStart,
+        cleanEnd,
         leaveReason,
         null,
         isEmergency,
@@ -1954,8 +1943,8 @@ export default function UserDashboard() {
                           statusColor = "bg-red-500/10 text-red-500";
                         }
 
-                        const startF = req.startDate ? new Date(req.startDate).toLocaleDateString([], { month: "short", day: "numeric" }) : "";
-                        const endF = req.endDate ? new Date(req.endDate).toLocaleDateString([], { month: "short", day: "numeric" }) : "";
+                        const startF = req.startDate ? formatDisplayDate(req.startDate) : "";
+                        const endF = req.endDate ? formatDisplayDate(req.endDate) : "";
 
                         
   const handleDownloadPayslip = () => {
@@ -2378,12 +2367,12 @@ export default function UserDashboard() {
                     <span className="bg-brand-primary/10 text-brand-primary text-[8px] font-black px-2.5 py-1 rounded-full whitespace-nowrap">
                       {pl.startDate && pl.endDate ? (
                         pl.startDate === pl.endDate ? (
-                          new Date(pl.startDate).toLocaleDateString([], { month: "short", day: "numeric" })
+                          formatDisplayDate(pl.startDate)
                         ) : (
-                          `${new Date(pl.startDate).toLocaleDateString([], { month: "short", day: "numeric" })} - ${new Date(pl.endDate).toLocaleDateString([], { month: "short", day: "numeric" })}`
+                          `${formatDisplayDate(pl.startDate)} - ${formatDisplayDate(pl.endDate)}`
                         )
                       ) : (
-                        new Date(pl.date || pl.createdAt).toLocaleDateString([], { month: "short", day: "numeric" })
+                        formatDisplayDate(pl.date || pl.createdAt)
                       )}
                     </span>
                     <button
@@ -3260,12 +3249,12 @@ export default function UserDashboard() {
                   <span className="text-sm font-bold text-text-main mt-0.5 block">
                     {selectedPaidLeaveDetail.startDate && selectedPaidLeaveDetail.endDate ? (
                       selectedPaidLeaveDetail.startDate === selectedPaidLeaveDetail.endDate ? (
-                        new Date(selectedPaidLeaveDetail.startDate).toLocaleDateString([], { weekday: 'long', month: "long", day: "numeric", year: "numeric" })
+                        formatDisplayDate(selectedPaidLeaveDetail.startDate, { full: true, weekday: true })
                       ) : (
-                        `${new Date(selectedPaidLeaveDetail.startDate).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })} to ${new Date(selectedPaidLeaveDetail.endDate).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })}`
+                        `${formatDisplayDate(selectedPaidLeaveDetail.startDate, { includeYear: true })} to ${formatDisplayDate(selectedPaidLeaveDetail.endDate, { includeYear: true })}`
                       )
                     ) : (
-                      new Date(selectedPaidLeaveDetail.date || selectedPaidLeaveDetail.createdAt).toLocaleDateString([], { weekday: 'long', month: "long", day: "numeric", year: "numeric" })
+                      formatDisplayDate(selectedPaidLeaveDetail.date || selectedPaidLeaveDetail.createdAt, { full: true, weekday: true })
                     )}
                   </span>
                 </div>

@@ -10,6 +10,10 @@ dotenv.config();
 
 const { Pool } = pg;
 
+// Force PostgreSQL DATE type (OID 1082) to parse as plain string 'YYYY-MM-DD'
+// to eliminate timezone shift issues when dates are queried
+pg.types.setTypeParser(1082, (val) => val);
+
 const DEFAULT_DB_URL = "postgresql://postgres:wbmoHIZoKMKVvFhmAHgDYLUdVhZCcTzq@kodama.proxy.rlwy.net:52896/railway";
 const activeDbUrl = process.env.DATABASE_URL || DEFAULT_DB_URL;
 

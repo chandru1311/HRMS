@@ -114,6 +114,7 @@ import {
   getGoogleMapsUrl,
   resolveLocationName
 } from "../utils/locationHelper";
+import { formatDisplayDate, calculateLeaveDuration, getCleanDateOnly, hasDateOverlap } from "../utils/dateUtils";
 const getBase64ImageFromUrl = async (imageUrl) => {
   const res = await fetch(imageUrl);
   const blob = await res.blob();
@@ -152,37 +153,23 @@ const getInitials = (name) => {
 };
 
 const hasOverlap = (s1, e1, s2, e2) => {
-  if (!s1 || !e1 || !s2 || !e2) return false;
-  const start1 = new Date(s1).setHours(0, 0, 0, 0);
-  const end1 = new Date(e1).setHours(23, 59, 59, 999);
-  const start2 = new Date(s2).setHours(0, 0, 0, 0);
-  const end2 = new Date(e2).setHours(23, 59, 59, 999);
-  return start1 <= end2 && start2 <= end1;
+  return hasDateOverlap(s1, e1, s2, e2);
 };
 
 const getOverlapInfo = (s1, e1, s2, e2) => {
   if (!s1 || !e1 || !s2 || !e2) return 0;
-  const start1 = new Date(s1).setHours(0, 0, 0, 0);
-  const end1 = new Date(e1).setHours(23, 59, 59, 999);
-  const start2 = new Date(s2).setHours(0, 0, 0, 0);
-  const end2 = new Date(e2).setHours(23, 59, 59, 999);
-
-  const overlapStart = Math.max(start1, start2);
-  const overlapEnd = Math.min(end1, end2);
-
-  if (overlapStart <= overlapEnd) {
-    const diffTime = Math.abs(overlapEnd - overlapStart);
-    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-  }
-  return 0;
+  const c1 = getCleanDateOnly(s1);
+  const c2 = getCleanDateOnly(e1) || c1;
+  const c3 = getCleanDateOnly(s2);
+  const c4 = getCleanDateOnly(e2) || c3;
+  const maxStart = c1 > c3 ? c1 : c3;
+  const minEnd = c2 < c4 ? c2 : c4;
+  if (maxStart > minEnd) return 0;
+  return calculateLeaveDuration(maxStart, minEnd);
 };
 
 const getDurationDays = (s, e) => {
-  if (!s || !e) return 1;
-  const start = new Date(s).setHours(0, 0, 0, 0);
-  const end = new Date(e).setHours(23, 59, 59, 999);
-  const diffTime = Math.abs(end - start);
-  return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  return calculateLeaveDuration(s, e);
 };
 
 export default function AdminDashboard() {
@@ -3458,8 +3445,8 @@ export default function AdminDashboard() {
                           {paginatedPendingLeaves.map((req) => {
                             const isSelected = req.id === selectedRequestId;
 
-                            const startF = req.startDate ? new Date(req.startDate).toLocaleDateString([], { month: "short", day: "numeric" }) : "";
-                            const endF = req.endDate ? new Date(req.endDate).toLocaleDateString([], { month: "short", day: "numeric" }) : "";
+                            const startF = req.startDate ? formatDisplayDate(req.startDate) : "";
+                            const endF = req.endDate ? formatDisplayDate(req.endDate) : "";
 
                             let typeBadge = "bg-brand-primary/10 text-brand-primary border border-brand-primary/20";
                             if (req.type === "Sick Leave") {
@@ -3600,7 +3587,7 @@ export default function AdminDashboard() {
                             <span className="text-xs text-text-sec font-semibold mt-0.5 block">{selectedRequest.type} Request</span>
                             <span className="text-[10px] text-text-mut font-bold block mt-1">
                               {selectedRequest.startDate && selectedRequest.endDate
-                                ? `${new Date(selectedRequest.startDate).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })} - ${new Date(selectedRequest.endDate).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}`
+                                ? `${formatDisplayDate(selectedRequest.startDate, { includeYear: true })} - ${formatDisplayDate(selectedRequest.endDate, { includeYear: true })}`
                                 : "—"}
                             </span>
                           </div>
@@ -3708,7 +3695,7 @@ export default function AdminDashboard() {
                             <div className="flex items-center justify-between">
                               <h4 className="font-extrabold text-xs text-text-mut uppercase tracking-wider">
                                 TEAM AVAILABILITY: {selectedRequest.startDate && selectedRequest.endDate
-                                  ? `${new Date(selectedRequest.startDate).toLocaleDateString([], { month: 'short', day: 'numeric' })} - ${new Date(selectedRequest.endDate).toLocaleDateString([], { month: 'short', day: 'numeric' })}`
+                                  ? `${formatDisplayDate(selectedRequest.startDate)} - ${formatDisplayDate(selectedRequest.endDate)}`
                                   : "OCT 24 - OCT 28"}
                               </h4>
                             </div>
@@ -3731,7 +3718,7 @@ export default function AdminDashboard() {
                                       </div>
                                       {selectedRequest.startDate && selectedRequest.endDate && (
                                         <span className="text-[9px] text-brand-primary font-semibold block">
-                                          Duration: {new Date(selectedRequest.startDate).toLocaleDateString([], { month: 'short', day: 'numeric' })} - {new Date(selectedRequest.endDate).toLocaleDateString([], { month: 'short', day: 'numeric' })} ({selectedRequest.duration})
+                                          Duration: {formatDisplayDate(selectedRequest.startDate)} - {formatDisplayDate(selectedRequest.endDate)} ({selectedRequest.duration})
                                         </span>
                                       )}
                                     </div>
@@ -3764,7 +3751,7 @@ export default function AdminDashboard() {
                                       </div>
                                       {oLeave.startDate && oLeave.endDate && (
                                         <span className="text-[9px] text-text-mut font-semibold block">
-                                          Duration: {new Date(oLeave.startDate).toLocaleDateString([], { month: 'short', day: 'numeric' })} - {new Date(oLeave.endDate).toLocaleDateString([], { month: 'short', day: 'numeric' })}
+                                          Duration: {formatDisplayDate(oLeave.startDate)} - {formatDisplayDate(oLeave.endDate)}
                                         </span>
                                       )}
                                     </div>
@@ -4547,12 +4534,12 @@ export default function AdminDashboard() {
                             <span className="bg-brand-primary/10 text-brand-primary text-[9px] font-bold px-2 py-0.5 rounded-full">
                               {pl.startDate && pl.endDate ? (
                                 pl.startDate === pl.endDate ? (
-                                  new Date(pl.startDate).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })
+                                  formatDisplayDate(pl.startDate, { includeYear: true })
                                 ) : (
-                                  `${new Date(pl.startDate).toLocaleDateString([], { month: "short", day: "numeric" })} - ${new Date(pl.endDate).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })}`
+                                  `${formatDisplayDate(pl.startDate)} - ${formatDisplayDate(pl.endDate, { includeYear: true })}`
                                 )
                               ) : (
-                                new Date(pl.date || pl.createdAt).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })
+                                formatDisplayDate(pl.date || pl.createdAt, { includeYear: true })
                               )}
                             </span>
                             <button
