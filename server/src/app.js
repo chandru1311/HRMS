@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import authRoutes from "./routes/auth.routes.js";
 import attendanceRoutes from "./routes/attendance.routes.js";
+import attendanceMonitoringRoutes from "./routes/attendanceMonitoring.routes.js";
 import usersRoutes from "./routes/users.routes.js";
 import leavesRoutes from "./routes/leaves.routes.js";
 import regularizationRoutes from "./routes/regularization.routes.js";
@@ -58,6 +59,8 @@ app.get("/api/health", (req, res) => {
 
 // Mount Routes
 app.use("/api/auth", authRoutes);
+app.use("/api/attendance-monitoring", attendanceMonitoringRoutes);
+app.use("/api/attendance/monitoring", attendanceMonitoringRoutes);
 app.use("/api/attendance", attendanceRoutes);
 app.use("/api/users", usersRoutes);
 app.use("/api/leaves", leavesRoutes);

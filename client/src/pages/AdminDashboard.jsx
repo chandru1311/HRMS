@@ -106,6 +106,7 @@ import ExternalLinksTab from "../components/ExternalLinksTab";
 import RolesTab from "../components/RolesTab";
 import AuditLogsAndSecurityTab from "../components/AuditLogsAndSecurityTab";
 import FaceEnrollmentPanel from "../components/FaceEnrollmentPanel";
+import AttendanceMonitoringTab from "../components/AttendanceMonitoring/AttendanceMonitoringTab";
 import { usePermissions } from "../hooks/usePermissions";
 import { subscribeToRoles } from "../firebase";
 import {
@@ -7791,6 +7792,10 @@ export default function AdminDashboard() {
 
       {(activeTab === "biometrics" && (isAdminUser || can("read", "EmployeeManagement") || can("read", "LiveActivity"))) && (
         <FaceEnrollmentPanel users={users} showToast={showToast} />
+      )}
+
+      {(activeTab === "attendance-monitoring" && (isAdminUser || can("read", "AttendanceMonitoring") || can("read", "LiveActivity") || can("read", "Dashboard"))) && (
+        <AttendanceMonitoringTab currentUser={currentUser} showToast={showToast} />
       )}
 
     </div>

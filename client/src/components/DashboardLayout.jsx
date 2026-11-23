@@ -39,7 +39,8 @@ import { Mailbox, AlertTriangle, Check, ShieldAlert,
   Globe2,
   LifeBuoy,
   Settings,
-  ShieldCheck
+  ShieldCheck,
+  CalendarCheck
 } from "lucide-react";
 import Logo from "./Logo";
 import logoImg from "../assets/zuna-logo.png";
@@ -828,6 +829,15 @@ export default function DashboardLayout({ children }) {
         active: location.pathname === "/admin" && activeTabParam === "live",
         module: "attendance",
         onClick: () => { navigate("/admin?tab=live"); setIsMobileOpen(false); }
+      });
+    }
+    if (isAdminUser || can("read", "AttendanceMonitoring") || can("read", "LiveActivity") || can("read", "Dashboard")) {
+      menuItems.push({
+        label: "Attendance Monitoring",
+        icon: CalendarCheck,
+        active: location.pathname === "/admin" && activeTabParam === "attendance-monitoring",
+        module: "attendance",
+        onClick: () => { navigate("/admin?tab=attendance-monitoring"); setIsMobileOpen(false); }
       });
     }
     if (isAdminUser || can("read", "EmployeeManagement")) {
