@@ -1,44 +1,37 @@
 import express from "express";
 import {
-  getAttendanceMonitoringSummary,
-  getAttendanceMonitoringRecords,
-  getLiveAttendanceMonitoring,
+  getMonitoringSummary,
+  getMonitoringRecords,
+  getMonitoringLive,
   getEmployeeAttendanceProfile,
-  getEmployeeAttendanceReport,
-  getAttendanceAnalytics,
-  reviewAttendanceRecord
+  getMonitoringAnalytics,
+  reviewRegularization,
+  unlockAttendance,
+  manualCorrectAttendance,
+  exportAttendanceCsv,
+  resolveAddressEndpoint
 } from "../controllers/attendanceMonitoringController.js";
-import { updateRegularizationStatus } from "../controllers/regularizationController.js";
-import { authenticateToken, requireManagerOrAdmin } from "../middlewares/auth.js";
+import { authenticateToken } from "../middlewares/auth.js";
 
 const router = express.Router();
 
-// Enforce authentication and administrative permissions across all monitoring endpoints
 router.use(authenticateToken);
-router.use(requireManagerOrAdmin);
 
-// Monitoring Summary Statistics
-router.get("/summary", getAttendanceMonitoringSummary);
-
-// Detailed Employee Attendance Table Records
-router.get("/records", getAttendanceMonitoringRecords);
-
-// Real-Time Live Attendance Pulse
-router.get("/live", getLiveAttendanceMonitoring);
-
-// Individual Employee Attendance Report Download / Data Export (supports ?format=csv or ?format=json)
-router.get("/employee/:userId/report", getEmployeeAttendanceReport);
-
-// Individual Employee Detailed Attendance Profile
+// Monitoring Overview & Records
+router.get("/summary", getMonitoringSummary);
+router.get("/records", getMonitoringRecords);
+router.get("/live", getMonitoringLive);
 router.get("/employee/:userId", getEmployeeAttendanceProfile);
+router.get("/analytics", getMonitoringAnalytics);
+router.get("/export", exportAttendanceCsv);
+router.get("/export-csv", exportAttendanceCsv);
 
-// Analytics, Charts, and Trend Reports
-router.get("/analytics", getAttendanceAnalytics);
-
-// Admin Action: Review/Remark/Unlock Attendance Record
-router.post("/record/:id/review", reviewAttendanceRecord);
-
-// Admin Action: Review Attendance Regularization Request
-router.patch("/regularization/:id/action", updateRegularizationStatus);
+// Admin Actions
+router.post("/regularize/:id/review", reviewRegularization);
+router.post("/regularization/:id/review", reviewRegularization);
+router.post("/unlock", unlockAttendance);
+router.post("/unlock/:attendanceId", unlockAttendance);
+router.post("/manual-correct", manualCorrectAttendance);
+router.post("/reverse-geocode", resolveAddressEndpoint);
 
 export default router;

@@ -266,6 +266,14 @@ export default function App() {
 
         {/* Admin Protected Routes */}
         <Route 
+          path="/attendance-monitoring" 
+          element={
+            <AdminRoute>
+              <Navigate to="/admin?tab=attendance-monitoring" replace />
+            </AdminRoute>
+          } 
+        />
+        <Route 
           path="/admin" 
           element={
             <AdminRoute>

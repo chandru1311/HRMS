@@ -6,6 +6,7 @@ import { setSecuritySocketIO } from "./services/securityDetector.js";
 import { ensureFaceService, stopFaceServiceProcess } from "./services/faceServiceManager.js";
 import { runGeofenceDefaultsMigration } from "../scripts/migrate-geofence-defaults.js";
 import { runAttendanceSessionsMigration } from "../scripts/migrate-attendance-sessions.js";
+import { runAttendanceLocationMigration } from "../scripts/migrate-attendance-location.js";
 import { runFaceReenrollmentMigration } from "../scripts/migrate-face-reenrollment.js";
 import { runCleanDuplicateNotifications } from "../scripts/clean-duplicate-notifications.js";
 import { runGlobalPayrollMigration } from "../scripts/migrate-global-payroll.js";
@@ -105,6 +106,7 @@ async function startServer() {
   // 2. Run database migrations (non-blocking, individual fault tolerance)
   try { await runGeofenceDefaultsMigration(); } catch (e) { console.warn("Geofence migration note:", e.message); }
   try { await runAttendanceSessionsMigration(); } catch (e) { console.warn("Attendance migration note:", e.message); }
+  try { await runAttendanceLocationMigration(); } catch (e) { console.warn("Attendance location migration note:", e.message); }
   try { await runFaceReenrollmentMigration(); } catch (e) { console.warn("Face reenrollment migration note:", e.message); }
   try { await runCleanDuplicateNotifications(); } catch (e) { console.warn("Clean notifications note:", e.message); }
   try { await runGlobalPayrollMigration(); } catch (e) { console.warn("Global payroll migration note:", e.message); }

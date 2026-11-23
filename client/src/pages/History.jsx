@@ -15,7 +15,6 @@ import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx";
 import logoImg from '../assets/zuna-logo.png';
 import { addStandardPDFHeader, addPDFFooter } from "../utils/pdfHeader";
-import { formatDisplayDate } from "../utils/dateUtils";
 export default function History() {
   const { currentUser } = useAuth();
   const { showToast } = useToast();
@@ -769,8 +768,8 @@ export default function History() {
                             statusColor = "bg-red-500/10 text-red-500 border border-red-500/20";
                           }
 
-                          const startF = req.startDate ? formatDisplayDate(req.startDate) : "";
-                          const endF = req.endDate ? formatDisplayDate(req.endDate) : "";
+                          const startF = req.startDate ? new Date(req.startDate).toLocaleDateString([], { month: "short", day: "numeric" }) : "";
+                          const endF = req.endDate ? new Date(req.endDate).toLocaleDateString([], { month: "short", day: "numeric" }) : "";
 
                           return (
                             <tr key={req.id} className="hover:bg-bg-base/30">

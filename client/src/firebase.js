@@ -2276,65 +2276,51 @@ export const fetchAllTasks = async (params = {}) => {
   return data;
 };
 
-// ==========================================
-// ADMIN ATTENDANCE MONITORING MODULE APIS
-// ==========================================
-
-const toCleanQueryString = (params = {}) => {
-  const clean = {};
-  for (const [key, val] of Object.entries(params)) {
-    if (val !== undefined && val !== null && val !== "") {
-      clean[key] = val;
-    }
-  }
-  return new URLSearchParams(clean).toString();
-};
+// ============================================================================
+// ATTENDANCE MONITORING MODULE CLIENT LAYER
+// ============================================================================
 
 export const getAttendanceMonitoringSummary = async (params = {}) => {
-  const query = toCleanQueryString(params);
-  return apiFetch(`/attendance-monitoring/summary${query ? `?${query}` : ""}`);
+  const query = new URLSearchParams(params).toString();
+  return await apiFetch(`/attendance/monitoring/summary${query ? `?${query}` : ""}`);
 };
 
 export const getAttendanceMonitoringRecords = async (params = {}) => {
-  const query = toCleanQueryString(params);
-  return apiFetch(`/attendance-monitoring/records${query ? `?${query}` : ""}`);
+  const query = new URLSearchParams(params).toString();
+  return await apiFetch(`/attendance/monitoring/records${query ? `?${query}` : ""}`);
 };
 
-export const getLiveAttendanceMonitoring = async (params = {}) => {
-  const query = toCleanQueryString(params);
-  return apiFetch(`/attendance-monitoring/live${query ? `?${query}` : ""}`);
+export const getAttendanceMonitoringLive = async () => {
+  return await apiFetch("/attendance/monitoring/live");
 };
 
-export const getEmployeeAttendanceProfile = async (userId, params = 60) => {
-  let query = "";
-  if (typeof params === "object" && params !== null) {
-    query = toCleanQueryString(params);
-  } else {
-    query = `days=${params}`;
-  }
-  return apiFetch(`/attendance-monitoring/employee/${encodeURIComponent(userId)}${query ? `?${query}` : ""}`);
+export const getEmployeeAttendanceProfile = async (userId) => {
+  return await apiFetch(`/attendance/monitoring/employee/${encodeURIComponent(userId)}`);
 };
 
-export const getEmployeeAttendanceReportApi = async (userId, params = {}) => {
-  const query = toCleanQueryString(params);
-  return apiFetch(`/attendance-monitoring/employee/${encodeURIComponent(userId)}/report${query ? `?${query}` : ""}`);
+export const getAttendanceMonitoringAnalytics = async (params = {}) => {
+  const query = new URLSearchParams(params).toString();
+  return await apiFetch(`/attendance/monitoring/analytics${query ? `?${query}` : ""}`);
 };
 
-export const getAttendanceAnalytics = async (params = {}) => {
-  const query = toCleanQueryString(params);
-  return apiFetch(`/attendance-monitoring/analytics${query ? `?${query}` : ""}`);
-};
-
-export const reviewAttendanceRecordApi = async (recordId, payload) => {
-  return apiFetch(`/attendance-monitoring/record/${encodeURIComponent(recordId)}/review`, {
+export const reviewRegularizationRequest = async (id, decision, adminRemarks = "") => {
+  return await apiFetch(`/attendance/monitoring/regularize/${encodeURIComponent(id)}/review`, {
     method: "POST",
-    body: JSON.stringify(payload)
+    body: JSON.stringify({ decision, adminRemarks })
   });
 };
 
-export const reviewAttendanceRegularizationApi = async (regId, payload) => {
-  return apiFetch(`/attendance-monitoring/regularization/${encodeURIComponent(regId)}/action`, {
-    method: "PATCH",
-    body: JSON.stringify(payload)
+export const unlockEmployeeAttendance = async (attendanceId, resolutionNotes = "") => {
+  return await apiFetch(`/attendance/monitoring/unlock/${encodeURIComponent(attendanceId)}`, {
+    method: "POST",
+    body: JSON.stringify({ resolutionNotes })
   });
 };
+
+export const manualCorrectAttendanceRecord = async (data) => {
+  return await apiFetch("/attendance/monitoring/manual-correct", {
+    method: "POST",
+    body: JSON.stringify(data)
+  });
+};
+

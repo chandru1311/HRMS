@@ -1,5 +1,6 @@
 import { query } from "../config/db.js";
 import { sendNotificationOnce } from "./notificationService.js";
+import auditService from "./auditService.js";
 
 /**
  * Compliance Supervisor Service
@@ -52,12 +53,146 @@ export const checkComplianceNow = async (io = null, targetCompanyId = null) => {
 
 /**
  * 1. Check for tasks assigned to employees not viewed/acknowledged within 10 minutes
- * (Attendance absent marking is NOT applied for unviewed tasks; only unsubmitted reports after 10m mark absent)
+ * Enforces SLA rule: Unacknowledged active tasks older than 10 minutes incur an attendance penalty.
  */
 export const runTaskUnseenComplianceCheck = async (io = null, targetCompanyId = null) => {
-  // Absent-marking and account-locking penalties removed for unviewed tasks per user specification.
-  // Absent penalties are ONLY applied when progress reports are not submitted 10 minutes after due.
-  return 0;
+  try {
+    let taskPenalties = 0;
+    const now = new Date();
+
+    let taskSql = `
+      SELECT t.id as task_id, t.title as task_title, t.company_id, t.assigned_to,
+             t.viewed_at, t.acknowledged_at, t.assigned_at, t.created_at, t.status,
+             u.name as employee_name, u.email as employee_email
+      FROM tasks t
+      JOIN users u ON t.assigned_to = u.id
+      WHERE t.status NOT IN ('completed', 'cancelled', 'suspended')
+        AND t.assigned_to IS NOT NULL
+        AND (t.sla_penalty_applied IS FALSE OR t.sla_penalty_applied IS NULL)
+        AND t.viewed_at IS NULL
+        AND t.acknowledged_at IS NULL
+        AND COALESCE(t.assigned_at, t.created_at) <= NOW() - INTERVAL '10 minutes'
+    `;
+    const params = [];
+    if (targetCompanyId) {
+      params.push(targetCompanyId);
+      taskSql += ` AND t.company_id = $${params.length}`;
+    }
+
+    const unackRes = await query(taskSql, params);
+
+    for (const task of unackRes.rows) {
+      const tz = await getCompanyTimezone(task.company_id);
+      const today = getLocalDateInTz(tz);
+
+      // Verify task assignment is currently active and belongs to this employee
+      const verifyTask = await query(
+        `SELECT id, status, assigned_to, viewed_at, acknowledged_at, sla_penalty_applied
+         FROM tasks WHERE id = $1 AND assigned_to = $2 AND status NOT IN ('completed', 'cancelled', 'suspended')`,
+        [task.task_id, task.assigned_to]
+      );
+      if (verifyTask.rows.length === 0) continue;
+      const tRow = verifyTask.rows[0];
+      if (tRow.viewed_at || tRow.acknowledged_at || tRow.sla_penalty_applied) continue;
+
+      // Atomic mark task SLA penalty applied
+      const updateTaskRes = await query(
+        `UPDATE tasks
+         SET sla_penalty_applied = TRUE,
+             status = 'sla_breached',
+             updated_at = NOW()
+         WHERE id = $1 AND (sla_penalty_applied IS FALSE OR sla_penalty_applied IS NULL)
+         RETURNING id`,
+        [task.task_id]
+      );
+      if (updateTaskRes.rows.length === 0) continue; // Already handled concurrently
+
+      taskPenalties++;
+
+      // Apply attendance penalty
+      const attId = `${task.assigned_to}_${today}`;
+      const penaltyReason = `Task acknowledgement deadline exceeded (10 minutes) for task: ${task.task_title}`;
+
+      // Check existing attendance today
+      const existingAtt = await query(
+        `SELECT id, status, check_in, check_out, duration_minutes, sessions, breaks
+         FROM attendance WHERE user_id = $1 AND date = $2 AND company_id = $3`,
+        [task.assigned_to, today, task.company_id]
+      );
+
+      if (existingAtt.rows.length > 0) {
+        const attRec = existingAtt.rows[0];
+        const finalAttId = attRec.id;
+        await query(
+          `UPDATE attendance
+           SET status = 'absent',
+               check_out = COALESCE(check_out, NOW()),
+               auto_checked_out = TRUE,
+               penalty_status = 'unseen_task_penalty',
+               is_admin_locked = TRUE,
+               penalty_applied_at = NOW(),
+               penalty_reason = $1,
+               penalized_by_task_id = $2,
+               updated_at = NOW()
+           WHERE id = $3`,
+          [penaltyReason, task.task_id, finalAttId]
+        );
+      } else {
+        await query(
+          `INSERT INTO attendance (
+             id, user_id, company_id, date, status, check_out, auto_checked_out,
+             penalty_status, is_admin_locked, penalty_applied_at, penalty_reason,
+             penalized_by_task_id, duration_minutes, accumulated_working_minutes,
+             sessions, breaks, created_at, updated_at
+           )
+           VALUES ($1, $2, $3, $4, 'absent', NOW(), TRUE, 'unseen_task_penalty', TRUE, NOW(), $5, $6, 0, 0, '[]'::jsonb, '[]'::jsonb, NOW(), NOW())
+           ON CONFLICT (id) DO UPDATE SET
+             status = 'absent',
+             check_out = COALESCE(attendance.check_out, NOW()),
+             auto_checked_out = TRUE,
+             penalty_status = 'unseen_task_penalty',
+             is_admin_locked = TRUE,
+             penalty_applied_at = NOW(),
+             penalty_reason = EXCLUDED.penalty_reason,
+             penalized_by_task_id = EXCLUDED.penalized_by_task_id,
+             updated_at = NOW()`,
+          [attId, task.assigned_to, task.company_id, today, penaltyReason, task.task_id]
+        );
+      }
+
+      // Audit Log
+      auditService.logAudit({
+        userId: task.assigned_to,
+        companyId: task.company_id,
+        action: "ATTENDANCE_LOCKED_UNACKNOWLEDGED_TASK",
+        resourceType: "attendance",
+        resourceId: attId,
+        details: {
+          taskId: task.task_id,
+          taskTitle: task.task_title,
+          slaMinutes: 10,
+          reason: penaltyReason
+        }
+      });
+
+      // Notification to employee
+      await sendNotificationOnce({
+        userId: task.assigned_to,
+        title: "Attendance Marked Absent (Task Unacknowledged)",
+        message: `You did not acknowledge the assigned task "${task.task_title}" within 10 minutes. Your attendance has been marked Absent and check-in is locked.`,
+        type: "error",
+        link: "/task-management",
+        io,
+        activityType: "unseen_task_penalty",
+        entityId: task.task_id
+      });
+    }
+
+    return taskPenalties;
+  } catch (err) {
+    console.error("runTaskUnseenComplianceCheck error:", err);
+    return 0;
+  }
 };
 
 /**
@@ -122,7 +257,7 @@ export const runHourlyReportingComplianceCheck = async (io = null, targetCompany
           await query(
             `UPDATE tasks SET metadata = $1, updated_at = NOW() WHERE id = $2`,
             [JSON.stringify(updatedMeta), task.task_id]
-          ).catch(() => {});
+          ).catch(() => { });
 
           // Send exactly one notification and skip hourly report penalties
           await sendNotificationOnce({
@@ -186,7 +321,7 @@ export const runHourlyReportingComplianceCheck = async (io = null, targetCompany
         await query(
           `UPDATE tasks SET sla_penalty_applied = TRUE, updated_at = NOW() WHERE id = $1`,
           [task.task_id]
-        ).catch(() => {});
+        ).catch(() => { });
 
         if (io) {
           io.to(`user_${task.assigned_to}`).emit("task_updated", { id: task.task_id, sla_penalty_applied: true });
@@ -297,14 +432,14 @@ export const runHourlyReportingComplianceCheck = async (io = null, targetCompany
                  breaks = $6,
                  updated_at = NOW()
              WHERE id = $7`,
-            [finalCheckout, penaltyReason, task.task_id, totalDayMins, JSON.stringify(sessions), JSON.stringify(breaks), attId]
+            [finalCheckout, penaltyReason, task.task_id, totalDayMins, JSON.stringify(finalSessions), JSON.stringify(breaks), attId]
           );
 
           // Clean up any extra duplicate rows for this user on this day
           await query(
             `DELETE FROM attendance WHERE user_id = $1 AND date = $2 AND id != $3`,
             [task.assigned_to, today, attId]
-          ).catch(() => {});
+          ).catch(() => { });
         } else {
           penaltyCount++;
           attId = `${task.assigned_to}_${today}`;
@@ -465,7 +600,7 @@ export const startComplianceSupervisor = (io, intervalMs = 60000) => {
 
   // Initial immediate check
   setTimeout(() => {
-    checkComplianceNow(io).catch(() => {});
+    checkComplianceNow(io).catch(() => { });
   }, 3000);
 
   // Periodic recurring check

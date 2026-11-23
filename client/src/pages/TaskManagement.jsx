@@ -2,11 +2,11 @@ import React, { useState, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
-import { 
-  createNotification, 
-  addTaskReport, 
-  subscribeToTaskReports, 
-  startTaskTimer, 
+import {
+  createNotification,
+  addTaskReport,
+  subscribeToTaskReports,
+  startTaskTimer,
   stopTaskTimer,
   subscribeToMyDailyReports,
   addDailyReport,
@@ -26,9 +26,9 @@ import {
   subscribeToAllUsers,
   uploadFileToFirebase
 } from "../firebase";
-import { 
-  CheckCircle, Clock, Send, MessageSquare, Play, X, FileText, Download, 
-  Square, Activity, Plus, Trash2, AlertTriangle, AlertCircle, ShieldAlert, 
+import {
+  CheckCircle, Clock, Send, MessageSquare, Play, X, FileText, Download,
+  Square, Activity, Plus, Trash2, AlertTriangle, AlertCircle, ShieldAlert,
   Check, RotateCcw, Calendar, User, TrendingUp, ListTodo, Eye, Unlock, Filter, Lock
 } from "lucide-react";
 import jsPDF from "jspdf";
@@ -40,7 +40,7 @@ import FileCard from "../components/FileCard";
 export default function TaskManagement() {
   const { currentUser } = useAuth();
   const { showToast } = useToast();
-  
+
   const isAdmin = currentUser?.role === "admin" || currentUser?.role === "superadmin" || currentUser?.isSuperAdmin;
 
   // Active Tab state
@@ -149,7 +149,7 @@ export default function TaskManagement() {
         if (t.timerStartedAt) {
           const start = new Date(t.timerStartedAt).getTime();
           if (Date.now() - start > 12 * 3600 * 1000) {
-            stopTaskTimer(currentUser.uid, t.id, t.assignedBy).catch(() => {});
+            stopTaskTimer(currentUser.uid, t.id, t.assignedBy).catch(() => { });
           }
         }
       });
@@ -222,7 +222,7 @@ export default function TaskManagement() {
     if (activeSubTab === "my-tasks" && tasks.length > 0) {
       tasks.forEach(t => {
         if (!t.viewed_at && !t.viewedAt && t.id) {
-          markTaskViewed(t.id).catch(() => {});
+          markTaskViewed(t.id).catch(() => { });
         }
       });
     }
@@ -358,7 +358,7 @@ export default function TaskManagement() {
     const total = adminAllTasks.length;
     const completed = adminAllTasks.filter(t => t.status === "completed" || t.completed).length;
     const inProgress = adminAllTasks.filter(t => t.status === "in-progress" || (t.status === "accepted" && !t.completed)).length;
-    
+
     // Check for overdue tasks
     const overdue = adminAllTasks.filter(t => {
       if (t.status === "completed" || t.status === "Completed" || t.completed) return false;
@@ -524,7 +524,7 @@ export default function TaskManagement() {
       const nowIso = new Date(nowMs).toISOString();
       try {
         localStorage.setItem(`hourly_cycle_${targetTaskId}_${todayStr}`, nowMs.toString());
-      } catch (e) {}
+      } catch (e) { }
 
       // Update local task state immediately so only this task's timer is reset
       setTasks(prev => prev.map(t => (t.id === targetTaskId ? {
@@ -563,11 +563,11 @@ export default function TaskManagement() {
       const nowIso = new Date().toISOString();
       const targetUserId = selectedAttendanceRecord.userId || selectedAttendanceRecord.assignedTo;
       await revertAttendancePenalty(selectedAttendanceRecord.id, revertNotes, selectedAttendanceRecord.taskId);
-      
+
       // Update local admin tasks state immediately so all active tasks of this employee show as unlocked & Present
       setAdminAllTasks(prev => prev.map(t => {
         const isTargetUser = (targetUserId && (t.assigned_to === targetUserId || t.assignedTo === targetUserId)) ||
-                             (selectedAttendanceRecord.userName && (t.assignee_name === selectedAttendanceRecord.userName || t.assigneeName === selectedAttendanceRecord.userName));
+          (selectedAttendanceRecord.userName && (t.assignee_name === selectedAttendanceRecord.userName || t.assigneeName === selectedAttendanceRecord.userName));
         if (isTargetUser || t.id === selectedAttendanceRecord.taskId) {
           return {
             ...t,
@@ -632,8 +632,8 @@ export default function TaskManagement() {
 
       if (isComplete) {
         const res = await completeTaskWithSla(task.id);
-        const statusMsg = res.completion_status === "completed_on_time" 
-          ? "Task completed on time! Excellent job." 
+        const statusMsg = res.completion_status === "completed_on_time"
+          ? "Task completed on time! Excellent job."
           : "Task marked completed (overdue SLA recorded).";
         showToast(statusMsg, res.completion_status === "completed_on_time" ? "success" : "info");
         setTasks(prev => prev.map(t => t.id === task.id ? { ...t, completed: true, status: "completed", completionStatus: res.completion_status } : t));
@@ -655,9 +655,8 @@ export default function TaskManagement() {
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-black text-text-main tracking-tight">Task & Activity Management</h1>
-            <span className={`px-2.5 py-0.5 text-[11px] font-bold uppercase rounded-full ${
-              isAdmin ? "bg-purple-500/10 text-purple-600 border border-purple-500/20" : "bg-blue-500/10 text-blue-600 border border-blue-500/20"
-            }`}>
+            <span className={`px-2.5 py-0.5 text-[11px] font-bold uppercase rounded-full ${isAdmin ? "bg-purple-500/10 text-purple-600 border border-purple-500/20" : "bg-blue-500/10 text-blue-600 border border-blue-500/20"
+              }`}>
               {isAdmin ? "Admin Workspace" : "Employee Portal"}
             </span>
           </div>
@@ -703,11 +702,10 @@ export default function TaskManagement() {
         {isAdmin && (
           <button
             onClick={() => setActiveSubTab("monitoring")}
-            className={`pb-3 px-6 text-sm font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-2 whitespace-nowrap ${
-              activeSubTab === "monitoring"
+            className={`pb-3 px-6 text-sm font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-2 whitespace-nowrap ${activeSubTab === "monitoring"
                 ? "border-brand-primary text-brand-primary"
                 : "border-transparent text-text-mut hover:text-text-main"
-            }`}
+              }`}
           >
             <Activity size={16} />
             Task Monitoring & SLA
@@ -716,11 +714,10 @@ export default function TaskManagement() {
 
         <button
           onClick={() => setActiveSubTab("my-tasks")}
-          className={`pb-3 px-6 text-sm font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-2 whitespace-nowrap ${
-            activeSubTab === "my-tasks"
+          className={`pb-3 px-6 text-sm font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-2 whitespace-nowrap ${activeSubTab === "my-tasks"
               ? "border-brand-primary text-brand-primary"
               : "border-transparent text-text-mut hover:text-text-main"
-          }`}
+            }`}
         >
           <ListTodo size={16} />
           {isAdmin ? "My Personal Tasks" : "My Assigned Tasks"}
@@ -733,11 +730,10 @@ export default function TaskManagement() {
 
         <button
           onClick={() => setActiveSubTab("hourly-reports")}
-          className={`pb-3 px-6 text-sm font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-2 whitespace-nowrap ${
-            activeSubTab === "hourly-reports"
+          className={`pb-3 px-6 text-sm font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-2 whitespace-nowrap ${activeSubTab === "hourly-reports"
               ? "border-brand-primary text-brand-primary"
               : "border-transparent text-text-mut hover:text-text-main"
-          }`}
+            }`}
         >
           <TrendingUp size={16} />
           Hourly Progress Reports
@@ -750,11 +746,10 @@ export default function TaskManagement() {
 
         <button
           onClick={() => setActiveSubTab("daily-logs")}
-          className={`pb-3 px-6 text-sm font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-2 whitespace-nowrap ${
-            activeSubTab === "daily-logs"
+          className={`pb-3 px-6 text-sm font-bold border-b-2 transition-colors cursor-pointer flex items-center gap-2 whitespace-nowrap ${activeSubTab === "daily-logs"
               ? "border-brand-primary text-brand-primary"
               : "border-transparent text-text-mut hover:text-text-main"
-          }`}
+            }`}
         >
           <Calendar size={16} />
           Daily Activity Log
@@ -892,11 +887,10 @@ export default function TaskManagement() {
                               <div className="text-[11px] text-text-mut line-clamp-1 mt-0.5">{t.description}</div>
                             )}
                             <div className="flex items-center gap-2 mt-1">
-                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                t.status === "completed" ? "bg-emerald-500/10 text-emerald-600" :
-                                t.status === "in-progress" ? "bg-blue-500/10 text-blue-600" :
-                                "bg-purple-500/10 text-purple-600"
-                              }`}>
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${t.status === "completed" ? "bg-emerald-500/10 text-emerald-600" :
+                                  t.status === "in-progress" ? "bg-blue-500/10 text-blue-600" :
+                                    "bg-purple-500/10 text-purple-600"
+                                }`}>
                                 {t.status === "completed" ? "Completed" : t.status === "in-progress" ? "In Progress" : "New / Assigned"}
                               </span>
                               {t.project_name && (
@@ -921,11 +915,10 @@ export default function TaskManagement() {
                             </div>
                             {isCompleted ? (
                               <div className="mt-1 flex items-center gap-1.5 flex-wrap">
-                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                  (t.completion_status === "completed_on_time" || t.completionStatus === "completed_on_time" || (t.completed_at && effectiveDeadline && new Date(t.completed_at) <= new Date(effectiveDeadline)))
+                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${(t.completion_status === "completed_on_time" || t.completionStatus === "completed_on_time" || (t.completed_at && effectiveDeadline && new Date(t.completed_at) <= new Date(effectiveDeadline)))
                                     ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20"
                                     : "bg-amber-500/10 text-amber-500 border border-amber-500/20"
-                                }`}>
+                                  }`}>
                                   {(t.completion_status === "completed_on_time" || t.completionStatus === "completed_on_time" || (t.completed_at && effectiveDeadline && new Date(t.completed_at) <= new Date(effectiveDeadline)))
                                     ? "✓ Finished Within Deadline"
                                     : "Finished Overdue"}
@@ -1041,7 +1034,7 @@ export default function TaskManagement() {
               </div>
               <h3 className="text-lg font-bold text-text-main">No Tasks Assigned</h3>
               <p className="text-xs text-text-sec max-w-sm mt-2">
-                You have no active tasks assigned right now. When an administrator assigns a task, it will appear here immediately with a 1-hour view acknowledgement requirement.
+                No active task assigned. Attendance is not affected by task acknowledgement requirements.
               </p>
             </div>
           ) : (
@@ -1081,22 +1074,20 @@ export default function TaskManagement() {
                     return (
                       <div
                         key={task.id}
-                        className={`bg-bg-card border rounded-[20px] p-5 shadow-sm transition-all relative overflow-hidden text-left ${
-                          isDeadlineFinished
+                        className={`bg-bg-card border rounded-[20px] p-5 shadow-sm transition-all relative overflow-hidden text-left ${isDeadlineFinished
                             ? "border-amber-500/50 bg-amber-500/[0.03]"
-                            : isPenalized 
-                              ? "border-red-500/40 bg-red-500/[0.02]" 
-                              : isNew 
-                                ? "border-brand-primary/50 shadow-brand-primary/5" 
+                            : isPenalized
+                              ? "border-red-500/40 bg-red-500/[0.02]"
+                              : isNew
+                                ? "border-brand-primary/50 shadow-brand-primary/5"
                                 : "border-border-card hover:border-brand-primary/30"
-                        }`}
+                          }`}
                       >
                         {/* Status bar */}
-                        <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${
-                          isDeadlineFinished
+                        <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${isDeadlineFinished
                             ? "bg-amber-500"
                             : isPenalized ? "bg-red-500" : isNew ? "bg-brand-primary animate-pulse" : "bg-blue-500"
-                        }`}></div>
+                          }`}></div>
 
                         <div className="flex justify-between items-start mb-2">
                           <div>
@@ -1139,11 +1130,10 @@ export default function TaskManagement() {
                               handleMarkComplete(task, true);
                             }}
                             disabled={isTaskBlocked}
-                            className={`flex-shrink-0 w-7 h-7 rounded-full border-2 flex items-center justify-center transition-all ${
-                              isTaskBlocked
+                            className={`flex-shrink-0 w-7 h-7 rounded-full border-2 flex items-center justify-center transition-all ${isTaskBlocked
                                 ? "border-red-500/40 text-red-400/70 bg-red-500/10 cursor-not-allowed opacity-60"
                                 : "border-border-card text-transparent hover:border-emerald-500 hover:text-emerald-500 hover:bg-emerald-500/10 transition-all cursor-pointer"
-                            }`}
+                              }`}
                             title={isDeadlineFinished ? "Task deadline has finished. Completion is locked." : "Mark as completed (triggers SLA evaluation)"}
                           >
                             {isDeadlineFinished ? <Lock size={14} /> : <CheckCircle size={16} />}
@@ -1229,13 +1219,12 @@ export default function TaskManagement() {
                               setShowHourlyReportModal(true);
                             }}
                             disabled={isTaskBlocked}
-                            className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-[10px] text-xs font-bold transition-all ${
-                              isDeadlineFinished
+                            className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-[10px] text-xs font-bold transition-all ${isDeadlineFinished
                                 ? "bg-amber-500/10 text-amber-400/70 border border-amber-500/20 cursor-not-allowed opacity-60"
                                 : isPenalized
                                   ? "bg-red-500/10 text-red-400/70 border border-red-500/20 cursor-not-allowed opacity-60"
                                   : "bg-brand-primary/10 text-brand-primary hover:bg-brand-primary hover:text-white rounded-[10px] text-xs font-bold transition-all cursor-pointer"
-                            }`}
+                              }`}
                             title={isDeadlineFinished ? "Task deadline has finished. Reporting is locked." : isPenalized ? "Reporting locked: attendance marked Absent." : "Submit Hourly Report"}
                           >
                             {isDeadlineFinished ? <Lock size={13} /> : isPenalized ? <Lock size={13} /> : <Send size={13} />}
@@ -1281,11 +1270,10 @@ export default function TaskManagement() {
                       <div className="flex justify-between items-start">
                         <div>
                           <h4 className="font-bold text-sm text-text-main line-through">{task.title}</h4>
-                          <span className={`inline-block mt-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                            (task.completionStatus === "completed_on_time" || task.completion_status === "completed_on_time" || (task.completed_at && task.deadline && new Date(task.completed_at) <= new Date(task.deadline)))
-                              ? "bg-emerald-500/10 text-emerald-600" 
+                          <span className={`inline-block mt-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${(task.completionStatus === "completed_on_time" || task.completion_status === "completed_on_time" || (task.completed_at && task.deadline && new Date(task.completed_at) <= new Date(task.deadline)))
+                              ? "bg-emerald-500/10 text-emerald-600"
                               : "bg-amber-500/10 text-amber-600"
-                          }`}>
+                            }`}>
                             {(task.completionStatus === "completed_on_time" || task.completion_status === "completed_on_time" || (task.completed_at && task.deadline && new Date(task.completed_at) <= new Date(task.deadline))) ? "Finished Within Deadline" : "Finished Overdue"}
                           </span>
                         </div>
@@ -1322,7 +1310,7 @@ export default function TaskManagement() {
             <div>
               <h2 className="text-base font-extrabold text-text-main">Chronological Progress Reports Stream</h2>
               <p className="text-xs text-text-mut mt-0.5">
-                {isAdmin 
+                {isAdmin
                   ? "Audit employee hourly submissions, track project percentages, and inspect blockers in real time."
                   : "Review your submitted hourly progress updates and verification logs."}
               </p>

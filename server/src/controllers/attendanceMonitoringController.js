@@ -1,1534 +1,1063 @@
-import crypto from "crypto";
 import { query } from "../config/db.js";
 import auditService from "../services/auditService.js";
-import { formatDateOnly, calculateDaysBetween } from "./leaveController.js";
+import { sendNotificationOnce } from "../services/notificationService.js";
+import { reverseGeocode } from "../services/reverseGeocodingService.js";
 
 /**
- * Returns today's date formatted as YYYY-MM-DD in local time
+ * Attendance Monitoring Controller
+ * -------------------------------------------------------------
+ * Powers the Admin Attendance Monitoring Module in Zuna HRMS:
+ * - Real-time and historical attendance tracking
+ * - GPS geofence & Biometric verification outcomes
+ * - Shift-based late arrival & early departure calculations
+ * - Multi-metric summaries, live presence, and analytics
+ * - Regularization approval/rejection and manual corrections
+ * - Strict tenant isolation & audit logging
  */
-const getTodayDateStr = () => {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
-};
 
-/**
- * Returns yesterday's date formatted as YYYY-MM-DD
- */
-const getYesterdayDateStr = () => {
-  const d = new Date();
-  d.setDate(d.getDate() - 1);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-};
-
-/**
- * Returns date range for this week (Monday to Sunday)
- */
-const getThisWeekRange = () => {
-  const now = new Date();
-  const dayOfWeek = now.getDay(); // 0 is Sunday, 1 is Monday
-  const distanceToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-  const monday = new Date(now);
-  monday.setDate(now.getDate() - distanceToMonday);
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-
-  return {
-    startDate: formatDateOnly(monday),
-    endDate: formatDateOnly(sunday)
-  };
-};
-
-/**
- * Returns date range for this month (1st to last day of month)
- */
-const getThisMonthRange = () => {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = now.getMonth();
-  const firstDay = new Date(y, m, 1);
-  const lastDay = new Date(y, m + 1, 0);
-
-  return {
-    startDate: formatDateOnly(firstDay),
-    endDate: formatDateOnly(lastDay)
-  };
-};
-
-/**
- * Parses time string (HH:MM or timestamp) to total minutes from midnight
- */
-const parseTimeToMinutes = (timeVal) => {
-  if (!timeVal) return null;
-  if (timeVal instanceof Date) {
-    if (isNaN(timeVal.getTime())) return null;
-    return timeVal.getHours() * 60 + timeVal.getMinutes();
+// Helper: Resolve effective company ID for tenant isolation
+const resolveCompanyId = async (req) => {
+  const role = (req.user?.role || "").toLowerCase();
+  const isSuperAdmin = role === "superadmin" || (req.user?.email || "").toLowerCase().includes("superadmin@");
+  
+  let compId = req.user?.companyId || req.user?.company_id;
+  
+  // Superadmin can query specific company or defaults to requested companyId in query
+  if (isSuperAdmin && req.query?.companyId) {
+    return req.query.companyId;
   }
-  const str = String(timeVal);
-  if (str.includes("T")) {
-    const d = new Date(str);
-    if (!isNaN(d.getTime())) {
-      return d.getHours() * 60 + d.getMinutes();
-    }
-  }
-  const m = str.match(/(\d{1,2}):(\d{2})/);
-  if (m) {
-    return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
-  }
-  return null;
-};
-
-/**
- * Formats time (HH:MM AM/PM) safely
- */
-const formatTimeDisplay = (timeVal) => {
-  if (!timeVal) return "—";
-  let d;
-  if (timeVal instanceof Date) {
-    d = timeVal;
-  } else if (typeof timeVal === "string" && timeVal.includes("T")) {
-    d = new Date(timeVal);
-  } else if (typeof timeVal === "string") {
-    const m = timeVal.match(/(\d{1,2}):(\d{2})/);
-    if (m) {
-      let h = parseInt(m[1], 10);
-      const min = m[2];
-      const ampm = h >= 12 ? "PM" : "AM";
-      h = h % 12 || 12;
-      return `${String(h).padStart(2, "0")}:${min} ${ampm}`;
-    }
-    return timeVal;
-  }
-  if (!d || isNaN(d.getTime())) return "—";
-  let h = d.getHours();
-  const min = String(d.getMinutes()).padStart(2, "0");
-  const ampm = h >= 12 ? "PM" : "AM";
-  h = h % 12 || 12;
-  return `${String(h).padStart(2, "0")}:${min} ${ampm}`;
-};
-
-/**
- * Processes break logs, calculates net working hours and location strings
- * for any attendance row.
- */
-export const processAttendanceBreaksAndHours = (att, user = {}, targetDateStr = null) => {
-  const now = new Date();
-  const recDateStr = formatDateOnly(att?.date || targetDateStr || now);
-  const isToday = recDateStr === getTodayDateStr();
-
-  // 1. Parse Breaks
-  let rawBreaks = [];
-  if (Array.isArray(att?.breaks)) {
-    rawBreaks = att.breaks;
-  } else if (typeof att?.breaks === "string") {
+  
+  // If companyId is not in token, look it up from the database for this user
+  if (!compId && req.user?.id) {
     try {
-      rawBreaks = JSON.parse(att.breaks || "[]");
-    } catch {
-      rawBreaks = [];
+      const uRes = await query("SELECT company_id FROM users WHERE id = $1 LIMIT 1", [req.user.id]);
+      compId = uRes.rows[0]?.company_id;
+    } catch (err) {
+      console.warn("Could not query user company_id:", err.message);
     }
   }
 
-  let totalBreakMinutes = 0;
-  let hasOngoingBreak = false;
-
-  const processedBreaks = rawBreaks.map((b, index) => {
-    const rawStart = b.start || b.startTime;
-    const rawEnd = b.end || b.resumeTime;
-    const bStart = rawStart ? new Date(rawStart) : null;
-    const bEnd = rawEnd ? new Date(rawEnd) : null;
-
-    let durationMins = 0;
-    let isOngoing = false;
-
-    if (bStart && bEnd && !isNaN(bStart.getTime()) && !isNaN(bEnd.getTime())) {
-      durationMins = Math.max(0, Math.floor((bEnd.getTime() - bStart.getTime()) / 60000));
-      totalBreakMinutes += durationMins;
-    } else if (bStart && (!bEnd || isNaN(bEnd?.getTime?.()))) {
-      isOngoing = true;
-      hasOngoingBreak = true;
-      if (isToday) {
-        durationMins = Math.max(0, Math.floor((now.getTime() - bStart.getTime()) / 60000));
+  // If still not found (e.g. superadmin without explicit query param),
+  // fallback to company with most attendance records
+  if (!compId) {
+    try {
+      const fallbackRes = await query(
+        `SELECT company_id, COUNT(*) as cnt FROM attendance WHERE company_id IS NOT NULL GROUP BY company_id ORDER BY cnt DESC LIMIT 1`
+      );
+      if (fallbackRes.rows.length > 0) {
+        compId = fallbackRes.rows[0].company_id;
       } else {
-        durationMins = Number(b.durationMinutes || b.duration) || 0;
+        const firstComp = await query("SELECT id FROM companies ORDER BY created_at ASC LIMIT 1");
+        compId = firstComp.rows[0]?.id || "carrezza-global-solutions";
       }
-      totalBreakMinutes += durationMins;
-    } else if (b.durationMinutes || b.duration) {
-      durationMins = Number(b.durationMinutes || b.duration) || 0;
-      totalBreakMinutes += durationMins;
+    } catch {
+      compId = "carrezza-global-solutions";
+    }
+  }
+
+  return compId;
+};
+
+// Helper: Resolve company timezone (defaults to Asia/Kolkata)
+const getCompanyTimezone = async (companyId) => {
+  if (!companyId) return "Asia/Kolkata";
+  try {
+    const res = await query("SELECT settings FROM companies WHERE id = $1", [companyId]);
+    const settings = res.rows[0]?.settings;
+    if (settings && typeof settings === "object" && settings.timezone) {
+      return settings.timezone;
+    }
+    return "Asia/Kolkata";
+  } catch {
+    return "Asia/Kolkata";
+  }
+};
+
+// Helper: Format Date to YYYY-MM-DD
+const formatDateStr = (d, tz = "Asia/Kolkata") => {
+  try {
+    return new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(d instanceof Date ? d : new Date(d));
+  } catch {
+    return (d instanceof Date ? d : new Date(d)).toISOString().split("T")[0];
+  }
+};
+
+// Helper: Format Date readable, e.g. "23 Nov 2026"
+export const formatDateReadable = (dStr) => {
+  if (!dStr) return "--";
+  try {
+    const parts = String(dStr).split("T")[0].split("-").map(Number);
+    if (parts.length === 3 && parts[0] && parts[1] && parts[2]) {
+      const dt = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
+      return dt.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
+    }
+  } catch {}
+  return String(dStr);
+};
+
+// Helper: Format Date long, e.g. "23 November 2026"
+export const formatDateLong = (dStr) => {
+  if (!dStr) return "--";
+  try {
+    const parts = String(dStr).split("T")[0].split("-").map(Number);
+    if (parts.length === 3 && parts[0] && parts[1] && parts[2]) {
+      const dt = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
+      return dt.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
+    }
+  } catch {}
+  return String(dStr);
+};
+
+// Helper: Check if company enforces geofencing
+export const getCompanyGeofenceEnabled = async (companyId) => {
+  if (!companyId) return false;
+  try {
+    const settingsRes = await query(
+      `SELECT key, value FROM environment_settings WHERE company_id = $1 AND key IN ('geofence_settings', 'general')`,
+      [companyId]
+    );
+    let geofenceSettingsRow = null;
+    let generalGeoSettings = null;
+    for (const row of settingsRes.rows) {
+      if (row.key === "geofence_settings" && row.value && typeof row.value === "object") geofenceSettingsRow = row.value;
+      if (row.key === "general" && row.value?.geolocationSettings) generalGeoSettings = row.value.geolocationSettings;
+    }
+    if (geofenceSettingsRow?.enable_geofencing === false || geofenceSettingsRow?.enabled === false || generalGeoSettings?.enabled === false) {
+      return false;
+    }
+    if (geofenceSettingsRow?.enable_geofencing === true || geofenceSettingsRow?.enabled === true || generalGeoSettings?.enabled === true) {
+      return true;
+    }
+    const compRes = await query(`SELECT latitude, longitude, allowed_radius_meters FROM companies WHERE id = $1`, [companyId]);
+    const compRow = compRes.rows[0];
+    return Boolean(compRow && (compRow.latitude != null || compRow.longitude != null || compRow.allowed_radius_meters != null));
+  } catch {
+    return false;
+  }
+};
+
+// Helper: Format Time string HH:MM
+const formatTimeHHMM = (val) => {
+  if (!val) return "";
+  try {
+    const d = new Date(val);
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
+    }
+  } catch {}
+  return String(val);
+};
+
+// Helper: Parse HH:MM to total minutes from midnight
+const parseTimeToMinutes = (timeStr) => {
+  if (!timeStr) return null;
+  const match = String(timeStr).match(/(\d{1,2}):(\d{2})/);
+  if (!match) return null;
+  return parseInt(match[1], 10) * 60 + parseInt(match[2], 10);
+};
+
+// Helper: Format minutes into "Xh Ym"
+const formatDuration = (totalMinutes) => {
+  if (!totalMinutes || isNaN(totalMinutes) || totalMinutes <= 0) return "0h 0m";
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = Math.floor(totalMinutes % 60);
+  return `${hours}h ${minutes}m`;
+};
+
+// Helper: Resolve date range from request
+const resolveDateRange = (reqQuery, tz = "Asia/Kolkata") => {
+  const { preset = "today", date, dateFrom, dateTo } = reqQuery;
+  const now = new Date();
+  const todayStr = formatDateStr(now, tz);
+
+  if (date) {
+    return { startDate: date, endDate: date, isTodayRange: date === todayStr };
+  }
+
+  if (preset === "yesterday") {
+    const yest = new Date(now.getTime() - 24 * 3600 * 1000);
+    const yestStr = formatDateStr(yest, tz);
+    return { startDate: yestStr, endDate: yestStr, isTodayRange: false };
+  }
+
+  if (preset === "this_week") {
+    // Current week starting Monday
+    const day = now.getDay();
+    const diffToMonday = (day === 0 ? -6 : 1) - day;
+    const mon = new Date(now.getTime() + diffToMonday * 24 * 3600 * 1000);
+    const sun = new Date(mon.getTime() + 6 * 24 * 3600 * 1000);
+    return {
+      startDate: formatDateStr(mon, tz),
+      endDate: formatDateStr(sun, tz),
+      isTodayRange: false
+    };
+  }
+
+  if (preset === "this_month") {
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const lastDay = new Date(year, now.getMonth() + 1, 0).getDate();
+    return {
+      startDate: `${year}-${month}-01`,
+      endDate: `${year}-${month}-${String(lastDay).padStart(2, "0")}`,
+      isTodayRange: false
+    };
+  }
+
+  if (preset === "custom" && (dateFrom || dateTo)) {
+    return {
+      startDate: dateFrom || todayStr,
+      endDate: dateTo || dateFrom || todayStr,
+      isTodayRange: (dateFrom === todayStr && dateTo === todayStr)
+    };
+  }
+
+  // Default: today
+  return { startDate: todayStr, endDate: todayStr, isTodayRange: true };
+};
+
+// Helper: Calculate late arrival and early departure based on assigned shifts
+const calculateLateAndEarly = (checkInIso, checkOutIso, shiftStart, shiftEnd, graceMinutes = 15) => {
+  let lateByMinutes = 0;
+  let earlyDepartureMinutes = 0;
+
+  const defaultShiftStart = shiftStart || "10:00";
+  const defaultShiftEnd = shiftEnd || "19:00";
+
+  const shiftStartMins = parseTimeToMinutes(defaultShiftStart);
+  const shiftEndMins = parseTimeToMinutes(defaultShiftEnd);
+
+  if (checkInIso && shiftStartMins !== null) {
+    const inDate = new Date(checkInIso);
+    const inMins = inDate.getHours() * 60 + inDate.getMinutes();
+    const diff = inMins - shiftStartMins;
+    if (diff > graceMinutes) {
+      lateByMinutes = diff;
+    }
+  }
+
+  if (checkOutIso && shiftEndMins !== null) {
+    const outDate = new Date(checkOutIso);
+    const outMins = outDate.getHours() * 60 + outDate.getMinutes();
+    const diff = shiftEndMins - outMins;
+    if (diff > 0) {
+      earlyDepartureMinutes = diff;
+    }
+  }
+
+  return { lateByMinutes, earlyDepartureMinutes };
+};
+
+// Helper: Map GPS verification outcome according to business rules
+export const evaluateGpsVerification = (att, attempt, isGeofenceEnabled = false) => {
+  const attemptGps = (attempt?.gps_result || "").toLowerCase();
+  const loc = att?.check_in_location || att?.location || {};
+
+  // 1. Explicit outside geofence failure recorded during verification attempt or location payload
+  if (attemptGps === "outside" || attemptGps === "failed" || attempt?.failure_category === "geofence_rejected" || (loc.inGeofence === false && isGeofenceEnabled)) {
+    return "Outside Geofence";
+  }
+
+  // 2. Explicit verified geofence match during attempt or location payload
+  if (attemptGps === "inside" || (attemptGps === "verified" && isGeofenceEnabled) || (loc.inGeofence === true && isGeofenceEnabled)) {
+    return "Verified";
+  }
+
+  // 3. Stored explicit location_status from check-in
+  if (att?.location_status && att.location_status !== "Not Available") {
+    return att.location_status;
+  }
+
+  const rawLat = att?.latitude ?? loc.latitude;
+  const rawLon = att?.longitude ?? loc.longitude;
+  const accuracy = att?.accuracy != null ? Number(att.accuracy) : (loc.accuracy != null ? Number(loc.accuracy) : null);
+  const hasCoords = rawLat != null && rawLon != null && !isNaN(Number(rawLat)) && !isNaN(Number(rawLon)) && (Number(rawLat) !== 0 || Number(rawLon) !== 0);
+
+  // 4. Coordinates captured
+  if (hasCoords) {
+    if (accuracy !== null && accuracy > 500) {
+      return "Accuracy Insufficient";
     }
 
-    const bStartFormatted = bStart && !isNaN(bStart.getTime()) ? formatTimeDisplay(bStart) : "—";
-    const bEndFormatted = isOngoing ? "Ongoing" : (bEnd && !isNaN(bEnd.getTime()) ? formatTimeDisplay(bEnd) : "—");
-    const durFormatted = isOngoing
-      ? `Ongoing (${durationMins}m)`
-      : (durationMins > 0 ? (durationMins >= 60 ? `${Math.floor(durationMins / 60)}h ${durationMins % 60}m` : `${durationMins}m`) : "0m");
+    if (isGeofenceEnabled) {
+      return "Verified";
+    } else {
+      return "Location Captured";
+    }
+  }
 
-    return {
-      index: index + 1,
-      breakNumber: index + 1,
-      type: b.breakType || b.type || `Break ${index + 1}`,
-      breakType: b.breakType || b.type || `Break ${index + 1}`,
-      start: bStart ? bStart.toISOString() : (rawStart || null),
-      end: bEnd ? bEnd.toISOString() : (rawEnd || null),
-      startTime: bStart ? bStart.toISOString() : (rawStart || null),
-      endTime: bEnd ? bEnd.toISOString() : (rawEnd || null),
-      startTimeFormatted: bStartFormatted,
-      endTimeFormatted: bEndFormatted,
-      durationMinutes: durationMins,
-      duration: durationMins,
-      durationFormatted: durFormatted,
-      isOngoing,
-      location: b.location || b.endLocation || null,
-      reason: b.reason || "break"
-    };
-  });
+  // 5. No coordinates captured
+  return "Not Available";
+};
 
-  // Extract Break 1, Break 2, Break 3
-  const getBreakSlot = (idx) => {
-    if (idx < processedBreaks.length) {
-      const b = processedBreaks[idx];
+// Helper: Map Biometric & Liveness verification outcome
+const evaluateBiometricVerification = (attempt, att) => {
+  if (!attempt) {
+    if (att?.biometric_verified === true || att?.verification_method === "FACE" || att?.verification_method === "BIOMETRIC") {
       return {
-        start: b.startTimeFormatted,
-        end: b.endTimeFormatted,
-        duration: b.durationFormatted,
-        durationMinutes: b.durationMinutes,
-        status: b.isOngoing ? "Ongoing" : "Completed",
-        taken: true,
-        type: b.type
+        faceVerification: "Verified",
+        faceBiometricStatus: "Verified",
+        livenessVerification: "Passed"
       };
     }
     return {
-      start: "—",
-      end: "—",
-      duration: "Not Taken",
-      durationMinutes: 0,
-      status: "Not Taken",
-      taken: false,
-      type: `Break ${idx + 1}`
+      faceVerification: "Not Available",
+      faceBiometricStatus: "Not Available",
+      livenessVerification: "Not Available"
     };
-  };
-
-  const break1 = getBreakSlot(0);
-  const break2 = getBreakSlot(1);
-  const break3 = getBreakSlot(2);
-
-  // Format Total Break Duration
-  const totalBreakHours = Math.floor(totalBreakMinutes / 60);
-  const totalBreakRemMins = totalBreakMinutes % 60;
-  const totalBreakFormatted = `${String(totalBreakHours).padStart(2, "0")}h ${String(totalBreakRemMins).padStart(2, "0")}m`;
-
-  // 2. Locations
-  const formatLoc = (locObj) => {
-    if (!locObj || typeof locObj !== "object" || Object.keys(locObj).length === 0) {
-      return "GPS unavailable";
-    }
-    if (locObj.locationName && typeof locObj.locationName === "string" && locObj.locationName.trim() && !locObj.locationName.toLowerCase().includes("unavailable")) {
-      return locObj.locationName.trim();
-    }
-    if (locObj.latitude != null && locObj.longitude != null && !isNaN(Number(locObj.latitude)) && !isNaN(Number(locObj.longitude))) {
-      return `${Number(locObj.latitude).toFixed(4)}, ${Number(locObj.longitude).toFixed(4)}`;
-    }
-    return "GPS unavailable";
-  };
-
-  const checkInLocationDisplay = formatLoc(att?.check_in_location || att?.location);
-  const checkOutLocationDisplay = formatLoc(att?.check_out_location);
-
-  // 3. Working Hours & Net Working Hours
-  let checkInDate = att?.check_in ? new Date(att.check_in) : null;
-  let checkOutDate = att?.check_out ? new Date(att.check_out) : null;
-
-  let totalAttendanceMinutes = 0;
-  if (checkInDate && !isNaN(checkInDate.getTime())) {
-    if (checkOutDate && !isNaN(checkOutDate.getTime())) {
-      totalAttendanceMinutes = Math.max(0, Math.floor((checkOutDate.getTime() - checkInDate.getTime()) / 60000));
-      // Handle overnight shift: if checkOut is chronologically before checkIn on same date record
-      if (checkOutDate < checkInDate) {
-        totalAttendanceMinutes += 1440;
-      }
-    } else if (isToday) {
-      totalAttendanceMinutes = Math.max(0, Math.floor((now.getTime() - checkInDate.getTime()) / 60000));
-    } else {
-      totalAttendanceMinutes = Number(att?.duration_minutes) || Number(att?.accumulated_working_minutes) || 0;
-    }
   }
 
-  // Prevent attendance duration capping past 24 hours for a single day record
-  totalAttendanceMinutes = Math.min(1440, totalAttendanceMinutes);
+  let faceVerification = "Not Available";
+  let livenessVerification = "Not Available";
 
-  // Net Working Hours = Total Attendance Duration - Total Break Duration
-  const netWorkingMinutes = Math.max(0, totalAttendanceMinutes - totalBreakMinutes);
+  const status = (attempt.status || "").toLowerCase();
+  const faceRes = (attempt.face_result || "").toLowerCase();
+  const failureCategory = (attempt.failure_category || "").toLowerCase();
+  const livenessRes = (attempt.liveness_result || "").toLowerCase();
 
-  const formatHoursMins = (totalMins) => {
-    const h = Math.floor(totalMins / 60);
-    const m = totalMins % 60;
-    return `${String(h).padStart(2, "0")}h ${String(m).padStart(2, "0")}m`;
-  };
+  // 1. Face Verification Evaluation
+  if (status === "verified" || faceRes === "matched" || faceRes === "verified" || faceRes === "success" || faceRes === "passed") {
+    faceVerification = "Verified";
+  } else if (failureCategory === "liveness_failed" || livenessRes === "spoof" || livenessRes === "failed") {
+    faceVerification = "Liveness Failed";
+  } else if (faceRes === "not_matched" || failureCategory === "face_mismatch") {
+    faceVerification = "Face Mismatch";
+  } else if (failureCategory === "enrollment_missing") {
+    faceVerification = "Not Enrolled";
+  } else if (failureCategory === "no_face") {
+    faceVerification = "No Face Detected";
+  } else if (failureCategory === "multiple_faces") {
+    faceVerification = "Multiple Faces";
+  } else if (status === "failed") {
+    faceVerification = "Verification Failed";
+  } else if (status === "pending") {
+    faceVerification = "Pending";
+  } else if (status === "inconclusive") {
+    faceVerification = "Inconclusive";
+  }
 
-  const totalAttendanceFormatted = formatHoursMins(totalAttendanceMinutes);
-  const netWorkingFormatted = formatHoursMins(netWorkingMinutes);
+  // 2. Liveness Evaluation
+  if (livenessRes === "live" || livenessRes === "passed" || livenessRes === "success" || attempt.metadata?.livenessPassed === true) {
+    livenessVerification = "Passed";
+  } else if (livenessRes === "spoof" || livenessRes === "failed" || failureCategory === "liveness_failed") {
+    livenessVerification = "Failed";
+  } else if (livenessRes === "inconclusive") {
+    livenessVerification = "Inconclusive";
+  } else if (faceVerification === "Verified") {
+    livenessVerification = "Passed";
+  }
 
   return {
-    breaks: processedBreaks,
-    totalBreaksCount: processedBreaks.length,
-    hasOngoingBreak,
-    break1,
-    break2,
-    break3,
-    break1Duration: break1.duration,
-    break2Duration: break2.duration,
-    break3Duration: break3.duration,
-    totalBreakMinutes,
-    totalBreakDuration: totalBreakFormatted,
-    total_break_duration: totalBreakFormatted,
-    checkInLocation: checkInLocationDisplay,
-    check_in_location: checkInLocationDisplay,
-    checkInCoordinates: (att?.check_in_location?.latitude != null && !isNaN(Number(att.check_in_location.latitude))) ? {
-      latitude: Number(att.check_in_location.latitude),
-      longitude: Number(att.check_in_location.longitude),
-      accuracy: att.check_in_location.accuracy ? Number(att.check_in_location.accuracy) : null
-    } : null,
-    checkOutLocation: checkOutLocationDisplay,
-    check_out_location: checkOutLocationDisplay,
-    checkOutCoordinates: (att?.check_out_location?.latitude != null && !isNaN(Number(att.check_out_location.latitude))) ? {
-      latitude: Number(att.check_out_location.latitude),
-      longitude: Number(att.check_out_location.longitude),
-      accuracy: att.check_out_location.accuracy ? Number(att.check_out_location.accuracy) : null
-    } : null,
-    totalAttendanceMinutes,
-    totalAttendanceDuration: totalAttendanceFormatted,
-    total_attendance_duration: totalAttendanceFormatted,
-    netWorkingMinutes,
-    netWorkingHours: netWorkingFormatted,
-    net_working_hours: netWorkingFormatted,
-    netWorkingHoursDecimal: parseFloat((netWorkingMinutes / 60).toFixed(2))
+    faceVerification,
+    faceBiometricStatus: faceVerification,
+    livenessVerification
   };
 };
 
-/**
- * Helper to get target company ID enforcing tenant isolation
- */
-const resolveTargetCompany = (req) => {
-  const isSuperAdmin = String(req.user?.role || "").toLowerCase() === "superadmin";
-  const targetCompanyId = isSuperAdmin && req.query.companyId 
-    ? req.query.companyId 
-    : (req.user?.companyId || req.user?.company_id);
-  return { isSuperAdmin, targetCompanyId };
+// Helper: Check admin authorization
+const authorizeAdmin = (req, res) => {
+  const role = (req.user?.role || "").toLowerCase();
+  const isAdmin = role === "admin" || role === "superadmin" || role === "hr manager" || role === "system admin";
+  if (!isAdmin) {
+    res.status(403).json({ error: "Access denied. Administrator privileges required." });
+    return false;
+  }
+  return true;
 };
 
-/**
- * 1. Overview Dashboard Summary Statistics
- * Returns: Total Employees, Present, Absent, Late Arrivals, Currently Working,
- * Checked Out, On Leave, Pending Regularization Requests
- */
-export const getAttendanceMonitoringSummary = async (req, res) => {
+// Helper: Format single attendance record row item
+const formatAttendanceRow = (user, att, attempt, leave, rowDate, tz, isTodayRange, isGeofenceEnabled = false) => {
+  const shiftStart = user.shift_start || "10:00";
+  const shiftEnd = user.shift_end || "19:00";
+  const shiftDisplay = `${shiftStart} - ${shiftEnd}`;
+
+  let checkInTime = att?.check_in || null;
+  let checkOutTime = att?.check_out || null;
+  let durationMinutes = Number(att?.duration_minutes || att?.accumulated_working_minutes) || 0;
+
+  if (!durationMinutes && checkInTime && checkOutTime) {
+    durationMinutes = Math.max(0, Math.floor((new Date(checkOutTime) - new Date(checkInTime)) / 60000));
+  } else if (!durationMinutes && checkInTime && !checkOutTime && isTodayRange) {
+    durationMinutes = Math.max(0, Math.floor((Date.now() - new Date(checkInTime).getTime()) / 60000));
+  }
+
+  const { lateByMinutes, earlyDepartureMinutes } = calculateLateAndEarly(
+    checkInTime,
+    checkOutTime,
+    shiftStart,
+    shiftEnd
+  );
+
+  const gpsVerification = evaluateGpsVerification(att, attempt, isGeofenceEnabled);
+  const { faceVerification, faceBiometricStatus, livenessVerification } = evaluateBiometricVerification(attempt, att);
+
+  const loc = att?.check_in_location || att?.location || {};
+  const lat = att?.latitude != null ? Number(att.latitude) : (loc.latitude != null ? Number(loc.latitude) : null);
+  const lon = att?.longitude != null ? Number(att.longitude) : (loc.longitude != null ? Number(loc.longitude) : null);
+  const accuracy = att?.accuracy != null ? Number(att.accuracy) : (loc.accuracy != null ? Number(loc.accuracy) : null);
+  const hasCoords = lat !== null && lon !== null && !isNaN(lat) && !isNaN(lon) && (lat !== 0 || lon !== 0);
+
+  const resolvedAddress = att?.resolved_address || loc.locationName || loc.address || loc.resolved_address || (hasCoords ? `${lat.toFixed(4)}, ${lon.toFixed(4)}` : null);
+  const place = resolvedAddress || (hasCoords ? `${lat.toFixed(4)}, ${lon.toFixed(4)}` : "Not Available");
+  const mapsUrl = hasCoords ? `https://www.google.com/maps?q=${lat},${lon}` : null;
+  const attDate = att?.date ? formatDateStr(att.date, tz) : rowDate;
+
+  // Determine final comprehensive status
+  let attendanceStatus = "Pending";
+  if (att?.is_admin_locked) {
+    attendanceStatus = "Attendance Locked";
+  } else if (leave) {
+    attendanceStatus = "On Leave";
+  } else if (att?.status === "absent") {
+    attendanceStatus = "Absent";
+  } else if (checkInTime && !checkOutTime) {
+    attendanceStatus = lateByMinutes > 0 ? "Late (Working)" : "Present (Working)";
+  } else if (checkInTime && checkOutTime) {
+    if (durationMinutes < 240) {
+      attendanceStatus = "Half Day";
+    } else if (lateByMinutes > 0) {
+      attendanceStatus = "Late";
+    } else {
+      attendanceStatus = "Present";
+    }
+  } else if (isTodayRange) {
+    attendanceStatus = "Not Checked In";
+  } else {
+    attendanceStatus = "Absent";
+  }
+
+  return {
+    id: att?.id || `${user.id}_${rowDate}`,
+    attendanceId: att?.id || null,
+    userId: user.id,
+    employeeId: user.employee_id || user.id,
+    employeeName: user.name,
+    employeeEmail: user.email,
+    avatarUrl: user.avatar_url || "",
+    department: user.department || "General",
+    designation: user.designation || "Staff",
+    shift: shiftDisplay,
+    shiftStart,
+    shiftEnd,
+    date: attDate,
+    dateFormatted: formatDateReadable(attDate),
+    dateLongFormatted: formatDateLong(attDate),
+    latitude: hasCoords ? lat : null,
+    longitude: hasCoords ? lon : null,
+    accuracy: accuracy,
+    accuracyFormatted: accuracy != null ? `${Math.round(accuracy)} metres` : "Not Available",
+    place,
+    resolvedAddress,
+    locationStatus: gpsVerification,
+    geofenceEnforcement: isGeofenceEnabled ? "Enabled" : "Disabled",
+    mapsUrl,
+    checkIn: checkInTime,
+    checkOut: checkOutTime,
+    checkInFormatted: checkInTime ? formatTimeHHMM(checkInTime) : "--:--",
+    checkOutFormatted: checkOutTime ? formatTimeHHMM(checkOutTime) : "--:--",
+    workingHoursMinutes: durationMinutes,
+    workingHoursFormatted: formatDuration(durationMinutes),
+    lateByMinutes,
+    earlyDepartureMinutes,
+    gpsVerification,
+    faceVerification,
+    faceBiometricStatus,
+    livenessVerification,
+    attendanceStatus,
+    isAdminLocked: Boolean(att?.is_admin_locked),
+    penaltyStatus: att?.penalty_status || null,
+    penaltyReason: att?.penalty_reason || null,
+    autoCheckedOut: Boolean(att?.auto_checked_out),
+    isRegularized: Boolean(att?.is_regularized),
+    breaks: Array.isArray(att?.breaks) ? att.breaks : []
+  };
+};
+
+// -------------------------------------------------------------
+// 1. GET /api/attendance/monitoring/summary
+// -------------------------------------------------------------
+export const getMonitoringSummary = async (req, res) => {
   try {
-    const { isSuperAdmin, targetCompanyId } = resolveTargetCompany(req);
-    const filterType = req.query.filterType || req.query.range || "today";
-    const { department, employeeId, status } = req.query;
+    if (!authorizeAdmin(req, res)) return;
 
-    let startDate = req.query.startDate;
-    let endDate = req.query.endDate;
+    const companyId = await resolveCompanyId(req);
+    const tz = await getCompanyTimezone(companyId);
+    const isGeofenceEnabled = await getCompanyGeofenceEnabled(companyId);
+    const { startDate, endDate, isTodayRange } = resolveDateRange(req.query, tz);
+    const { department, employeeId } = req.query;
 
-    if (filterType === "today") {
-      startDate = getTodayDateStr();
-      endDate = startDate;
-    } else if (filterType === "yesterday") {
-      startDate = getYesterdayDateStr();
-      endDate = startDate;
-    } else if (filterType === "this_week") {
-      const week = getThisWeekRange();
-      startDate = week.startDate;
-      endDate = week.endDate;
-    } else if (filterType === "this_month") {
-      const month = getThisMonthRange();
-      startDate = month.startDate;
-      endDate = month.endDate;
-    } else if (req.query.date) {
-      startDate = req.query.date;
-      endDate = req.query.date;
-    } else if (!startDate || !endDate) {
-      startDate = getTodayDateStr();
-      endDate = startDate;
+    // 1. Query Total Active Employees in Company
+    let empSql = `SELECT id, name, department, shift_start, shift_end FROM users WHERE company_id = $1 AND (status IS NULL OR status = 'active') AND role <> 'superadmin'`;
+    const empParams = [companyId];
+    if (department && department !== "all") {
+      empParams.push(department);
+      empSql += ` AND department = $${empParams.length}`;
+    }
+    if (employeeId && employeeId !== "all") {
+      empParams.push(employeeId);
+      empSql += ` AND (id = $${empParams.length} OR employee_id = $${empParams.length})`;
+    }
+    const empRes = await query(empSql, empParams);
+    const totalEmployees = empRes.rows.length;
+    const empIds = empRes.rows.map(e => e.id);
+
+    const emptySummary = {
+      totalEmployees: 0,
+      presentEmployees: 0,
+      absentEmployees: 0,
+      lateArrivals: 0,
+      currentlyWorking: 0,
+      checkedOut: 0,
+      onLeave: 0,
+      pendingRegularizations: 0,
+      startDate,
+      endDate
+    };
+
+    if (totalEmployees === 0) {
+      return res.json({
+        summary: emptySummary,
+        ...emptySummary
+      });
     }
 
-    startDate = formatDateOnly(startDate);
-    endDate = formatDateOnly(endDate);
-
-    // 1. Fetch Company Users
-    let userSql = `
-      SELECT id, name, employee_id, department, role, shift_start, shift_end, status
-      FROM users
-      WHERE role NOT IN ('superadmin', 'client')
+    // 2. Query Attendance in range
+    let attSql = `
+      SELECT id, user_id, date, status, check_in, check_out, duration_minutes,
+             accumulated_working_minutes, is_admin_locked, penalty_status
+      FROM attendance
+      WHERE company_id = $1 AND date >= $2::date AND date <= $3::date
     `;
-    const userParams = [];
-    if (targetCompanyId) {
-      userParams.push(targetCompanyId);
-      userSql += ` AND company_id = $${userParams.length}`;
-    }
+    const attParams = [companyId, startDate, endDate];
+    const attRes = await query(attSql, attParams);
+
+    // 3. Query Approved Leaves in range
+    const leaveRes = await query(
+      `SELECT user_id, start_date, end_date FROM leave_requests 
+       WHERE company_id = $1 AND status = 'approved' AND start_date <= $2::date AND end_date >= $3::date`,
+      [companyId, endDate, startDate]
+    );
+    const onLeaveUserIds = new Set(leaveRes.rows.map(r => r.user_id));
+
+    // 4. Query Pending Regularizations
+    const regRes = await query(
+      `SELECT COUNT(*)::int as count FROM regularization_requests 
+       WHERE company_id = $1 AND status = 'pending'`,
+      [companyId]
+    );
+    const pendingRegularizations = regRes.rows[0]?.count || 0;
+
+    // Build user shift map
+    const userMap = new Map();
+    empRes.rows.forEach(u => userMap.set(u.id, u));
+
+    // Aggregate statistics uniquely by user_id to prevent double counting
+    const presentUserIds = new Set();
+    const absentUserIds = new Set();
+    const lateUserIds = new Set();
+    const currentlyWorkingUserIds = new Set();
+    const checkedOutUserIds = new Set();
+    const recordedUsers = new Set();
+
+    attRes.rows.forEach(row => {
+      if (!userMap.has(row.user_id)) return;
+      recordedUsers.add(row.user_id);
+      const user = userMap.get(row.user_id);
+
+      const hasCheckIn = Boolean(row.check_in);
+      const hasCheckOut = Boolean(row.check_out);
+      const isLocked = Boolean(row.is_admin_locked);
+      const isAbsent = row.status === "absent";
+
+      if (isAbsent || isLocked) {
+        absentUserIds.add(row.user_id);
+      } else if (hasCheckIn) {
+        presentUserIds.add(row.user_id);
+        if (hasCheckOut) {
+          checkedOutUserIds.add(row.user_id);
+        } else {
+          currentlyWorkingUserIds.add(row.user_id);
+        }
+
+        const { lateByMinutes } = calculateLateAndEarly(row.check_in, row.check_out, user.shift_start, user.shift_end);
+        if (lateByMinutes > 0) {
+          lateUserIds.add(row.user_id);
+        }
+      }
+    });
+
+    // Employees with NO attendance record in range:
+    // If on approved leave -> counted as onLeave.
+    // If not on leave and date is in past -> absent.
+    empIds.forEach(uid => {
+      if (!recordedUsers.has(uid)) {
+        if (!onLeaveUserIds.has(uid) && !isTodayRange) {
+          absentUserIds.add(uid);
+        }
+      }
+    });
+
+    const summaryData = {
+      totalEmployees,
+      presentEmployees: presentUserIds.size,
+      absentEmployees: absentUserIds.size,
+      lateArrivals: lateUserIds.size,
+      currentlyWorking: currentlyWorkingUserIds.size,
+      checkedOut: checkedOutUserIds.size,
+      onLeave: onLeaveUserIds.size,
+      pendingRegularizations,
+      startDate,
+      endDate
+    };
+
+    res.json({
+      summary: summaryData,
+      ...summaryData
+    });
+  } catch (err) {
+    console.error("getMonitoringSummary error:", err);
+    res.status(500).json({ error: "Failed to fetch attendance monitoring summary." });
+  }
+};
+
+// -------------------------------------------------------------
+// 2. GET /api/attendance/monitoring/records
+// -------------------------------------------------------------
+export const getMonitoringRecords = async (req, res) => {
+  try {
+    if (!authorizeAdmin(req, res)) return;
+
+    const companyId = await resolveCompanyId(req);
+    const tz = await getCompanyTimezone(companyId);
+    const isGeofenceEnabled = await getCompanyGeofenceEnabled(companyId);
+    const { startDate, endDate, isTodayRange } = resolveDateRange(req.query, tz);
+    const {
+      department,
+      employeeId,
+      status,
+      search = "",
+      page = 1,
+      limit = 20,
+      sortBy = "check_in",
+      sortOrder = "desc"
+    } = req.query;
+
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const pageSize = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+
+    // Base query for active company employees
+    let userSql = `
+      SELECT id, name, email, employee_id, department, designation, avatar_url,
+             shift_start, shift_end, role, status as user_status
+      FROM users
+      WHERE company_id = $1 AND (status IS NULL OR status = 'active') AND role <> 'superadmin'
+    `;
+    const userParams = [companyId];
+
     if (department && department !== "all") {
       userParams.push(department);
       userSql += ` AND department = $${userParams.length}`;
     }
     if (employeeId && employeeId !== "all") {
       userParams.push(employeeId);
-      userSql += ` AND id = $${userParams.length}`;
+      userSql += ` AND (id = $${userParams.length} OR employee_id = $${userParams.length})`;
+    }
+    if (search && search.trim()) {
+      userParams.push(`%${search.trim().toLowerCase()}%`);
+      userSql += ` AND (LOWER(name) LIKE $${userParams.length} OR LOWER(email) LIKE $${userParams.length} OR LOWER(COALESCE(employee_id, '')) LIKE $${userParams.length})`;
     }
 
     const usersRes = await query(userSql, userParams);
     const users = usersRes.rows;
-    const totalEmployees = users.length;
-    const userIds = users.map(u => u.id);
-
-    if (userIds.length === 0) {
-      return res.json({
-        totalEmployees: 0,
-        presentEmployees: 0,
-        absentEmployees: 0,
-        lateArrivals: 0,
-        currentlyWorking: 0,
-        checkedOut: 0,
-        onLeave: 0,
-        pendingRegularization: 0,
-        startDate,
-        endDate,
-        filterType
-      });
-    }
-
-    // 2. Fetch Attendance Records for this range
-    let attSql = `
-      SELECT a.*, a.date::text as date_str
-      FROM attendance a
-      WHERE a.date >= $1 AND a.date <= $2
-        AND a.user_id = ANY($3::text[])
-    `;
-    const attParams = [startDate, endDate, userIds];
-    if (targetCompanyId) {
-      attParams.push(targetCompanyId);
-      attSql += ` AND a.company_id = $${attParams.length}`;
-    }
-
-    const attRes = await query(attSql, attParams);
-    const attendanceRecords = attRes.rows;
-
-    // 3. Fetch Approved Leaves for this range
-    let leaveSql = `
-      SELECT l.*
-      FROM leave_requests l
-      WHERE l.status = 'approved'
-        AND l.start_date <= $2 AND l.end_date >= $1
-        AND l.user_id = ANY($3::text[])
-    `;
-    const leaveParams = [startDate, endDate, userIds];
-    if (targetCompanyId) {
-      leaveParams.push(targetCompanyId);
-      leaveSql += ` AND l.company_id = $${leaveParams.length}`;
-    }
-    const leaveRes = await query(leaveSql, leaveParams);
-    const approvedLeaves = leaveRes.rows;
-
-    // 4. Fetch Pending Regularizations
-    let regSql = `
-      SELECT count(*) as count
-      FROM regularization_requests r
-      WHERE r.status = 'pending'
-        AND r.user_id = ANY($1::text[])
-    `;
-    const regParams = [userIds];
-    if (targetCompanyId) {
-      regParams.push(targetCompanyId);
-      regSql += ` AND r.company_id = $${regParams.length}`;
-    }
-    const regRes = await query(regSql, regParams);
-    const pendingRegularization = parseInt(regRes.rows[0]?.count || "0", 10);
-
-    // 5. Aggregate metrics
-    let presentCount = 0;
-    let lateCount = 0;
-    let currentlyWorkingCount = 0;
-    let checkedOutCount = 0;
-    let onLeaveCount = 0;
-
-    // Fast user lookup
-    const userMap = new Map();
-    users.forEach(u => userMap.set(u.id, u));
-
-    // Group attendance by (user_id + date)
-    const attMap = new Map();
-    attendanceRecords.forEach(a => {
-      const d = formatDateOnly(a.date_str || a.date);
-      const key = `${a.user_id}_${d}`;
-      attMap.set(key, a);
-    });
-
-    // Check approved leaves coverage
-    const leaveCoverage = new Set();
-    approvedLeaves.forEach(l => {
-      users.forEach(u => {
-        if (u.id === l.user_id) {
-          leaveCoverage.add(`${l.user_id}`);
-        }
-      });
-    });
-    onLeaveCount = leaveCoverage.size;
-
-    // Evaluate each attendance log
-    const evaluatedPresentUsers = new Set();
-
-    attendanceRecords.forEach(a => {
-      const u = userMap.get(a.user_id);
-      const shiftStartStr = u?.shift_start || "09:00";
-      const shiftStartMins = parseTimeToMinutes(shiftStartStr) || 540;
-
-      const isLeave = a.status === "on-leave";
-      const isLockedOrAbsent = a.is_admin_locked || a.status === "absent" || a.penalty_status;
-
-      if (!isLeave && !isLockedOrAbsent && a.check_in) {
-        evaluatedPresentUsers.add(a.user_id);
-        presentCount++;
-
-        // Late calculation (5-minute grace threshold)
-        const inMins = parseTimeToMinutes(a.check_in);
-        if (inMins !== null && inMins > (shiftStartMins + 5)) {
-          lateCount++;
-        }
-
-        // Currently working vs Checked out
-        if (a.check_out) {
-          checkedOutCount++;
-        } else {
-          currentlyWorkingCount++;
-        }
-      }
-    });
-
-    // Absent employees
-    let absentCount = 0;
-    if (startDate === endDate) {
-      users.forEach(u => {
-        const key = `${u.id}_${startDate}`;
-        const hasAtt = attMap.get(key);
-        const hasLeave = approvedLeaves.some(l => {
-          const lStart = formatDateOnly(l.start_date);
-          const lEnd = formatDateOnly(l.end_date);
-          return l.user_id === u.id && startDate >= lStart && startDate <= lEnd;
-        });
-
-        if (!hasLeave) {
-          if (!hasAtt || !hasAtt.check_in || hasAtt.is_admin_locked || hasAtt.status === "absent") {
-            absentCount++;
-          }
-        }
-      });
-    } else {
-      absentCount = Math.max(0, totalEmployees - evaluatedPresentUsers.size - onLeaveCount);
-    }
-
-    res.json({
-      totalEmployees,
-      presentEmployees: presentCount,
-      absentEmployees: absentCount,
-      lateArrivals: lateCount,
-      currentlyWorking: currentlyWorkingCount,
-      checkedOut: checkedOutCount,
-      onLeave: onLeaveCount,
-      pendingRegularization,
-      startDate,
-      endDate,
-      filterType
-    });
-  } catch (err) {
-    console.error("getAttendanceMonitoringSummary error:", err);
-    res.status(500).json({ error: "Failed to generate attendance summary." });
-  }
-};
-
-/**
- * 2. Employee Attendance Monitoring Table Records
- * Returns detailed rows with GPS & biometric verification results,
- * shift info, late by, early departure, and action triggers.
- */
-export const getAttendanceMonitoringRecords = async (req, res) => {
-  try {
-    const { isSuperAdmin, targetCompanyId } = resolveTargetCompany(req);
-    const filterType = req.query.filterType || req.query.range || "today";
-    const {
-      department,
-      status,
-      search = "",
-      page = 1,
-      limit = 25,
-      sortBy = "date",
-      sortOrder = "desc"
-    } = req.query;
-
-    let startDate = req.query.startDate;
-    let endDate = req.query.endDate;
-
-    if (filterType === "today") {
-      startDate = getTodayDateStr();
-      endDate = startDate;
-    } else if (filterType === "yesterday") {
-      startDate = getYesterdayDateStr();
-      endDate = startDate;
-    } else if (filterType === "this_week") {
-      const week = getThisWeekRange();
-      startDate = week.startDate;
-      endDate = week.endDate;
-    } else if (filterType === "this_month") {
-      const month = getThisMonthRange();
-      startDate = month.startDate;
-      endDate = month.endDate;
-    } else if (req.query.date) {
-      startDate = req.query.date;
-      endDate = req.query.date;
-    } else if (!startDate || !endDate) {
-      startDate = getTodayDateStr();
-      endDate = startDate;
-    }
-
-    startDate = formatDateOnly(startDate);
-    endDate = formatDateOnly(endDate);
-
-    // Fetch company settings for geofencing
-    let allowedRadius = 200;
-    if (targetCompanyId) {
-      const compRes = await query("SELECT allowed_radius_meters FROM companies WHERE id = $1", [targetCompanyId]);
-      if (compRes.rows[0]?.allowed_radius_meters) {
-        allowedRadius = Number(compRes.rows[0].allowed_radius_meters);
-      }
-    }
-
-    // 1. Fetch Users
-    let userSql = `
-      SELECT id, name, email, employee_id, department, designation, role, shift_start, shift_end, avatar_url, phone, status
-      FROM users
-      WHERE role NOT IN ('superadmin', 'client')
-    `;
-    const userParams = [];
-    if (targetCompanyId) {
-      userParams.push(targetCompanyId);
-      userSql += ` AND company_id = $${userParams.length}`;
-    }
-    if (department && department !== "all") {
-      userParams.push(department);
-      userSql += ` AND department = $${userParams.length}`;
-    }
-    if (search.trim()) {
-      userParams.push(`%${search.trim()}%`);
-      userSql += ` AND (name ILIKE $${userParams.length} OR email ILIKE $${userParams.length} OR employee_id ILIKE $${userParams.length})`;
-    }
-
-    userSql += " ORDER BY name ASC";
-    const userRes = await query(userSql, userParams);
-    const users = userRes.rows;
-    const userIds = users.map(u => u.id);
-
-    // Fetch tenant distinct departments
-    let deptSql = "SELECT DISTINCT department FROM users WHERE department IS NOT NULL";
-    const deptParams = [];
-    if (targetCompanyId) {
-      deptSql += " AND company_id = $1";
-      deptParams.push(targetCompanyId);
-    }
-    const deptRes = await query(deptSql, deptParams);
-    const departments = deptRes.rows.map(r => r.department).filter(Boolean).sort();
-
-    if (userIds.length === 0) {
+    if (users.length === 0) {
       return res.json({
         records: [],
-        departments,
-        pagination: {
-          total: 0,
-          page: Number(page),
-          limit: Number(limit),
-          totalPages: 0
-        },
-        startDate,
-        endDate,
-        filterType
+        pagination: { total: 0, page: pageNum, limit: pageSize, totalPages: 0 }
       });
     }
 
     const userMap = new Map();
     users.forEach(u => userMap.set(u.id, u));
+    const userIds = users.map(u => u.id);
 
-    // 2. Fetch Attendance for Date Range
-    let attSql = `
-      SELECT a.*, a.date::text as date_str
+    // Fetch attendance records for these users in the date range
+    const attSql = `
+      SELECT a.*, a.id as attendance_id
       FROM attendance a
-      WHERE a.date >= $1 AND a.date <= $2
-        AND a.user_id = ANY($3::text[])
+      WHERE a.company_id = $1
+        AND a.user_id = ANY($2::text[])
+        AND a.date >= $3::date AND a.date <= $4::date
+      ORDER BY a.date DESC, a.check_in DESC NULLS LAST, a.created_at DESC
     `;
-    const attParams = [startDate, endDate, userIds];
-    if (targetCompanyId) {
-      attParams.push(targetCompanyId);
-      attSql += ` AND a.company_id = $${attParams.length}`;
-    }
-    attSql += " ORDER BY a.date DESC, a.check_in DESC NULLS LAST";
-    const attRes = await query(attSql, attParams);
-    const attendanceRecords = attRes.rows;
+    const attRes = await query(attSql, [companyId, userIds, startDate, endDate]);
 
-    // 3. Fetch Approved Leaves for Date Range
-    let leaveSql = `
-      SELECT l.*
-      FROM leave_requests l
-      WHERE l.status = 'approved'
-        AND l.start_date <= $2 AND l.end_date >= $1
-        AND l.user_id = ANY($3::text[])
-    `;
-    const leaveParams = [startDate, endDate, userIds];
-    if (targetCompanyId) {
-      leaveParams.push(targetCompanyId);
-      leaveSql += ` AND l.company_id = $${leaveParams.length}`;
-    }
-    const leaveRes = await query(leaveSql, leaveParams);
-    const leaveRecords = leaveRes.rows;
+    // Fetch verification attempts linked specifically to each attendance record
+    const attIds = attRes.rows.map(a => a.id);
+    const attemptByAttId = new Map();
 
-    // 4. Fetch Regularizations for Date Range
-    let regSql = `
-      SELECT r.*
-      FROM regularization_requests r
-      WHERE r.attendance_date >= $1 AND r.attendance_date <= $2
-        AND r.user_id = ANY($3::text[])
-    `;
-    const regParams = [startDate, endDate, userIds];
-    if (targetCompanyId) {
-      regParams.push(targetCompanyId);
-      regSql += ` AND r.company_id = $${regParams.length}`;
-    }
-    const regRes = await query(regSql, regParams);
-    const regMap = new Map();
-    regRes.rows.forEach(r => {
-      const d = formatDateOnly(r.attendance_date);
-      regMap.set(`${r.user_id}_${d}`, r);
-    });
+    if (attIds.length > 0) {
+      const matchedAttemptsRes = await query(
+        `SELECT DISTINCT ON (a.id)
+           a.id as attendance_id,
+           ava.id as attempt_id,
+           ava.user_id,
+           ava.company_id,
+           ava.status as attempt_status,
+           ava.face_result,
+           ava.liveness_result,
+           ava.failure_category,
+           ava.gps_result,
+           ava.model,
+           ava.metadata as attempt_metadata,
+           ava.attempted_at
+         FROM attendance a
+         LEFT JOIN attendance_verification_sessions s
+           ON s.user_id = a.user_id
+          AND s.company_id = a.company_id
+          AND s.status = 'consumed'
+          AND s.action_type = 'check-in'
+          AND (
+            (a.metadata->>'verificationSessionId' IS NOT NULL AND s.id = a.metadata->>'verificationSessionId')
+            OR
+            (a.metadata->>'verificationSessionId' IS NULL AND a.check_in IS NOT NULL AND ABS(EXTRACT(EPOCH FROM (a.check_in - s.consumed_at))) <= 120)
+          )
+         LEFT JOIN attendance_verification_attempts ava
+           ON (
+             (a.metadata->>'verificationAttemptId' IS NOT NULL AND ava.id = a.metadata->>'verificationAttemptId')
+             OR
+             (a.metadata->>'verificationAttemptId' IS NULL AND s.attempt_id IS NOT NULL AND ava.id = s.attempt_id)
+             OR
+             (a.metadata->>'verificationAttemptId' IS NULL AND a.check_in IS NOT NULL AND ava.user_id = a.user_id AND ava.company_id = a.company_id AND ABS(EXTRACT(EPOCH FROM (a.check_in - ava.attempted_at))) <= 120)
+           )
+         WHERE a.company_id = $1
+           AND a.id = ANY($2::text[])
+           AND ava.id IS NOT NULL
+         ORDER BY a.id, ABS(EXTRACT(EPOCH FROM (a.check_in - COALESCE(s.consumed_at, ava.attempted_at)))) ASC`,
+        [companyId, attIds]
+      ).catch(err => {
+        console.warn("Could not match verification attempts:", err.message);
+        return { rows: [] };
+      });
 
-    // 5. Fetch Verification Attempts for Date Range
-    let avaSql = `
-      SELECT ava.*
-      FROM attendance_verification_attempts ava
-      WHERE ava.attempted_at::date >= $1::date AND ava.attempted_at::date <= $2::date
-        AND ava.user_id = ANY($3::text[])
-      ORDER BY ava.attempted_at DESC
-    `;
-    const avaRes = await query(avaSql, [startDate, endDate, userIds]);
-    const avaMap = new Map();
-    avaRes.rows.forEach(v => {
-      const d = formatDateOnly(v.attempted_at);
-      const key = `${v.user_id}_${d}`;
-      if (!avaMap.has(key)) avaMap.set(key, v);
-    });
-
-    // 6. Paid Holidays in range
-    let holidayMap = new Map();
-    if (targetCompanyId) {
-      const holRes = await query(
-        `SELECT title, start_date, end_date FROM paid_leaves WHERE status = 'active' AND start_date <= $2 AND end_date >= $1 AND (company_id = $3 OR company_id IS NULL)`,
-        [startDate, endDate, targetCompanyId]
-      );
-      holRes.rows.forEach(h => {
-        holidayMap.set(formatDateOnly(h.start_date), h.title);
+      matchedAttemptsRes.rows.forEach(row => {
+        attemptByAttId.set(row.attendance_id, row);
       });
     }
 
-    // Helper to format a single record
-    const formatRecordRow = (user, att, recDate) => {
-      const dStr = formatDateOnly(recDate);
-      const reg = regMap.get(`${user.id}_${dStr}`);
-      const ava = avaMap.get(`${user.id}_${dStr}`);
+    // Also fetch latest verification attempt per user for today's attempts (e.g. unclocked staff with verification failures)
+    const todayAttemptsRes = await query(
+      `SELECT DISTINCT ON (user_id) *
+       FROM attendance_verification_attempts
+       WHERE company_id = $1 AND user_id = ANY($2::text[]) AND attempted_at >= $3::date
+       ORDER BY user_id, attempted_at DESC`,
+      [companyId, userIds, startDate]
+    ).catch(() => ({ rows: [] }));
+    const latestAttemptByUser = new Map();
+    todayAttemptsRes.rows.forEach(a => latestAttemptByUser.set(a.user_id, a));
 
-      const leave = leaveRecords.find(l => {
-        const lStart = formatDateOnly(l.start_date);
-        const lEnd = formatDateOnly(l.end_date);
-        return l.user_id === user.id && dStr >= lStart && dStr <= lEnd;
+    // Fetch approved leaves in range
+    const leaveRes = await query(
+      `SELECT user_id, leave_type, reason, start_date, end_date
+       FROM leave_requests
+       WHERE company_id = $1 AND status = 'approved' AND user_id = ANY($2::text[])
+         AND start_date <= $3::date AND end_date >= $4::date`,
+      [companyId, userIds, endDate, startDate]
+    ).catch(() => ({ rows: [] }));
+    const leaveMap = new Map();
+    leaveRes.rows.forEach(l => leaveMap.set(l.user_id, l));
+
+    const combinedList = [];
+
+    if (startDate === endDate) {
+      // Single day (Today, Yesterday, or specific date): show all company staff status
+      const attByUserId = new Map();
+      attRes.rows.forEach(att => {
+        if (!attByUserId.has(att.user_id)) {
+          attByUserId.set(att.user_id, att);
+        }
       });
 
-      const shiftStartStr = user.shift_start || "09:00";
-      const shiftEndStr = user.shift_end || "18:00";
-      const shiftDisplay = `${formatTimeDisplay(shiftStartStr)} - ${formatTimeDisplay(shiftEndStr)}`;
+      users.forEach(user => {
+        const att = attByUserId.get(user.id);
+        const attempt = att ? (attemptByAttId.get(att.id) || null) : (latestAttemptByUser.get(user.id) || null);
+        const leave = leaveMap.get(user.id);
+        const rowItem = formatAttendanceRow(user, att, attempt, leave, startDate, tz, isTodayRange, isGeofenceEnabled);
 
-      const shiftStartMins = parseTimeToMinutes(shiftStartStr) || 540;
-      const shiftEndMins = parseTimeToMinutes(shiftEndStr) || 1080;
-
-      const breakCalc = processAttendanceBreaksAndHours(att, user, dStr);
-
-      let checkInTime = null;
-      let checkOutTime = null;
-      let workingHoursStr = breakCalc.netWorkingHours;
-      let workingHoursDec = breakCalc.netWorkingHoursDecimal;
-      let workingMinutes = breakCalc.netWorkingMinutes;
-      let lateMinutes = 0;
-      let earlyDepartureMinutes = 0;
-
-      if (att && att.check_in) {
-        checkInTime = att.check_in;
-        checkOutTime = att.check_out || null;
-
-        const inMins = parseTimeToMinutes(checkInTime);
-        if (inMins !== null && inMins > shiftStartMins) {
-          lateMinutes = inMins - shiftStartMins;
+        // Status filter
+        if (status && status !== "all") {
+          const normStatus = status.toLowerCase();
+          const normActual = rowItem.attendanceStatus.toLowerCase();
+          if (!normActual.includes(normStatus)) return;
         }
 
-        if (checkOutTime) {
-          const outMins = parseTimeToMinutes(checkOutTime);
-          if (outMins !== null && outMins < shiftEndMins) {
-            earlyDepartureMinutes = shiftEndMins - outMins;
+        combinedList.push(rowItem);
+      });
+    } else {
+      // Multi-day range (This Week, This Month, Custom):
+      // Emit every attendance record present in range
+      const addedRowKeys = new Set();
+
+      attRes.rows.forEach(att => {
+        const user = userMap.get(att.user_id);
+        if (!user) return;
+        const attempt = attemptByAttId.get(att.id) || null;
+        const attDateStr = formatDateStr(att.date, tz);
+        const leave = leaveMap.get(att.user_id);
+        const rowItem = formatAttendanceRow(user, att, attempt, leave, attDateStr, tz, attDateStr === formatDateStr(new Date(), tz), isGeofenceEnabled);
+
+        if (status && status !== "all") {
+          const normStatus = status.toLowerCase();
+          const normActual = rowItem.attendanceStatus.toLowerCase();
+          if (!normActual.includes(normStatus)) return;
+        }
+
+        addedRowKeys.add(`${user.id}_${attDateStr}`);
+        combinedList.push(rowItem);
+      });
+
+      // Also include users on approved leave who had no attendance check-in
+      leaveRes.rows.forEach(leave => {
+        const user = userMap.get(leave.user_id);
+        if (!user) return;
+        const leaveStart = formatDateStr(leave.start_date, tz);
+        const key = `${user.id}_${leaveStart}`;
+        if (!addedRowKeys.has(key)) {
+          const rowItem = formatAttendanceRow(user, null, null, leave, leaveStart, tz, false, isGeofenceEnabled);
+          if (status && status !== "all") {
+            const normStatus = status.toLowerCase();
+            const normActual = rowItem.attendanceStatus.toLowerCase();
+            if (!normActual.includes(normStatus)) return;
           }
-        }
-      }
-
-      // GPS Verification Result
-      let gpsVerification = "Not Available";
-      if (att && (att.fence_verified_at || (att.distance_from_office_meters != null && Number(att.distance_from_office_meters) <= allowedRadius))) {
-        gpsVerification = "Verified";
-      } else if (att && att.distance_from_office_meters != null && Number(att.distance_from_office_meters) > allowedRadius) {
-        gpsVerification = "Failed";
-      } else if (att?.check_in_location && typeof att.check_in_location === "object" && Object.keys(att.check_in_location).length > 0) {
-        const accuracy = Number(att.check_in_location.accuracy);
-        if (accuracy > 150) {
-          gpsVerification = "Accuracy Insufficient";
-        } else {
-          gpsVerification = "Verified";
-        }
-      } else if (ava?.gps_result) {
-        if (ava.gps_result === "verified" || ava.gps_result === "within_geofence") gpsVerification = "Verified";
-        else if (ava.gps_result === "outside_geofence" || ava.gps_result === "failed") gpsVerification = "Failed";
-      }
-
-      // Face Verification Result
-      let faceVerification = "Not Available";
-      if (att && att.biometric_verified && att.liveness_passed) {
-        faceVerification = "Verified";
-      } else if (att && att.biometric_verified === false && att.verification_score != null) {
-        faceVerification = "Failed";
-      } else if (ava) {
-        if (ava.status === "passed" || ava.face_result === "match") faceVerification = "Verified";
-        else if (ava.status === "failed" || ava.face_result === "mismatch") faceVerification = "Failed";
-        else if (ava.status === "inconclusive") faceVerification = "Inconclusive";
-      }
-
-      // Attendance Status Resolution
-      const dateObj = new Date(dStr + "T00:00:00");
-      const dayOfWeek = dateObj.getDay();
-      const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-      const isHoliday = holidayMap.has(dStr);
-
-      let attendanceStatus = "Absent";
-      if (att?.is_admin_locked) {
-        attendanceStatus = "Attendance Locked";
-      } else if (leave || att?.status === "on-leave") {
-        attendanceStatus = "On Leave";
-      } else if (att?.status === "absent" || att?.absence_reason || att?.penalty_status) {
-        attendanceStatus = "Absent";
-      } else if (checkInTime) {
-        if (checkOutTime) {
-          if (workingMinutes < 270) {
-            attendanceStatus = "Half Day";
-          } else if (lateMinutes > 5) {
-            attendanceStatus = "Late";
-          } else {
-            attendanceStatus = "Present";
-          }
-        } else {
-          if (dStr === getTodayDateStr()) {
-            attendanceStatus = lateMinutes > 5 ? "Late" : "Present";
-          } else {
-            attendanceStatus = "Incomplete Check-out";
-          }
-        }
-      } else if (isHoliday) {
-        attendanceStatus = "Holiday";
-      } else if (isWeekend) {
-        attendanceStatus = "Weekly Off";
-      } else if (dStr === getTodayDateStr()) {
-        const now = new Date();
-        const currentMins = now.getHours() * 60 + now.getMinutes();
-        if (currentMins < shiftStartMins) {
-          attendanceStatus = "Pending";
-        } else if (currentMins > shiftStartMins + 15) {
-          attendanceStatus = "Late";
-        } else {
-          attendanceStatus = "Pending";
-        }
-      }
-
-      const checkInFormatted = formatTimeDisplay(checkInTime);
-      const checkOutFormatted = formatTimeDisplay(checkOutTime);
-      const lateFormatted = lateMinutes > 0 ? `${lateMinutes}m` : "0m";
-      const earlyFormatted = earlyDepartureMinutes > 0 ? `${earlyDepartureMinutes}m` : "0m";
-      const isLocked = Boolean(att?.is_admin_locked);
-      const dist = (att && att.distance_from_office_meters != null) ? Number(att.distance_from_office_meters) : null;
-
-      return {
-        id: att?.id || `sim_${user.id}_${dStr}`,
-        recordId: att?.id || `sim_${user.id}_${dStr}`,
-        attendanceId: att?.id || null,
-        userId: user.id,
-        user_id: user.id,
-        empId: user.employee_id || `EMP-${user.id.slice(-4).toUpperCase()}`,
-        employeeId: user.employee_id || `EMP-${user.id.slice(-4).toUpperCase()}`,
-        employee_id: user.employee_id || `EMP-${user.id.slice(-4).toUpperCase()}`,
-        name: user.name || "Employee",
-        employeeName: user.name || "Employee",
-        user_name: user.name || "Employee",
-        email: user.email,
-        phone: user.phone || "—",
-        department: user.department || "General",
-        designation: user.designation || "Staff",
-        avatarUrl: user.avatar_url || null,
-        avatar_url: user.avatar_url || null,
-        shift: shiftDisplay,
-        shift_name: shiftDisplay,
-        shiftStart: shiftStartStr,
-        shift_start: shiftStartStr,
-        shiftEnd: shiftEndStr,
-        shift_end: shiftEndStr,
-        date: dStr,
-        date_formatted: dStr,
-        checkIn: checkInFormatted,
-        check_in: checkInFormatted,
-        check_in_formatted: checkInFormatted,
-        check_in_time: checkInFormatted !== "—" ? checkInFormatted : null,
-        checkInRaw: checkInTime,
-        checkOut: checkOutFormatted,
-        check_out: checkOutFormatted,
-        check_out_formatted: checkOutFormatted,
-        check_out_time: checkOutFormatted !== "—" ? checkOutFormatted : null,
-        checkOutRaw: checkOutTime,
-        workingHours: workingHoursStr,
-        working_hours: workingHoursDec,
-        working_hours_formatted: workingHoursStr,
-        workingMinutes,
-        // Detailed Breaks Breakdown
-        break1: breakCalc.break1,
-        break2: breakCalc.break2,
-        break3: breakCalc.break3,
-        break1Duration: breakCalc.break1.duration,
-        break2Duration: breakCalc.break2.duration,
-        break3Duration: breakCalc.break3.duration,
-        break_1_duration: breakCalc.break1.duration,
-        break_2_duration: breakCalc.break2.duration,
-        break_3_duration: breakCalc.break3.duration,
-        totalBreaksCount: breakCalc.totalBreaksCount,
-        total_breaks_count: breakCalc.totalBreaksCount,
-        totalBreakMinutes: breakCalc.totalBreakMinutes,
-        total_break_minutes: breakCalc.totalBreakMinutes,
-        totalBreakDuration: breakCalc.totalBreakDuration,
-        total_break_duration: breakCalc.totalBreakDuration,
-        breaks: breakCalc.breaks,
-        allBreaks: breakCalc.breaks,
-        hasOngoingBreak: breakCalc.hasOngoingBreak,
-        // Check-in and Check-out Locations
-        checkInLocation: breakCalc.checkInLocation,
-        check_in_location: breakCalc.check_in_location,
-        checkInCoordinates: breakCalc.checkInCoordinates,
-        checkOutLocation: breakCalc.checkOutLocation,
-        check_out_location: breakCalc.check_out_location,
-        checkOutCoordinates: breakCalc.checkOutCoordinates,
-        // Net Working Hours & Duration
-        totalAttendanceMinutes: breakCalc.totalAttendanceMinutes,
-        total_attendance_minutes: breakCalc.totalAttendanceMinutes,
-        totalAttendanceDuration: breakCalc.totalAttendanceDuration,
-        total_attendance_duration: breakCalc.totalAttendanceDuration,
-        netWorkingMinutes: breakCalc.netWorkingMinutes,
-        net_working_minutes: breakCalc.netWorkingMinutes,
-        netWorkingHours: breakCalc.netWorkingHours,
-        net_working_hours: breakCalc.netWorkingHours,
-        lateByMinutes: lateMinutes,
-        late_minutes: lateMinutes,
-        lateByText: lateFormatted,
-        late_by_formatted: lateFormatted,
-        earlyDepartureMinutes,
-        early_departure_minutes: earlyDepartureMinutes,
-        earlyDepartureText: earlyFormatted,
-        early_departure_formatted: earlyFormatted,
-        gpsVerification,
-        gps_verification_status: gpsVerification,
-        gpsStatus: gpsVerification,
-        faceVerification,
-        face_verification_status: faceVerification,
-        faceStatus: faceVerification,
-        attendanceStatus,
-        attendance_status: attendanceStatus,
-        status: attendanceStatus,
-        isRegularized: Boolean(att?.is_regularized || reg?.status === "approved"),
-        regularizationStatus: reg?.status || null,
-        regularizationId: reg?.id || null,
-        adminNotes: att?.admin_notes || null,
-        admin_notes: att?.admin_notes || null,
-        admin_remarks: att?.admin_notes || null,
-        isAdminLocked: isLocked,
-        is_admin_locked: isLocked,
-        locked: isLocked,
-        attendance_locked: isLocked,
-        distanceMeters: dist,
-        distance_from_office_meters: dist,
-        location: att?.check_in_location || att?.location || null
-      };
-    };
-
-    let allRecords = [];
-
-    // Map all actual database attendance records
-    const coveredUserDateKeys = new Set();
-    attendanceRecords.forEach(att => {
-      const u = userMap.get(att.user_id);
-      if (u) {
-        const dStr = formatDateOnly(att.date_str || att.date);
-        coveredUserDateKeys.add(`${u.id}_${dStr}`);
-        allRecords.push(formatRecordRow(u, att, dStr));
-      }
-    });
-
-    // If single day view, or for today in range:
-    // Ensure every scheduled company user has an entry
-    const targetSingleDate = (startDate === endDate) ? startDate : (getTodayDateStr() >= startDate && getTodayDateStr() <= endDate ? getTodayDateStr() : null);
-    if (targetSingleDate) {
-      users.forEach(u => {
-        const key = `${u.id}_${targetSingleDate}`;
-        if (!coveredUserDateKeys.has(key)) {
-          allRecords.push(formatRecordRow(u, null, targetSingleDate));
+          addedRowKeys.add(key);
+          combinedList.push(rowItem);
         }
       });
     }
 
-    // Filter by status if requested
-    if (status && status !== "all") {
-      const sLower = status.toLowerCase();
-      allRecords = allRecords.filter(r => r.attendanceStatus.toLowerCase() === sLower || r.status.toLowerCase() === sLower);
-    }
-
-    // Sort
-    allRecords.sort((a, b) => {
-      let valA = a[sortBy] !== undefined ? a[sortBy] : a.date;
-      let valB = b[sortBy] !== undefined ? b[sortBy] : b.date;
-      if (valA === undefined) valA = "";
-      if (valB === undefined) valB = "";
-      if (typeof valA === "string") {
-        return sortOrder === "asc" ? valA.localeCompare(valB) : valB.localeCompare(valA);
+    // Sorting
+    combinedList.sort((a, b) => {
+      let aVal = a[sortBy] ?? "";
+      let bVal = b[sortBy] ?? "";
+      if (sortBy === "workingHours" || sortBy === "workingHoursMinutes") {
+        aVal = a.workingHoursMinutes;
+        bVal = b.workingHoursMinutes;
       }
-      return sortOrder === "asc" ? (valA > valB ? 1 : -1) : (valA < valB ? 1 : -1);
+      if (sortOrder === "asc") {
+        return aVal > bVal ? 1 : aVal < bVal ? -1 : 0;
+      }
+      return aVal < bVal ? 1 : aVal > bVal ? -1 : 0;
     });
 
-    // Pagination
-    const pageNum = Math.max(1, parseInt(page, 10) || 1);
-    const limitNum = Math.max(1, parseInt(limit, 10) || 25);
-    const totalRecords = allRecords.length;
-    const totalPages = Math.ceil(totalRecords / limitNum);
-    const paginatedRecords = allRecords.slice((pageNum - 1) * limitNum, pageNum * limitNum);
+    const total = combinedList.length;
+    const startIndex = (pageNum - 1) * pageSize;
+    const paginatedRecords = combinedList.slice(startIndex, startIndex + pageSize);
 
     res.json({
       records: paginatedRecords,
-      departments,
       pagination: {
-        total: totalRecords,
+        total,
         page: pageNum,
-        limit: limitNum,
-        totalPages
-      },
-      startDate,
-      endDate,
-      filterType
+        limit: pageSize,
+        totalPages: Math.ceil(total / pageSize)
+      }
     });
   } catch (err) {
-    console.error("getAttendanceMonitoringRecords error:", err);
+    console.error("getMonitoringRecords error:", err);
     res.status(500).json({ error: "Failed to fetch attendance monitoring records." });
   }
 };
 
-/**
- * 3. Live Attendance Monitoring Snapshot
- * Real-time view for Today showing:
- * - Employees currently checked in (working)
- * - Employees not checked in
- * - Employees checked out
- * - Employees who are late
- * - Employees whose verification is pending
- */
-export const getLiveAttendanceMonitoring = async (req, res) => {
+// -------------------------------------------------------------
+// 3. GET /api/attendance/monitoring/live
+// -------------------------------------------------------------
+export const getMonitoringLive = async (req, res) => {
   try {
-    const { isSuperAdmin, targetCompanyId } = resolveTargetCompany(req);
-    const todayStr = getTodayDateStr();
+    if (!authorizeAdmin(req, res)) return;
 
-    // 1. Fetch Users
-    let userSql = `
-      SELECT id, name, email, employee_id, department, designation, shift_start, shift_end, avatar_url
-      FROM users
-      WHERE role NOT IN ('superadmin', 'client')
-    `;
-    const userParams = [];
-    if (targetCompanyId) {
-      userParams.push(targetCompanyId);
-      userSql += ` AND company_id = $${userParams.length}`;
-    }
-    userSql += " ORDER BY name ASC";
-    const userRes = await query(userSql, userParams);
-    const users = userRes.rows;
-    const userIds = users.map(u => u.id);
+    const companyId = await resolveCompanyId(req);
+    const tz = await getCompanyTimezone(companyId);
+    const today = formatDateStr(new Date(), tz);
 
-    if (userIds.length === 0) {
-      return res.json({
-        lastRefreshedAt: new Date().toISOString(),
-        summary: { working: 0, notCheckedIn: 0, checkedOut: 0, late: 0, pendingReview: 0 },
-        categories: { working: [], notCheckedIn: [], checkedOut: [], late: [], pendingReview: [] }
-      });
-    }
+    // Active employees
+    const usersRes = await query(
+      `SELECT id, name, email, employee_id, department, designation, avatar_url, shift_start, shift_end 
+       FROM users 
+       WHERE company_id = $1 AND (status IS NULL OR status = 'active') AND role <> 'superadmin'`,
+      [companyId]
+    );
 
-    // 2. Fetch Today's Attendance
-    const attSql = `
-      SELECT a.*, a.date::text as date_str
-      FROM attendance a
-      WHERE a.date = $1
-        AND a.user_id = ANY($2::text[])
-    `;
-    const attRes = await query(attSql, [todayStr, userIds]);
+    // Today's attendance
+    const attRes = await query(
+      `SELECT a.* FROM attendance a WHERE a.company_id = $1 AND a.date = $2::date`,
+      [companyId, today]
+    );
+
+    // Approved leaves for today
+    const leaveRes = await query(
+      `SELECT user_id, leave_type FROM leave_requests 
+       WHERE company_id = $1 AND status = 'approved' AND start_date <= $2::date AND end_date >= $2::date`,
+      [companyId, today]
+    ).catch(() => ({ rows: [] }));
+    const leaveSet = new Set(leaveRes.rows.map(l => l.user_id));
+
     const attMap = new Map();
-    attRes.rows.forEach(r => attMap.set(r.user_id, r));
+    attRes.rows.forEach(a => attMap.set(a.user_id, a));
 
-    // 3. Fetch Today's Approved Leaves
-    const leaveSql = `
-      SELECT l.*
-      FROM leave_requests l
-      WHERE l.status = 'approved'
-        AND l.start_date <= $1 AND l.end_date >= $1
-        AND l.user_id = ANY($2::text[])
-    `;
-    const leaveRes = await query(leaveSql, [todayStr, userIds]);
-    const leaveMap = new Map();
-    leaveRes.rows.forEach(l => leaveMap.set(l.user_id, l));
+    const currentlyWorking = [];
+    const notCheckedIn = [];
+    const checkedOut = [];
+    const lateToday = [];
+    const onLeaveToday = [];
 
-    // 4. Fetch Pending Verification Attempts for Today
-    const pendingAvaSql = `
-      SELECT ava.*, u.name as user_name, u.department
-      FROM attendance_verification_attempts ava
-      LEFT JOIN users u ON ava.user_id = u.id
-      WHERE ava.attempted_at::date = $1::date
-        AND ava.review_status = 'pending'
-        AND ava.user_id = ANY($2::text[])
-    `;
-    const pendingAvaRes = await query(pendingAvaSql, [todayStr, userIds]);
-    const pendingReviewList = pendingAvaRes.rows.map(r => ({
-      id: r.id,
-      userId: r.user_id,
-      name: r.user_name || "Employee",
-      department: r.department || "General",
-      attemptedAt: r.attempted_at,
-      status: r.status,
-      failureCategory: r.failure_category,
-      gpsResult: r.gps_result,
-      faceResult: r.face_result
-    }));
+    usersRes.rows.forEach(u => {
+      const att = attMap.get(u.id);
+      const isLeave = leaveSet.has(u.id);
 
-    // 5. Categorize Live Status
-    const workingList = [];
-    const notCheckedInList = [];
-    const checkedOutList = [];
-    const lateList = [];
-
-    const now = new Date();
-    const currentMins = now.getHours() * 60 + now.getMinutes();
-
-    users.forEach(user => {
-      const att = attMap.get(user.id);
-      const leave = leaveMap.get(user.id);
-
-      const shiftStartStr = user.shift_start || "09:00";
-      const shiftEndStr = user.shift_end || "18:00";
-      const shiftStartMins = parseTimeToMinutes(shiftStartStr) || 540;
-
-      const baseInfo = {
-        userId: user.id,
-        name: user.name,
-        employeeId: user.employee_id || `EMP-${user.id.slice(-4).toUpperCase()}`,
-        department: user.department || "General",
-        designation: user.designation || "Staff",
-        shift: `${formatTimeDisplay(shiftStartStr)} - ${formatTimeDisplay(shiftEndStr)}`,
-        avatarUrl: user.avatar_url || null
-      };
-
-      if (leave) {
-        // Handled as on leave
+      if (isLeave) {
+        onLeaveToday.push({
+          userId: u.id,
+          employeeId: u.employee_id || u.id,
+          name: u.name,
+          department: u.department,
+          avatarUrl: u.avatar_url,
+          status: "On Leave"
+        });
         return;
       }
 
-      if (att && att.check_in) {
-        const inMins = parseTimeToMinutes(att.check_in);
-        const isLate = inMins !== null && inMins > (shiftStartMins + 5);
-
-        if (isLate) {
-          lateList.push({
-            ...baseInfo,
-            checkIn: formatTimeDisplay(att.check_in),
-            checkInTime: att.check_in,
-            lateMinutes: inMins - shiftStartMins
-          });
-        }
-
-        if (att.check_out) {
-          checkedOutList.push({
-            ...baseInfo,
-            checkIn: formatTimeDisplay(att.check_in),
-            checkOut: formatTimeDisplay(att.check_out),
-            workingMinutes: att.duration_minutes || 0
-          });
-        } else {
-          workingList.push({
-            ...baseInfo,
-            checkIn: formatTimeDisplay(att.check_in),
-            checkInTime: att.check_in,
-            isLate
-          });
-        }
-      } else {
-        // Not checked in yet
-        const isPastShift = currentMins > (shiftStartMins + 15);
-        if (isPastShift) {
-          lateList.push({
-            ...baseInfo,
-            checkIn: "Not Checked In",
-            checkInTime: null,
-            lateMinutes: currentMins - shiftStartMins
-          });
-        }
-        notCheckedInList.push({
-          ...baseInfo,
-          isPastShift,
-          minutesOverdue: isPastShift ? currentMins - shiftStartMins : 0
+      if (!att || !att.check_in) {
+        notCheckedIn.push({
+          userId: u.id,
+          employeeId: u.employee_id || u.id,
+          name: u.name,
+          department: u.department,
+          avatarUrl: u.avatar_url,
+          shiftStart: u.shift_start || "10:00",
+          shiftEnd: u.shift_end || "19:00",
+          status: "Not Checked In"
         });
+        return;
+      }
+
+      const { lateByMinutes } = calculateLateAndEarly(att.check_in, att.check_out, u.shift_start, u.shift_end);
+
+      const recordItem = {
+        userId: u.id,
+        attendanceId: att.id,
+        employeeId: u.employee_id || u.id,
+        name: u.name,
+        department: u.department,
+        avatarUrl: u.avatar_url,
+        checkIn: att.check_in,
+        checkInFormatted: formatTimeHHMM(att.check_in),
+        checkOut: att.check_out,
+        checkOutFormatted: att.check_out ? formatTimeHHMM(att.check_out) : null,
+        durationMinutes: att.duration_minutes || Math.max(0, Math.floor((Date.now() - new Date(att.check_in).getTime()) / 60000)),
+        lateByMinutes,
+        isAdminLocked: Boolean(att.is_admin_locked)
+      };
+
+      if (lateByMinutes > 0) {
+        lateToday.push(recordItem);
+      }
+
+      if (att.check_out) {
+        checkedOut.push(recordItem);
+      } else {
+        currentlyWorking.push(recordItem);
       }
     });
 
     res.json({
       lastRefreshedAt: new Date().toISOString(),
-      summary: {
-        working: workingList.length,
-        notCheckedIn: notCheckedInList.length,
-        checkedOut: checkedOutList.length,
-        late: lateList.length,
-        pendingReview: pendingReviewList.length
+      today,
+      counts: {
+        working: currentlyWorking.length,
+        notCheckedIn: notCheckedIn.length,
+        checkedOut: checkedOut.length,
+        late: lateToday.length,
+        onLeave: onLeaveToday.length
       },
-      categories: {
-        working: workingList,
-        notCheckedIn: notCheckedInList,
-        checkedOut: checkedOutList,
-        late: lateList,
-        pendingReview: pendingReviewList
-      }
+      currentlyWorking,
+      notCheckedIn,
+      checkedOut,
+      lateToday,
+      onLeaveToday
     });
   } catch (err) {
-    console.error("getLiveAttendanceMonitoring error:", err);
-    res.status(500).json({ error: "Failed to fetch live attendance monitoring." });
+    console.error("getMonitoringLive error:", err);
+    res.status(500).json({ error: "Failed to fetch live attendance status." });
   }
 };
 
-/**
- * 4. Individual Employee Attendance Profile
- * Detailed profile containing:
- * - Employee info, department, shift
- * - Daily attendance history
- * - Late arrival & early departure metrics
- * - GPS verification records (office coords, geofence radius, user coords, distance)
- * - Biometric verification records (without exposing raw templates)
- * - Regularization history
- * - Admin remarks and audit logs
- */
+// -------------------------------------------------------------
+// 4. GET /api/attendance/monitoring/employee/:userId
+// -------------------------------------------------------------
 export const getEmployeeAttendanceProfile = async (req, res) => {
   try {
-    const { isSuperAdmin, targetCompanyId } = resolveTargetCompany(req);
+    if (!authorizeAdmin(req, res)) return;
+
     const { userId } = req.params;
-    const { days = 60, startDate: qStartDate, endDate: qEndDate } = req.query;
+    const companyId = await resolveCompanyId(req);
 
-    if (!userId) {
-      return res.status(400).json({ error: "User ID is required." });
-    }
-
-    // 1. Fetch User Record
+    // Verify employee belongs to company (tenant isolation)
     const userRes = await query(
-      `SELECT id, company_id, name, email, employee_id, role, department, designation, shift_start, shift_end, avatar_url, phone, status, created_at
-       FROM users
-       WHERE id = $1 ${!isSuperAdmin && targetCompanyId ? "AND company_id = $2" : ""}`,
-      !isSuperAdmin && targetCompanyId ? [userId, targetCompanyId] : [userId]
+      `SELECT id, name, email, employee_id, department, designation, avatar_url,
+              shift_start, shift_end, role, status, created_at
+       FROM users WHERE id = $1 AND company_id = $2`,
+      [userId, companyId]
     );
 
     if (userRes.rows.length === 0) {
-      return res.status(404).json({ error: "Employee not found or access denied." });
+      return res.status(404).json({ error: "Employee not found." });
     }
-    const user = userRes.rows[0];
+    const employee = userRes.rows[0];
 
-    // 2. Fetch Company Office Location Settings
-    let officeLocation = null;
-    let allowedRadius = 200;
-    if (user.company_id) {
-      const compRes = await query(
-        `SELECT name, latitude, longitude, allowed_radius_meters FROM companies WHERE id = $1`,
-        [user.company_id]
-      );
-      if (compRes.rows.length > 0) {
-        const c = compRes.rows[0];
-        officeLocation = {
-          name: c.name,
-          latitude: c.latitude ? Number(c.latitude) : null,
-          longitude: c.longitude ? Number(c.longitude) : null,
-          radiusMeters: c.allowed_radius_meters ? Number(c.allowed_radius_meters) : 200
-        };
-        allowedRadius = officeLocation.radiusMeters;
-      }
-    }
+    // Attendance records (last 30 days)
+    const attRes = await query(
+      `SELECT a.* 
+       FROM attendance a 
+       WHERE a.user_id = $1 AND a.company_id = $2 
+       ORDER BY a.date DESC, a.check_in DESC NULLS LAST 
+       LIMIT 30`,
+      [userId, companyId]
+    );
 
-    // 3. Fetch Attendance History
-    let attendanceHistory = [];
-    let startDate = qStartDate ? formatDateOnly(qStartDate) : null;
-    let endDate = qEndDate ? formatDateOnly(qEndDate) : null;
+    // Verification attempts for this user (sanitized, no raw biometric data)
+    const verifyRes = await query(
+      `SELECT id, work_mode, status, failure_category, gps_result, face_result, liveness_result,
+              review_status, review_decision, review_note, attempted_at, created_at
+       FROM attendance_verification_attempts
+       WHERE user_id = $1 AND company_id = $2
+       ORDER BY created_at DESC LIMIT 20`,
+      [userId, companyId]
+    ).catch(() => ({ rows: [] }));
 
-    if (startDate && endDate) {
-      const attSql = `
-        SELECT a.*, a.date::text as date_str
-        FROM attendance a
-        WHERE a.user_id = $1 AND a.date >= $2 AND a.date <= $3
-        ORDER BY a.date DESC
-      `;
-      const attRes = await query(attSql, [userId, startDate, endDate]);
-      attendanceHistory = attRes.rows;
-    } else {
-      const attSql = `
-        SELECT a.*, a.date::text as date_str
-        FROM attendance a
-        WHERE a.user_id = $1
-        ORDER BY a.date DESC
-        LIMIT $2
-      `;
-      const attRes = await query(attSql, [userId, Math.min(Number(days) || 60, 180)]);
-      attendanceHistory = attRes.rows;
-    }
+    // Regularization requests for this employee
+    const regRes = await query(
+      `SELECT id, attendance_date, requested_check_in, requested_check_out, reason,
+              status, manager_comment, rejection_reason, reviewed_by, reviewed_at, created_at
+       FROM regularization_requests
+       WHERE user_id = $1 AND company_id = $2
+       ORDER BY created_at DESC LIMIT 20`,
+      [userId, companyId]
+    ).catch(() => ({ rows: [] }));
 
-    // 4. Fetch Verification Attempts (Biometric & GPS)
-    const avaSql = `
-      SELECT id, attempted_at, work_mode, status, failure_category,
-             gps_result, face_result, liveness_result, review_status, review_decision, review_note, metadata
-      FROM attendance_verification_attempts
-      WHERE user_id = $1
-      ORDER BY attempted_at DESC
-      LIMIT 30
-    `;
-    const avaRes = await query(avaSql, [userId]);
-    const verificationAttempts = avaRes.rows;
-
-    // 5. Fetch Regularization Requests
-    const regSql = `
-      SELECT r.*, r.attendance_date::text as date_str
-      FROM regularization_requests r
-      WHERE r.user_id = $1
-      ORDER BY r.created_at DESC
-      LIMIT 30
-    `;
-    const regRes = await query(regSql, [userId]);
-    const regularizationHistory = regRes.rows.map(r => ({
-      id: r.id,
-      date: formatDateOnly(r.date_str || r.attendance_date),
-      requestedCheckIn: formatTimeDisplay(r.requested_check_in),
-      requestedCheckOut: formatTimeDisplay(r.requested_check_out),
-      reason: r.reason || "—",
-      status: r.status,
-      managerComment: r.manager_comment || r.rejection_reason || "—",
-      appliedAt: r.created_at
-    }));
-
-    // 6. Fetch Audit History regarding this employee
-    const auditSql = `
-      SELECT id, action, details, created_at, user_name, user_role
-      FROM audit_logs
-      WHERE resource_id = $1 OR details->>'employeeId' = $1 OR details->>'userId' = $1
-      ORDER BY created_at DESC
-      LIMIT 20
-    `;
-    const auditRes = await query(auditSql, [userId]);
-    const auditHistory = auditRes.rows;
-
-    // 7. Calculate Aggregates & Process Breaks for Profile
-    const shiftStartStr = user.shift_start || "09:00";
-    const shiftEndStr = user.shift_end || "18:00";
-    const shiftStartMins = parseTimeToMinutes(shiftStartStr) || 540;
-    const shiftEndMins = parseTimeToMinutes(shiftEndStr) || 1080;
-
-    let presentDays = 0;
-    let lateDays = 0;
-    let absentDays = 0;
-    let halfDays = 0;
-    let onLeaveDays = 0;
-    let totalNetWorkingMinutes = 0;
-    let totalAllBreaksMinutes = 0;
-
-    const formattedHistory = attendanceHistory.map(a => {
-      const dStr = formatDateOnly(a.date_str || a.date);
-      const breakCalc = processAttendanceBreaksAndHours(a, user, dStr);
-
-      totalNetWorkingMinutes += breakCalc.netWorkingMinutes;
-      totalAllBreaksMinutes += breakCalc.totalBreakMinutes;
-
-      let lateMins = 0;
-      let earlyMins = 0;
-
-      if (a.check_in) {
-        const inMins = parseTimeToMinutes(a.check_in);
-        if (inMins !== null && inMins > (shiftStartMins + 5)) {
-          lateMins = inMins - shiftStartMins;
-          lateDays++;
-        }
-        presentDays++;
-      }
-
-      if (a.check_out) {
-        const outMins = parseTimeToMinutes(a.check_out);
-        if (outMins !== null && outMins < shiftEndMins) {
-          earlyMins = shiftEndMins - outMins;
-        }
-      }
-
-      let status = a.status || "Present";
-      if (a.status === "on-leave") {
-        onLeaveDays++;
-        status = "On Leave";
-      } else if (a.status === "absent" || a.is_admin_locked) {
-        absentDays++;
-        status = a.is_admin_locked ? "Attendance Locked" : "Absent";
-      } else if (breakCalc.netWorkingMinutes > 0 && breakCalc.netWorkingMinutes < 270) {
-        halfDays++;
-        status = "Half Day";
-      } else if (lateMins > 0) {
-        status = "Late";
-      }
-
-      // GPS verification status
-      let gpsStatus = "Not Available";
-      if (a.fence_verified_at || (a.distance_from_office_meters != null && Number(a.distance_from_office_meters) <= allowedRadius)) {
-        gpsStatus = "Verified";
-      } else if (a.distance_from_office_meters != null && Number(a.distance_from_office_meters) > allowedRadius) {
-        gpsStatus = "Failed";
-      }
-
-      return {
-        id: a.id,
-        date: dStr,
-        date_formatted: dStr,
-        checkIn: formatTimeDisplay(a.check_in),
-        check_in: formatTimeDisplay(a.check_in),
-        checkInTime: formatTimeDisplay(a.check_in),
-        checkOut: formatTimeDisplay(a.check_out),
-        check_out: formatTimeDisplay(a.check_out),
-        checkOutTime: formatTimeDisplay(a.check_out),
-        checkInRaw: a.check_in,
-        checkOutRaw: a.check_out,
-        // Detailed Breaks
-        break1: breakCalc.break1,
-        break2: breakCalc.break2,
-        break3: breakCalc.break3,
-        break1Duration: breakCalc.break1.duration,
-        break2Duration: breakCalc.break2.duration,
-        break3Duration: breakCalc.break3.duration,
-        totalBreaksCount: breakCalc.totalBreaksCount,
-        totalBreakMinutes: breakCalc.totalBreakMinutes,
-        totalBreakDuration: breakCalc.totalBreakDuration,
-        total_break_duration: breakCalc.totalBreakDuration,
-        breaks: breakCalc.breaks,
-        hasOngoingBreak: breakCalc.hasOngoingBreak,
-        // Locations
-        checkInLocation: breakCalc.checkInLocation,
-        check_in_location: breakCalc.check_in_location,
-        checkInCoordinates: breakCalc.checkInCoordinates,
-        checkOutLocation: breakCalc.checkOutLocation,
-        check_out_location: breakCalc.check_out_location,
-        checkOutCoordinates: breakCalc.checkOutCoordinates,
-        // Hours
-        totalAttendanceDuration: breakCalc.totalAttendanceDuration,
-        total_attendance_duration: breakCalc.totalAttendanceDuration,
-        totalAttendanceMinutes: breakCalc.totalAttendanceMinutes,
-        netWorkingHours: breakCalc.netWorkingHours,
-        net_working_hours: breakCalc.netWorkingHours,
-        netWorkingMinutes: breakCalc.netWorkingMinutes,
-        workingHours: breakCalc.netWorkingHours,
-        working_hours: breakCalc.netWorkingHoursDecimal,
-        lateMinutes: lateMins,
-        earlyDepartureMinutes: earlyMins,
-        status,
-        attendanceStatus: status,
-        attendance_status: status,
-        gpsStatus,
-        gpsVerification: gpsStatus,
-        distanceMeters: a.distance_from_office_meters ? Number(a.distance_from_office_meters) : null,
-        biometricVerified: Boolean(a.biometric_verified),
-        livenessPassed: Boolean(a.liveness_passed),
-        adminNotes: a.admin_notes,
-        isLocked: Boolean(a.is_admin_locked)
-      };
-    });
-
-    const totalNetH = Math.floor(totalNetWorkingMinutes / 60);
-    const totalNetM = totalNetWorkingMinutes % 60;
-    const totalNetWorkingFormatted = `${String(totalNetH).padStart(2, "0")}h ${String(totalNetM).padStart(2, "0")}m`;
-
-    const totalBrkH = Math.floor(totalAllBreaksMinutes / 60);
-    const totalBrkM = totalAllBreaksMinutes % 60;
-    const totalBreakDurationFormatted = `${String(totalBrkH).padStart(2, "0")}h ${String(totalBrkM).padStart(2, "0")}m`;
-
-    const avgMins = presentDays > 0 ? Math.floor(totalNetWorkingMinutes / presentDays) : 0;
-    const avgH = Math.floor(avgMins / 60);
-    const avgM = avgMins % 60;
-    const avgHoursPerDayFormatted = `${String(avgH).padStart(2, "0")}h ${String(avgM).padStart(2, "0")}m`;
-    const avgHoursDec = presentDays > 0 ? (totalNetWorkingMinutes / presentDays / 60).toFixed(2) : "0.00";
+    // Audit logs related to this employee's attendance
+    const auditRes = await query(
+      `SELECT id, action, resource_type, details, ip_address, created_at
+       FROM audit_logs
+       WHERE company_id = $1 AND (user_id = $2 OR details->>'userId' = $2 OR details->>'employeeId' = $2)
+       ORDER BY created_at DESC LIMIT 20`,
+      [companyId, userId]
+    ).catch(() => ({ rows: [] }));
 
     res.json({
-      employee: {
-        id: user.id,
-        name: user.name,
-        employeeName: user.name,
-        email: user.email,
-        employeeId: user.employee_id || `EMP-${user.id.slice(-4).toUpperCase()}`,
-        empId: user.employee_id || `EMP-${user.id.slice(-4).toUpperCase()}`,
-        role: user.role,
-        department: user.department || "General",
-        designation: user.designation || "Staff",
-        shift: `${formatTimeDisplay(shiftStartStr)} - ${formatTimeDisplay(shiftEndStr)}`,
-        shift_name: `${formatTimeDisplay(shiftStartStr)} - ${formatTimeDisplay(shiftEndStr)}`,
-        shiftStart: shiftStartStr,
-        shift_start: shiftStartStr,
-        shiftEnd: shiftEndStr,
-        shift_end: shiftEndStr,
-        avatarUrl: user.avatar_url,
-        avatar_url: user.avatar_url,
-        phone: user.phone || "—",
-        status: user.status
-      },
-      officeLocation,
-      summary: {
-        totalLoggedDays: formattedHistory.length,
-        totalWorkingDays: formattedHistory.length,
-        presentDays,
-        totalPresentDays: presentDays,
-        lateDays,
-        totalLateArrivals: lateDays,
-        absentDays,
-        totalAbsentDays: absentDays,
-        halfDays,
-        onLeaveDays,
-        totalBreakMinutes: totalAllBreaksMinutes,
-        totalBreakDuration: totalBreakDurationFormatted,
-        totalNetWorkingMinutes,
-        totalNetWorkingHours: totalNetWorkingFormatted,
-        totalWorkingHours: (totalNetWorkingMinutes / 60).toFixed(2),
-        avgHoursPerDay: avgHoursDec,
-        avgDailyWorkingHours: avgHoursPerDayFormatted
-      },
-      history: formattedHistory,
-      verificationAttempts,
-      regularizationHistory,
-      auditHistory
+      employee,
+      attendanceHistory: attRes.rows,
+      verificationAttempts: verifyRes.rows,
+      regularizationRequests: regRes.rows,
+      auditHistory: auditRes.rows
     });
   } catch (err) {
     console.error("getEmployeeAttendanceProfile error:", err);
@@ -1536,510 +1065,504 @@ export const getEmployeeAttendanceProfile = async (req, res) => {
   }
 };
 
-/**
- * 4. Individual Employee Attendance Report Download / Data Export
- * Generates structured JSON or CSV containing Employee Info, Summary Statistics,
- * and Daily Attendance Records with breaks and locations.
- */
-export const getEmployeeAttendanceReport = async (req, res) => {
+// -------------------------------------------------------------
+// 5. GET /api/attendance/monitoring/analytics
+// -------------------------------------------------------------
+export const getMonitoringAnalytics = async (req, res) => {
   try {
-    const { isSuperAdmin, targetCompanyId } = resolveTargetCompany(req);
-    const { userId } = req.params;
-    let { startDate, endDate, format = "json" } = req.query;
+    if (!authorizeAdmin(req, res)) return;
 
-    if (!userId) {
-      return res.status(400).json({ error: "User ID is required." });
-    }
+    const companyId = await resolveCompanyId(req);
+    const tz = await getCompanyTimezone(companyId);
+    const { startDate, endDate } = resolveDateRange(req.query, tz);
 
-    // 1. Fetch User Record
-    const userRes = await query(
-      `SELECT id, company_id, name, email, employee_id, role, department, designation, shift_start, shift_end, phone, status
-       FROM users
-       WHERE id = $1 ${!isSuperAdmin && targetCompanyId ? "AND company_id = $2" : ""}`,
-      !isSuperAdmin && targetCompanyId ? [userId, targetCompanyId] : [userId]
+    // 1. Total active employees count
+    const usersRes = await query(
+      `SELECT id, department FROM users WHERE company_id = $1 AND (status IS NULL OR status = 'active') AND role <> 'superadmin'`,
+      [companyId]
+    );
+    const totalStaff = usersRes.rows.length;
+
+    // 2. Attendance rows in range
+    const attRes = await query(
+      `SELECT date, status, duration_minutes, user_id, check_in
+       FROM attendance
+       WHERE company_id = $1 AND date >= $2::date AND date <= $3::date`,
+      [companyId, startDate, endDate]
     );
 
-    if (userRes.rows.length === 0) {
-      return res.status(404).json({ error: "Employee not found or access denied." });
-    }
-    const user = userRes.rows[0];
-
-    // Default dates if not specified (current month)
-    if (!startDate || !endDate) {
-      const monthRange = getThisMonthRange();
-      startDate = startDate || monthRange.startDate;
-      endDate = endDate || monthRange.endDate;
-    }
-    startDate = formatDateOnly(startDate);
-    endDate = formatDateOnly(endDate);
-
-    // 2. Fetch Attendance Records for range
-    const attSql = `
-      SELECT a.*, a.date::text as date_str
-      FROM attendance a
-      WHERE a.user_id = $1 AND a.date >= $2 AND a.date <= $3
-      ORDER BY a.date DESC
-    `;
-    const attRes = await query(attSql, [userId, startDate, endDate]);
-    const attendanceRecords = attRes.rows;
-
-    // 3. Process each day's attendance
-    let totalPresentDays = 0;
-    let totalLateArrivals = 0;
-    let totalAbsentDays = 0;
-    let totalNetWorkingMinutes = 0;
-    let totalBreakMinutes = 0;
-
-    const shiftStartStr = user.shift_start || "09:00";
-    const shiftEndStr = user.shift_end || "18:00";
-    const shiftStartMins = parseTimeToMinutes(shiftStartStr) || 540;
-
-    const dailyRecords = attendanceRecords.map(a => {
-      const dStr = formatDateOnly(a.date_str || a.date);
-      const breakCalc = processAttendanceBreaksAndHours(a, user, dStr);
-
-      totalNetWorkingMinutes += breakCalc.netWorkingMinutes;
-      totalBreakMinutes += breakCalc.totalBreakMinutes;
-
-      let status = a.status || "Present";
-      if (a.check_in) {
-        totalPresentDays++;
-        const inMins = parseTimeToMinutes(a.check_in);
-        if (inMins !== null && inMins > (shiftStartMins + 5)) {
-          totalLateArrivals++;
-          status = "Late";
-        }
-      } else if (a.status === "on-leave") {
-        status = "On Leave";
-      } else {
-        totalAbsentDays++;
-        status = "Absent";
-      }
-
-      return {
-        date: dStr,
-        checkInTime: formatTimeDisplay(a.check_in),
-        checkInLocation: breakCalc.checkInLocation,
-        break1Start: breakCalc.break1.start,
-        break1End: breakCalc.break1.end,
-        break1Duration: breakCalc.break1.duration,
-        break2Start: breakCalc.break2.start,
-        break2End: breakCalc.break2.end,
-        break2Duration: breakCalc.break2.duration,
-        break3Start: breakCalc.break3.start,
-        break3End: breakCalc.break3.end,
-        break3Duration: breakCalc.break3.duration,
-        totalBreakDuration: breakCalc.totalBreakDuration,
-        checkOutTime: formatTimeDisplay(a.check_out),
-        checkOutLocation: breakCalc.checkOutLocation,
-        totalAttendanceDuration: breakCalc.totalAttendanceDuration,
-        netWorkingHours: breakCalc.netWorkingHours,
-        attendanceStatus: status
-      };
+    // 3. Department breakdown
+    const deptMap = new Map();
+    usersRes.rows.forEach(u => {
+      const d = u.department || "General";
+      if (!deptMap.has(d)) deptMap.set(d, { total: 0, present: 0 });
+      deptMap.get(d).total++;
     });
 
-    const totalWorkingDays = dailyRecords.length;
-    const totalNetH = Math.floor(totalNetWorkingMinutes / 60);
-    const totalNetM = totalNetWorkingMinutes % 60;
-    const totalNetWorkingHours = `${String(totalNetH).padStart(2, "0")}h ${String(totalNetM).padStart(2, "0")}m`;
+    // 4. Daily attendance percentage trend
+    const dateMap = new Map();
+    let totalWorkingMins = 0;
+    let recordsWithHours = 0;
 
-    const totalBrkH = Math.floor(totalBreakMinutes / 60);
-    const totalBrkM = totalBreakMinutes % 60;
-    const totalBreakDuration = `${String(totalBrkH).padStart(2, "0")}h ${String(totalBrkM).padStart(2, "0")}m`;
+    attRes.rows.forEach(a => {
+      const dStr = formatDateStr(a.date, tz);
+      if (!dateMap.has(dStr)) {
+        dateMap.set(dStr, { date: dStr, present: 0, absent: 0 });
+      }
+      const entry = dateMap.get(dStr);
+      if (a.status === "absent") {
+        entry.absent++;
+      } else if (a.check_in) {
+        entry.present++;
+        const u = usersRes.rows.find(x => x.id === a.user_id);
+        if (u) {
+          const dept = u.department || "General";
+          if (deptMap.has(dept)) deptMap.get(dept).present++;
+        }
+      }
 
-    const avgMins = totalPresentDays > 0 ? Math.floor(totalNetWorkingMinutes / totalPresentDays) : 0;
-    const avgH = Math.floor(avgMins / 60);
-    const avgM = avgMins % 60;
-    const averageDailyWorkingHours = `${String(avgH).padStart(2, "0")}h ${String(avgM).padStart(2, "0")}m`;
+      if (a.duration_minutes > 0) {
+        totalWorkingMins += Number(a.duration_minutes);
+        recordsWithHours++;
+      }
+    });
 
-    const summary = {
-      totalWorkingDays,
-      totalPresentDays,
-      totalAbsentDays,
-      totalLateArrivals,
-      totalBreakDuration,
-      totalNetWorkingHours,
-      averageDailyWorkingHours
-    };
+    const dailyTrend = Array.from(dateMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+    const departmentBreakdown = Array.from(deptMap.entries()).map(([dept, data]) => ({
+      department: dept,
+      total: data.total,
+      present: data.present,
+      percentage: data.total > 0 ? Math.round((data.present / data.total) * 100) : 0
+    }));
 
-    const employee = {
-      employeeName: user.name,
-      employeeId: user.employee_id || `EMP-${user.id.slice(-4).toUpperCase()}`,
-      department: user.department || "General",
-      designation: user.designation || "Staff"
-    };
-
-    if (String(format).toLowerCase() === "csv") {
-      const escapeCsv = (val) => {
-        if (val == null) return '""';
-        const str = String(val).replace(/"/g, '""');
-        return `"${str}"`;
-      };
-
-      const csvLines = [
-        `"INDIVIDUAL EMPLOYEE ATTENDANCE REPORT"`,
-        `"Generated On",${escapeCsv(new Date().toLocaleString())}`,
-        `"Reporting Period",${escapeCsv(`${startDate} to ${endDate}`)}`,
-        `""`,
-        `"EMPLOYEE INFORMATION"`,
-        `"Employee Name",${escapeCsv(employee.employeeName)}`,
-        `"Employee ID",${escapeCsv(employee.employeeId)}`,
-        `"Department",${escapeCsv(employee.department)}`,
-        `"Designation",${escapeCsv(employee.designation)}`,
-        `""`,
-        `"SUMMARY STATISTICS"`,
-        `"Total Working Days",${summary.totalWorkingDays}`,
-        `"Total Present Days",${summary.totalPresentDays}`,
-        `"Total Absent Days",${summary.totalAbsentDays}`,
-        `"Total Late Arrivals",${summary.totalLateArrivals}`,
-        `"Total Break Duration",${escapeCsv(summary.totalBreakDuration)}`,
-        `"Total Net Working Hours",${escapeCsv(summary.totalNetWorkingHours)}`,
-        `"Average Daily Working Hours",${escapeCsv(summary.averageDailyWorkingHours)}`,
-        `""`,
-        `"DAILY ATTENDANCE RECORDS"`,
-        [
-          "Date",
-          "Check-in Time",
-          "Check-in Location",
-          "Break 1 Start",
-          "Break 1 End",
-          "Break 1 Duration",
-          "Break 2 Start",
-          "Break 2 End",
-          "Break 2 Duration",
-          "Break 3 Start",
-          "Break 3 End",
-          "Break 3 Duration",
-          "Total Break Duration",
-          "Check-out Time",
-          "Check-out Location",
-          "Total Attendance Duration",
-          "Net Working Hours",
-          "Attendance Status"
-        ].map(escapeCsv).join(",")
-      ];
-
-      dailyRecords.forEach(r => {
-        const row = [
-          r.date,
-          r.checkInTime,
-          r.checkInLocation,
-          r.break1Start,
-          r.break1End,
-          r.break1Duration,
-          r.break2Start,
-          r.break2End,
-          r.break2Duration,
-          r.break3Start,
-          r.break3End,
-          r.break3Duration,
-          r.totalBreakDuration,
-          r.checkOutTime,
-          r.checkOutLocation,
-          r.totalAttendanceDuration,
-          r.netWorkingHours,
-          r.attendanceStatus
-        ].map(escapeCsv).join(",");
-        csvLines.push(row);
-      });
-
-      const csvString = csvLines.join("\r\n");
-      const safeFilename = `Attendance_Report_${employee.employeeName.replace(/\s+/g, "_")}_${startDate}_${endDate}.csv`;
-      res.setHeader("Content-Type", "text/csv; charset=utf-8");
-      res.setHeader("Content-Disposition", `attachment; filename="${safeFilename}"`);
-      return res.send(csvString);
-    }
+    const avgWorkingHours = recordsWithHours > 0 ? (totalWorkingMins / recordsWithHours / 60).toFixed(1) : "8.0";
 
     res.json({
-      success: true,
-      employee,
-      summary,
-      records: dailyRecords,
+      totalStaff,
+      avgWorkingHours,
+      dailyTrend,
+      departmentBreakdown,
       startDate,
       endDate
     });
   } catch (err) {
-    console.error("getEmployeeAttendanceReport error:", err);
-    res.status(500).json({ error: "Failed to generate employee attendance report." });
+    console.error("getMonitoringAnalytics error:", err);
+    res.status(500).json({ error: "Failed to fetch attendance analytics." });
   }
 };
 
-/**
- * 5. Attendance Analytics & Trends
- * Visual summaries for charts:
- * - Daily attendance percentage
- * - Monthly attendance percentage
- * - Department-wise attendance rates
- * - Late arrival trends
- * - Absence trends
- * - Average working hours
- * - Regularization statistics
- */
-export const getAttendanceAnalytics = async (req, res) => {
+// -------------------------------------------------------------
+// 6. POST /api/attendance/monitoring/regularize/:id/review
+// -------------------------------------------------------------
+export const reviewRegularization = async (req, res) => {
   try {
-    const { isSuperAdmin, targetCompanyId } = resolveTargetCompany(req);
-    const { days = 14 } = req.query;
-    const numDays = Math.min(Math.max(Number(days) || 14, 7), 60);
+    if (!authorizeAdmin(req, res)) return;
 
-    // 1. Fetch total employees count
-    let uSql = "SELECT count(*) as count FROM users WHERE role NOT IN ('superadmin', 'client')";
-    const uParams = [];
-    if (targetCompanyId) {
-      uParams.push(targetCompanyId);
-      uSql += " AND company_id = $1";
-    }
-    const uRes = await query(uSql, uParams);
-    const totalEmployees = parseInt(uRes.rows[0]?.count || "1", 10) || 1;
-
-    // 2. Fetch past N days attendance records
-    const startDateObj = new Date();
-    startDateObj.setDate(startDateObj.getDate() - (numDays - 1));
-    const startStr = formatDateOnly(startDateObj);
-    const endStr = getTodayDateStr();
-
-    let attSql = `
-      SELECT a.*, a.date::text as date_str, u.department, u.shift_start
-      FROM attendance a
-      LEFT JOIN users u ON a.user_id = u.id
-      WHERE a.date >= $1 AND a.date <= $2
-    `;
-    const attParams = [startStr, endStr];
-    if (targetCompanyId) {
-      attParams.push(targetCompanyId);
-      attSql += ` AND a.company_id = $${attParams.length}`;
-    }
-
-    const attRes = await query(attSql, attParams);
-    const records = attRes.rows;
-
-    // 3. Generate Day-by-Day Aggregate Array
-    const dailyMap = new Map();
-    for (let i = 0; i < numDays; i++) {
-      const d = new Date(startDateObj);
-      d.setDate(d.getDate() + i);
-      const dStr = formatDateOnly(d);
-      dailyMap.set(dStr, {
-        date: dStr,
-        displayDate: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-        present: 0,
-        late: 0,
-        absent: 0,
-        workingMinutes: 0
-      });
-    }
-
-    // Department grouping
-    const deptMap = new Map();
-
-    records.forEach(r => {
-      const dStr = formatDateOnly(r.date_str || r.date);
-      const dayItem = dailyMap.get(dStr);
-      const dept = r.department || "General";
-
-      if (!deptMap.has(dept)) {
-        deptMap.set(dept, { department: dept, present: 0, late: 0, absent: 0, totalHours: 0, recordsCount: 0 });
-      }
-      const deptItem = deptMap.get(dept);
-
-      if (r.check_in && r.status !== "absent" && !r.is_admin_locked) {
-        if (dayItem) {
-          dayItem.present++;
-          dayItem.workingMinutes += Number(r.duration_minutes) || 0;
-        }
-        deptItem.present++;
-        deptItem.recordsCount++;
-        deptItem.totalHours += (Number(r.duration_minutes) || 0) / 60;
-
-        const shiftStartMins = parseTimeToMinutes(r.shift_start || "09:00") || 540;
-        const inMins = parseTimeToMinutes(r.check_in);
-        if (inMins !== null && inMins > (shiftStartMins + 5)) {
-          if (dayItem) dayItem.late++;
-          deptItem.late++;
-        }
-      } else {
-        if (dayItem) dayItem.absent++;
-        deptItem.absent++;
-      }
-    });
-
-    const dailyAttendance = Array.from(dailyMap.values()).map(d => {
-      const rate = Math.min(100, Math.round((d.present / totalEmployees) * 100));
-      const avgHours = d.present > 0 ? (d.workingMinutes / d.present / 60).toFixed(1) : 0;
-      return {
-        ...d,
-        attendanceRate: rate,
-        avgHours: Number(avgHours)
-      };
-    });
-
-    const departmentBreakdown = Array.from(deptMap.values()).map(dept => {
-      const rate = dept.recordsCount > 0 ? Math.round((dept.present / dept.recordsCount) * 100) : 0;
-      return {
-        department: dept.department,
-        present: dept.present,
-        late: dept.late,
-        absent: dept.absent,
-        attendanceRate: rate,
-        avgHours: dept.present > 0 ? Number((dept.totalHours / dept.present).toFixed(1)) : 0
-      };
-    });
-
-    // Regularization Stats
-    let regSql = "SELECT status, count(*) as count FROM regularization_requests WHERE 1=1";
-    const regParams = [];
-    if (targetCompanyId) {
-      regParams.push(targetCompanyId);
-      regSql += " AND company_id = $1";
-    }
-    regSql += " GROUP BY status";
-    const regRes = await query(regSql, regParams);
-
-    const regStats = { total: 0, approved: 0, rejected: 0, pending: 0 };
-    regRes.rows.forEach(r => {
-      const st = r.status?.toLowerCase();
-      const count = parseInt(r.count, 10);
-      regStats.total += count;
-      if (st === "approved") regStats.approved = count;
-      else if (st === "rejected") regStats.rejected = count;
-      else if (st === "pending") regStats.pending = count;
-    });
-
-    res.json({
-      dailyAttendance,
-      departmentBreakdown,
-      regularizationStats: regStats,
-      totalEmployees
-    });
-  } catch (err) {
-    console.error("getAttendanceAnalytics error:", err);
-    res.status(500).json({ error: "Failed to generate attendance analytics." });
-  }
-};
-
-/**
- * 6. Admin Attendance Record Review / Manual Override
- * Allows administrators to add remarks, unlock attendance, or adjust status with full audit logging.
- */
-export const reviewAttendanceRecord = async (req, res) => {
-  try {
     const { id } = req.params;
-    const { adminNotes, status, unlock, userId, date } = req.body;
-    const reviewerId = req.user?.id;
-    const { isSuperAdmin, targetCompanyId } = resolveTargetCompany(req);
+    let decision = (req.body.decision || req.body.action || "").toLowerCase();
+    if (decision === "approve") decision = "approved";
+    if (decision === "reject") decision = "rejected";
+    const adminRemarks = req.body.adminRemarks || req.body.remarks || "";
+    const reviewerId = req.user.id;
+    const companyId = await resolveCompanyId(req);
 
-    if (!id) {
-      return res.status(400).json({ error: "Attendance record ID is required." });
+    if (!["approved", "rejected"].includes(decision)) {
+      return res.status(400).json({ error: "Decision must be 'approved' or 'rejected'." });
     }
 
-    let targetId = id;
-    let targetUserId = userId;
-    let targetDate = date;
+    // Verify regularization request belongs to company (tenant isolation)
+    const existingRes = await query(
+      `SELECT * FROM regularization_requests WHERE id = $1 AND company_id = $2`,
+      [id, companyId]
+    );
 
-    if (id.startsWith("sim_")) {
-      const parts = id.replace("sim_", "").split("_");
-      targetDate = parts.pop();
-      targetUserId = parts.join("_");
-      targetId = `${targetUserId}_${targetDate}`;
+    if (existingRes.rows.length === 0) {
+      return res.status(404).json({ error: "Regularization request not found." });
     }
+    const regReq = existingRes.rows[0];
 
-    // Check if record exists
-    const checkRes = await query("SELECT * FROM attendance WHERE id = $1", [targetId]);
-    if (checkRes.rows.length === 0) {
-      if (!targetUserId || !targetDate) {
-        return res.status(404).json({ error: "Attendance record not found." });
-      }
-      const newStatus = status || "absent";
-      const insertRes = await query(
-        `INSERT INTO attendance (id, user_id, company_id, date, status, admin_notes, admin_modified_by, admin_modified_at, is_admin_locked)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP, $8)
-         RETURNING *`,
-        [targetId, targetUserId, targetCompanyId, targetDate, newStatus, adminNotes || null, reviewerId, unlock ? false : false]
+    // Atomically update regularization request
+    const result = await query(
+      `UPDATE regularization_requests
+       SET status = $1, reviewed_by = $2, reviewed_at = CURRENT_TIMESTAMP,
+           manager_comment = $3, rejection_reason = $3, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $4
+       RETURNING *`,
+      [decision, reviewerId, adminRemarks, id]
+    );
+
+    // If approved, update or insert attendance record
+    if (decision === "approved") {
+      const attDate = formatDateStr(regReq.attendance_date);
+      let attId = `${regReq.user_id}_${attDate}`;
+      const existingAtt = await query(
+        `SELECT id FROM attendance WHERE user_id = $1 AND date = $2::date AND company_id = $3`,
+        [regReq.user_id, attDate, companyId]
       );
+      if (existingAtt.rows.length > 0) {
+        attId = existingAtt.rows[0].id;
+      }
+      const checkInVal = regReq.requested_check_in || `${attDate}T10:00:00Z`;
+      const checkOutVal = regReq.requested_check_out || `${attDate}T19:00:00Z`;
 
-      auditService.logAudit({
-        userId: reviewerId,
-        action: "ATTENDANCE_RECORD_REVIEWED",
-        resourceType: "attendance",
-        resourceId: targetId,
-        details: {
-          employeeId: targetUserId,
-          date: targetDate,
-          adminNotes,
-          status: newStatus,
-          created: true
-        },
-        req
-      });
-
-      return res.json({
-        success: true,
-        record: insertRes.rows[0],
-        message: "Attendance record updated successfully."
-      });
+      await query(
+        `INSERT INTO attendance (id, user_id, company_id, date, check_in, check_out, status, duration_minutes, is_regularized, is_admin_locked, penalty_status)
+         VALUES ($1, $2, $3, $4::date, $5, $6, 'present', 480, TRUE, FALSE, NULL)
+         ON CONFLICT (id) DO UPDATE SET
+           check_in = EXCLUDED.check_in,
+           check_out = EXCLUDED.check_out,
+           status = 'present',
+           duration_minutes = GREATEST(COALESCE(attendance.duration_minutes, 0), 480),
+           is_regularized = TRUE,
+           is_admin_locked = FALSE,
+           penalty_status = NULL,
+           penalty_reason = NULL,
+           updated_at = CURRENT_TIMESTAMP`,
+        [attId, regReq.user_id, companyId, attDate, checkInVal, checkOutVal]
+      );
     }
 
-    const updates = ["admin_modified_by = $1", "admin_modified_at = CURRENT_TIMESTAMP"];
-    const params = [reviewerId];
-
-    if (adminNotes !== undefined) {
-      params.push(adminNotes);
-      updates.push(`admin_notes = $${params.length}`);
-    }
-
-    if (unlock) {
-      params.push(false);
-      updates.push(`is_admin_locked = $${params.length}`);
-      params.push(false);
-      updates.push(`is_system_penalized = $${params.length}`);
-      params.push(null);
-      updates.push(`penalty_status = $${params.length}`);
-      params.push(null);
-      updates.push(`absence_reason = $${params.length}`);
-    }
-
-    if (status) {
-      params.push(status);
-      updates.push(`status = $${params.length}`);
-    }
-
-    params.push(targetId);
-    let sql = `UPDATE attendance SET ${updates.join(", ")}, updated_at = CURRENT_TIMESTAMP WHERE id = $${params.length}`;
-    if (!isSuperAdmin && targetCompanyId) {
-      params.push(targetCompanyId);
-      sql += ` AND company_id = $${params.length}`;
-    }
-    sql += " RETURNING *";
-
-    const result = await query(sql, params);
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: "Attendance record not found or access denied." });
-    }
-
-    const updated = result.rows[0];
-
-    // Audit Log
+    // Audit logging
     auditService.logAudit({
       userId: reviewerId,
-      action: "ATTENDANCE_RECORD_REVIEWED",
-      resourceType: "attendance",
-      resourceId: targetId,
+      userEmail: req.user?.email,
+      userName: req.user?.name || "Administrator",
+      companyId,
+      action: decision === "approved" ? "REGULARIZATION_APPROVED" : "REGULARIZATION_REJECTED",
+      resourceType: "regularization",
+      resourceId: id,
       details: {
-        employeeId: updated.user_id,
-        date: updated.date,
-        adminNotes,
-        status,
-        unlocked: Boolean(unlock)
+        employeeId: regReq.user_id,
+        attendanceDate: regReq.attendance_date,
+        decision,
+        adminRemarks
       },
       req
     });
 
+    // Notify employee
+    await sendNotificationOnce({
+      userId: regReq.user_id,
+      title: `Regularization ${decision === "approved" ? "Approved" : "Rejected"}`,
+      message: `Your attendance regularization for ${formatDateStr(regReq.attendance_date)} has been ${decision}. Remarks: ${adminRemarks || "None"}`,
+      type: decision === "approved" ? "success" : "warning",
+      link: "/history",
+      io: req.app?.get("io"),
+      activityType: "regularization_reviewed",
+      entityId: id
+    }).catch(() => {});
+
+    res.json({ message: `Regularization request ${decision} successfully.`, request: result.rows[0] });
+  } catch (err) {
+    console.error("reviewRegularization error:", err);
+    res.status(500).json({ error: "Failed to review regularization request." });
+  }
+};
+
+// -------------------------------------------------------------
+// 7. POST /api/attendance/monitoring/unlock/:attendanceId
+// -------------------------------------------------------------
+export const unlockAttendance = async (req, res) => {
+  try {
+    if (!authorizeAdmin(req, res)) return;
+
+    let attendanceId = req.params.attendanceId || req.body.attendanceId;
+    const resolutionNotes = req.body.resolutionNotes || req.body.reason || "";
+    const companyId = await resolveCompanyId(req);
+
+    if (!attendanceId && req.body.userId && req.body.date) {
+      const findRow = await query(
+        `SELECT id FROM attendance WHERE user_id = $1 AND date = $2::date AND company_id = $3`,
+        [req.body.userId, req.body.date, companyId]
+      );
+      if (findRow.rows.length > 0) {
+        attendanceId = findRow.rows[0].id;
+      }
+    }
+
+    if (!attendanceId) {
+      return res.status(400).json({ error: "attendanceId or (userId and date) is required." });
+    }
+
+    const attRes = await query(
+      `SELECT * FROM attendance WHERE id = $1 AND company_id = $2`,
+      [attendanceId, companyId]
+    );
+
+    if (attRes.rows.length === 0) {
+      return res.status(404).json({ error: "Attendance record not found." });
+    }
+    const record = attRes.rows[0];
+
+    const updatedRes = await query(
+      `UPDATE attendance
+       SET status = CASE WHEN check_in IS NOT NULL THEN (CASE WHEN check_out IS NOT NULL THEN 'checked-out' ELSE 'present' END) ELSE 'not-checked-in' END,
+           is_admin_locked = FALSE,
+           penalty_status = NULL,
+           penalty_reason = NULL,
+           penalized_by_task_id = NULL,
+           auto_checked_out = FALSE,
+           updated_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [attendanceId]
+    );
+
+    // If penalized by task, clear task penalty flag as well
+    if (record.penalized_by_task_id) {
+      await query(
+        `UPDATE tasks SET sla_penalty_applied = FALSE WHERE id = $1`,
+        [record.penalized_by_task_id]
+      ).catch(() => {});
+    }
+
+    // Audit log
+    auditService.logAudit({
+      userId: req.user.id,
+      userEmail: req.user?.email,
+      userName: req.user?.name || "Administrator",
+      companyId,
+      action: "ATTENDANCE_UNLOCK",
+      resourceType: "attendance",
+      resourceId: attendanceId,
+      details: {
+        employeeId: record.user_id,
+        previousPenalty: record.penalty_status,
+        resolutionNotes
+      },
+      req
+    });
+
+    // Notify employee
+    await sendNotificationOnce({
+      userId: record.user_id,
+      title: "Attendance Unlocked",
+      message: `Your attendance has been unlocked by Administrator. Notes: ${resolutionNotes || "Resolved"}`,
+      type: "success",
+      link: "/dashboard",
+      io: req.app?.get("io"),
+      activityType: "attendance_unlocked",
+      entityId: attendanceId
+    }).catch(() => {});
+
+    res.json({ message: "Attendance unlocked successfully.", attendance: updatedRes.rows[0] });
+  } catch (err) {
+    console.error("unlockAttendance error:", err);
+    res.status(500).json({ error: "Failed to unlock attendance." });
+  }
+};
+
+// -------------------------------------------------------------
+// 8. POST /api/attendance/monitoring/manual-correct
+// -------------------------------------------------------------
+export const manualCorrectAttendance = async (req, res) => {
+  try {
+    if (!authorizeAdmin(req, res)) return;
+
+    const { userId, date, checkIn, checkOut, status, reason = "" } = req.body;
+    const companyId = await resolveCompanyId(req);
+
+    if (!userId || !date) {
+      return res.status(400).json({ error: "userId and date are required." });
+    }
+
+    // Verify employee belongs to company
+    const userRes = await query("SELECT id, name FROM users WHERE id = $1 AND company_id = $2", [userId, companyId]);
+    if (userRes.rows.length === 0) {
+      return res.status(404).json({ error: "Employee not found in your organization." });
+    }
+
+    const attId = `${userId}_${date}`;
+    let durationMins = 0;
+    if (checkIn && checkOut) {
+      durationMins = Math.max(0, Math.floor((new Date(checkOut) - new Date(checkIn)) / 60000));
+    }
+
+    const newStatus = status || (checkIn ? "present" : "absent");
+
+    const result = await query(
+      `INSERT INTO attendance (
+        id, user_id, company_id, date, check_in, check_out, status,
+        duration_minutes, accumulated_working_minutes, is_regularized, is_admin_locked,
+        penalty_status, penalty_reason, created_at, updated_at
+      )
+      VALUES ($1, $2, $3, $4::date, $5, $6, $7, $8, $8, TRUE, FALSE, NULL, NULL, NOW(), NOW())
+      ON CONFLICT (id) DO UPDATE SET
+        check_in = COALESCE(EXCLUDED.check_in, attendance.check_in),
+        check_out = COALESCE(EXCLUDED.check_out, attendance.check_out),
+        status = EXCLUDED.status,
+        duration_minutes = EXCLUDED.duration_minutes,
+        accumulated_working_minutes = EXCLUDED.accumulated_working_minutes,
+        is_regularized = TRUE,
+        is_admin_locked = FALSE,
+        penalty_status = NULL,
+        penalty_reason = NULL,
+        updated_at = NOW()
+      RETURNING *`,
+      [attId, userId, companyId, date, checkIn || null, checkOut || null, newStatus, durationMins]
+    );
+
+    // Audit log
+    auditService.logAudit({
+      userId: req.user.id,
+      userEmail: req.user?.email,
+      userName: req.user?.name || "Administrator",
+      companyId,
+      action: "ATTENDANCE_MANUAL_CORRECTION",
+      resourceType: "attendance",
+      resourceId: attId,
+      details: {
+        employeeId: userId,
+        date,
+        checkIn,
+        checkOut,
+        status: newStatus,
+        reason
+      },
+      req
+    });
+
+    res.json({ message: "Attendance record updated successfully.", attendance: result.rows[0] });
+  } catch (err) {
+    console.error("manualCorrectAttendance error:", err);
+    res.status(500).json({ error: "Failed to manually correct attendance." });
+  }
+};
+
+// -------------------------------------------------------------
+// 9. GET /api/attendance/monitoring/export
+// -------------------------------------------------------------
+export const exportAttendanceCsv = async (req, res) => {
+  try {
+    if (!authorizeAdmin(req, res)) return;
+
+    const companyId = await resolveCompanyId(req);
+    const tz = await getCompanyTimezone(companyId);
+    const isGeofenceEnabled = await getCompanyGeofenceEnabled(companyId);
+    const { startDate, endDate } = resolveDateRange(req.query, tz);
+
+    const usersRes = await query(
+      `SELECT id, name, email, employee_id, department, shift_start, shift_end 
+       FROM users WHERE company_id = $1 AND role <> 'superadmin'`,
+      [companyId]
+    );
+
+    const attRes = await query(
+      `SELECT * FROM attendance WHERE company_id = $1 AND date >= $2::date AND date <= $3::date ORDER BY date DESC, check_in DESC`,
+      [companyId, startDate, endDate]
+    );
+
+    const userMap = new Map();
+    usersRes.rows.forEach(u => userMap.set(u.id, u));
+
+    const csvHeaders = [
+      "Employee ID",
+      "Date",
+      "Employee Name",
+      "Email",
+      "Department",
+      "Shift",
+      "Check In",
+      "Check Out",
+      "Duration (Minutes)",
+      "Duration (Hours)",
+      "Late By (Minutes)",
+      "Early Departure (Minutes)",
+      "GPS Status",
+      "Location Place",
+      "Latitude",
+      "Longitude",
+      "Face Biometric",
+      "Attendance Status"
+    ];
+
+    const rows = [csvHeaders.join(",")];
+
+    attRes.rows.forEach(att => {
+      const u = userMap.get(att.user_id) || {};
+      const { lateByMinutes, earlyDepartureMinutes } = calculateLateAndEarly(
+        att.check_in,
+        att.check_out,
+        u.shift_start,
+        u.shift_end
+      );
+
+      const dStr = formatDateStr(att.date, tz);
+      const cIn = att.check_in ? formatTimeHHMM(att.check_in) : "--:--";
+      const cOut = att.check_out ? formatTimeHHMM(att.check_out) : "--:--";
+      const durMins = Number(att.duration_minutes || att.accumulated_working_minutes) || 0;
+      const durHrs = (durMins / 60).toFixed(2);
+
+      const loc = att.check_in_location || att.location || {};
+      const lat = att.latitude != null ? att.latitude : (loc.latitude != null ? loc.latitude : "");
+      const lon = att.longitude != null ? att.longitude : (loc.longitude != null ? loc.longitude : "");
+      const place = att.resolved_address || loc.locationName || (lat !== "" && lon !== "" ? `${lat}, ${lon}` : "Not Available");
+      const gpsStatus = evaluateGpsVerification(att, null, isGeofenceEnabled);
+      const { faceBiometricStatus } = evaluateBiometricVerification(null, att);
+
+      const row = [
+        `"${u.employee_id || u.id || ""}"`,
+        `"${formatDateReadable(dStr)}"`,
+        `"${u.name || "Employee"}"`,
+        `"${u.email || ""}"`,
+        `"${u.department || "General"}"`,
+        `"${(u.shift_start || "10:00") + " - " + (u.shift_end || "19:00")}"`,
+        `"${cIn}"`,
+        `"${cOut}"`,
+        durMins,
+        durHrs,
+        lateByMinutes,
+        earlyDepartureMinutes,
+        `"${gpsStatus}"`,
+        `"${String(place).replace(/"/g, '""')}"`,
+        lat !== "" ? lat : '""',
+        lon !== "" ? lon : '""',
+        `"${faceBiometricStatus}"`,
+        `"${att.status || "present"}"`
+      ];
+
+      rows.push(row.join(","));
+    });
+
+    const csvContent = rows.join("\n");
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Disposition", `attachment; filename="attendance_report_${startDate}_to_${endDate}.csv"`);
+    res.send(csvContent);
+  } catch (err) {
+    console.error("exportAttendanceCsv error:", err);
+    res.status(500).json({ error: "Failed to export attendance CSV." });
+  }
+};
+
+// -------------------------------------------------------------
+// 10. POST /api/attendance/monitoring/reverse-geocode
+// -------------------------------------------------------------
+export const resolveAddressEndpoint = async (req, res) => {
+  try {
+    if (!authorizeAdmin(req, res)) return;
+    const { latitude, longitude, attendanceId } = req.body;
+    if (latitude == null || longitude == null) {
+      return res.status(400).json({ error: "Latitude and longitude are required." });
+    }
+    const address = await reverseGeocode(latitude, longitude);
+    if (address && attendanceId) {
+      await query(
+        `UPDATE attendance 
+         SET resolved_address = $1, 
+             check_in_location = jsonb_set(COALESCE(check_in_location, '{}'::jsonb), '{locationName}', to_jsonb($1::text)),
+             location = jsonb_set(COALESCE(location, '{}'::jsonb), '{locationName}', to_jsonb($1::text))
+         WHERE id = $2`,
+        [address, attendanceId]
+      ).catch(() => {});
+    }
     res.json({
-      success: true,
-      record: updated,
-      message: "Attendance record updated successfully."
+      address: address || `${Number(latitude).toFixed(4)}, ${Number(longitude).toFixed(4)}`,
+      formatted: address,
+      latitude: Number(latitude),
+      longitude: Number(longitude)
     });
   } catch (err) {
-    console.error("reviewAttendanceRecord error:", err);
-    res.status(500).json({ error: "Failed to review attendance record." });
+    console.error("resolveAddressEndpoint error:", err);
+    res.status(500).json({ error: "Failed to reverse geocode coordinates." });
   }
 };

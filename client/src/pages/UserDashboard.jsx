@@ -70,7 +70,6 @@ import {
   ShieldAlert
 } from "lucide-react";
 import CustomDateRangePicker from "../components/CustomDateRangePicker";
-import { formatDisplayDate, calculateLeaveDuration, getCleanDateOnly, hasDateOverlap } from "../utils/dateUtils";
 
 
 const numberToWords = (num) => {
@@ -232,7 +231,6 @@ export default function UserDashboard() {
   const [endDate, setEndDate] = useState("");
   const [leaveReason, setLeaveReason] = useState("");
   const [isEmergency, setIsEmergency] = useState(false);
-  const [isLeaveOverlapping, setIsLeaveOverlapping] = useState(false);
   const [myLeaveRequests, setMyLeaveRequests] = useState([]);
   const [selectedPaidLeaveDetail, setSelectedPaidLeaveDetail] = useState(null);
 
@@ -962,17 +960,25 @@ export default function UserDashboard() {
     const todayString = getLocalDateString();
     const tomorrowString = getTomorrowDateString();
 
-    const cleanStart = getCleanDateOnly(startDate);
-    const cleanEnd = getCleanDateOnly(finalEndDate) || cleanStart;
+    const startD = new Date(startDate);
+    startD.setHours(0, 0, 0, 0);
+    const endD = new Date(finalEndDate);
+    endD.setHours(0, 0, 0, 0);
+
+    const todayDateObj = new Date(todayString);
+    todayDateObj.setHours(0, 0, 0, 0);
+
+    const tomorrowDateObj = new Date(tomorrowString);
+    tomorrowDateObj.setHours(0, 0, 0, 0);
 
     // Validate standard leaves vs emergency leaves start date limits
     if (!isEmergency) {
-      if (cleanStart === todayString || cleanStart < tomorrowString) {
+      if (startDate === todayString || startD < tomorrowDateObj) {
         return showToast("Standard leave requests must start from tomorrow. Choose Emergency Leave to apply for today.", "warning");
       }
     } else {
       // Validate emergency leaves applied for today must be before shift start
-      if (cleanStart === todayString) {
+      if (startDate === todayString) {
         if (currentUser?.shiftStart) {
           const now = new Date();
           const [shiftH, shiftM] = String(currentUser.shiftStart).split(":").map(Number);
@@ -984,31 +990,17 @@ export default function UserDashboard() {
             return showToast(`Emergency leave for today must be applied before your shift starts at ${formattedShiftTime}.`, "warning");
           }
         }
-      } else if (cleanStart < todayString) {
+      } else if (startD < todayDateObj) {
         return showToast("Emergency leave cannot start in the past.", "warning");
       }
     }
 
-    if (cleanEnd < cleanStart) {
+    if (endD < startD) {
       return showToast("End Date cannot be before Start Date.", "warning");
     }
 
-    // 1 & 2 & 3. Before calculating leave duration, check employee's existing leave requests (Pending and Approved)
-    const hasOverlap = myLeaveRequests.some(leave => {
-      const st = String(leave.status || "").toLowerCase();
-      if (st !== "pending" && st !== "approved") return false;
-      const exStart = getCleanDateOnly(leave.startDate || leave.start_date);
-      const exEnd = getCleanDateOnly(leave.endDate || leave.end_date) || exStart;
-      if (!exStart) return false;
-      return hasDateOverlap(cleanStart, cleanEnd, exStart, exEnd);
-    });
-
-    if (hasOverlap || isLeaveOverlapping) {
-      return showToast("You already have a leave request for some of these dates. Please select a different date range.", "error");
-    }
-
-    // 5. If there is no overlap, calculate the leave duration correctly
-    const diffDays = calculateLeaveDuration(cleanStart, cleanEnd);
+    const diffTime = Math.abs(endD - startD);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
     const durationStr = `${diffDays} Day${diffDays > 1 ? "s" : ""}`;
 
     setActionLoading(true);
@@ -1019,8 +1011,8 @@ export default function UserDashboard() {
         currentUser.department || "Engineering",
         leaveType,
         durationStr,
-        cleanStart,
-        cleanEnd,
+        startDate,
+        finalEndDate,
         leaveReason,
         null,
         isEmergency,
@@ -1845,8 +1837,6 @@ export default function UserDashboard() {
                     setStartDate={setStartDate}
                     setEndDate={setEndDate}
                     minDate={isEmergency ? todayStr : tomorrowStr}
-                    existingLeaves={myLeaveRequests}
-                    onOverlapChange={setIsLeaveOverlapping}
                   />
                 </div>
 
@@ -1878,12 +1868,6 @@ export default function UserDashboard() {
                 </div>
 
                 {/* Submit Buttons */}
-                {isLeaveOverlapping && (
-                  <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-[12px] text-red-500 dark:text-red-400 text-xs font-bold flex items-center gap-2 mb-2 text-left">
-                    <AlertCircle size={16} className="flex-shrink-0" />
-                    <span>You already have a leave request for some of these dates. Please select a different date range.</span>
-                  </div>
-                )}
                 <div className="flex justify-end gap-3 border-t border-border-card pt-4">
                   <button
                     type="button"
@@ -1892,7 +1876,6 @@ export default function UserDashboard() {
                       setStartDate("");
                       setEndDate("");
                       setLeaveReason("");
-                      setIsLeaveOverlapping(false);
                       navigate("/dashboard");
                     }}
                     className="py-2.5 px-6 border border-border-card rounded-[12px] bg-bg-card hover:bg-bg-base text-text-sec text-xs font-bold transition-all cursor-pointer"
@@ -1902,13 +1885,8 @@ export default function UserDashboard() {
                   </button>
                   <button
                     type="submit"
-                    className={`py-2.5 px-6 text-white text-xs font-bold rounded-[12px] transition-colors ${
-                      isLeaveOverlapping
-                        ? "bg-slate-400 cursor-not-allowed opacity-60"
-                        : "bg-brand-primary hover:bg-brand-hover cursor-pointer"
-                    }`}
-                    disabled={actionLoading || isLeaveOverlapping}
-                    title={isLeaveOverlapping ? "You already have a leave request for some of these dates. Please select a different date range." : ""}
+                    className="py-2.5 px-6 bg-brand-primary text-white text-xs font-bold rounded-[12px] hover:bg-brand-hover transition-colors cursor-pointer"
+                    disabled={actionLoading}
                   >
                     {actionLoading ? "Submitting..." : "Submit Request"}
                   </button>
@@ -1943,8 +1921,8 @@ export default function UserDashboard() {
                           statusColor = "bg-red-500/10 text-red-500";
                         }
 
-                        const startF = req.startDate ? formatDisplayDate(req.startDate) : "";
-                        const endF = req.endDate ? formatDisplayDate(req.endDate) : "";
+                        const startF = req.startDate ? new Date(req.startDate).toLocaleDateString([], { month: "short", day: "numeric" }) : "";
+                        const endF = req.endDate ? new Date(req.endDate).toLocaleDateString([], { month: "short", day: "numeric" }) : "";
 
                         
   const handleDownloadPayslip = () => {
@@ -2367,12 +2345,12 @@ export default function UserDashboard() {
                     <span className="bg-brand-primary/10 text-brand-primary text-[8px] font-black px-2.5 py-1 rounded-full whitespace-nowrap">
                       {pl.startDate && pl.endDate ? (
                         pl.startDate === pl.endDate ? (
-                          formatDisplayDate(pl.startDate)
+                          new Date(pl.startDate).toLocaleDateString([], { month: "short", day: "numeric" })
                         ) : (
-                          `${formatDisplayDate(pl.startDate)} - ${formatDisplayDate(pl.endDate)}`
+                          `${new Date(pl.startDate).toLocaleDateString([], { month: "short", day: "numeric" })} - ${new Date(pl.endDate).toLocaleDateString([], { month: "short", day: "numeric" })}`
                         )
                       ) : (
-                        formatDisplayDate(pl.date || pl.createdAt)
+                        new Date(pl.date || pl.createdAt).toLocaleDateString([], { month: "short", day: "numeric" })
                       )}
                     </span>
                     <button
@@ -2660,6 +2638,12 @@ export default function UserDashboard() {
                     <span className="text-[9px] font-bold text-text-sec uppercase tracking-wide">
                       Active Shift Duration
                     </span>
+                    {(!userTasks || userTasks.filter(t => !t.completed).length === 0) && (
+                      <div className="mt-2 text-[11px] text-text-sec flex items-center justify-center gap-1.5 bg-bg-card/60 py-1 px-2.5 rounded-full border border-border-card/60">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                        <span>No active task assigned. Attendance is not affected by task acknowledgement requirements.</span>
+                      </div>
+                    )}
                   </div>
 
                   {/* Daily 3-Break System: Resumed breaks are removed from system */}
@@ -3249,12 +3233,12 @@ export default function UserDashboard() {
                   <span className="text-sm font-bold text-text-main mt-0.5 block">
                     {selectedPaidLeaveDetail.startDate && selectedPaidLeaveDetail.endDate ? (
                       selectedPaidLeaveDetail.startDate === selectedPaidLeaveDetail.endDate ? (
-                        formatDisplayDate(selectedPaidLeaveDetail.startDate, { full: true, weekday: true })
+                        new Date(selectedPaidLeaveDetail.startDate).toLocaleDateString([], { weekday: 'long', month: "long", day: "numeric", year: "numeric" })
                       ) : (
-                        `${formatDisplayDate(selectedPaidLeaveDetail.startDate, { includeYear: true })} to ${formatDisplayDate(selectedPaidLeaveDetail.endDate, { includeYear: true })}`
+                        `${new Date(selectedPaidLeaveDetail.startDate).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })} to ${new Date(selectedPaidLeaveDetail.endDate).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })}`
                       )
                     ) : (
-                      formatDisplayDate(selectedPaidLeaveDetail.date || selectedPaidLeaveDetail.createdAt, { full: true, weekday: true })
+                      new Date(selectedPaidLeaveDetail.date || selectedPaidLeaveDetail.createdAt).toLocaleDateString([], { weekday: 'long', month: "long", day: "numeric", year: "numeric" })
                     )}
                   </span>
                 </div>

@@ -2,39 +2,6 @@ import { query } from "../config/db.js";
 import { sendLeaveRequestNotification, sendLeaveStatusEmail } from "../services/emailService.js";
 import { sendNotificationOnce } from "../services/notificationService.js";
 
-/**
- * Extracts pure YYYY-MM-DD from string or Date object without timezone shift.
- */
-export const formatDateOnly = (val) => {
-  if (!val) return "";
-  if (typeof val === "string") {
-    const match = val.match(/^(\d{4})-(\d{2})-(\d{2})/);
-    if (match) return `${match[1]}-${match[2]}-${match[3]}`;
-  }
-  if (val instanceof Date) {
-    if (isNaN(val.getTime())) return "";
-    const y = val.getFullYear();
-    const m = String(val.getMonth() + 1).padStart(2, "0");
-    const d = String(val.getDate()).padStart(2, "0");
-    return `${y}-${m}-${d}`;
-  }
-  return String(val).substring(0, 10);
-};
-
-export const calculateDaysBetween = (startDate, endDate) => {
-  const s = formatDateOnly(startDate);
-  const e = formatDateOnly(endDate) || s;
-  if (!s) return 0;
-  if (!e) return 1;
-  const [y1, m1, d1] = s.split("-").map(Number);
-  const [y2, m2, d2] = e.split("-").map(Number);
-  if (!y1 || !y2) return 1;
-  const utc1 = Date.UTC(y1, m1 - 1, d1);
-  const utc2 = Date.UTC(y2, m2 - 1, d2);
-  const diffDays = Math.round((utc2 - utc1) / (1000 * 60 * 60 * 24)) + 1;
-  return diffDays > 0 ? diffDays : 0;
-};
-
 export const getLeaveRequests = async (req, res) => {
   try {
     const { companyId, userId, status } = req.query;
@@ -75,8 +42,8 @@ export const getLeaveRequests = async (req, res) => {
     const leaves = result.rows.map(row => {
       const totalDays = Number(row.total_days || 1);
       const leaveType = row.leave_type || "Casual Leave";
-      const startDateStr = formatDateOnly(row.start_date);
-      const endDateStr = formatDateOnly(row.end_date);
+      const startDateStr = row.start_date ? (typeof row.start_date === "string" ? row.start_date.split("T")[0] : new Date(row.start_date).toISOString().split("T")[0]) : "";
+      const endDateStr = row.end_date ? (typeof row.end_date === "string" ? row.end_date.split("T")[0] : new Date(row.end_date).toISOString().split("T")[0]) : "";
       const durationStr = `${totalDays} Day${totalDays > 1 ? "s" : ""}`;
 
       return {
@@ -141,40 +108,9 @@ export const createLeaveRequest = async (req, res) => {
       return res.status(400).json({ error: "Missing required leave request fields." });
     }
 
-    const cleanStartDate = formatDateOnly(startDate);
-    const cleanEndDate = formatDateOnly(endDate);
-
-    if (cleanEndDate < cleanStartDate) {
-      return res.status(400).json({ error: "End Date cannot be before Start Date." });
-    }
-
-    // 1. Before calculating leave duration, check the employee's existing leave requests.
-    // 2. Check both Pending and Approved leave requests.
-    // 3. Detect overlapping dates using: newStartDate <= existingEndDate && newEndDate >= existingStartDate
-    const existingRes = await query(
-      `SELECT id, leave_type, start_date, end_date, total_days, status
-       FROM leave_requests
-       WHERE user_id = $1
-         AND status IN ('pending', 'approved')`,
-      [userId]
-    );
-
-    const hasOverlap = existingRes.rows.some(r => {
-      const existingStartDate = formatDateOnly(r.start_date);
-      const existingEndDate = formatDateOnly(r.end_date) || existingStartDate;
-      if (!existingStartDate) return false;
-      return cleanStartDate <= existingEndDate && cleanEndDate >= existingStartDate;
-    });
-
-    if (hasOverlap) {
-      return res.status(400).json({
-        error: "You already have a leave request for some of these dates. Please select a different date range."
-      });
-    }
-
-    // 5. If there is no overlap, calculate duration correctly
-    const calculatedDays = calculateDaysBetween(cleanStartDate, cleanEndDate);
-    const parsedDays = calculatedDays > 0 ? calculatedDays : Number(parseInt(totalDays) || 1);
+    const cleanStartDate = String(startDate).split("T")[0];
+    const cleanEndDate = String(endDate).split("T")[0];
+    const parsedDays = Number(parseInt(totalDays) || 1);
 
     const id = "leave_" + Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
     const result = await query(
@@ -319,14 +255,21 @@ export const updateLeaveStatus = async (req, res) => {
 
       // Populate attendance records as 'on-leave'
       try {
-        const startStr = formatDateOnly(updatedLeave.start_date);
-        const endStr = formatDateOnly(updatedLeave.end_date);
+        const toLocalDateStr = (val) => {
+          if (!val) return "";
+          if (typeof val === "string" && /^\d{4}-\d{2}-\d{2}/.test(val)) return val.substring(0, 10);
+          const d = new Date(val);
+          if (isNaN(d.getTime())) return "";
+          const ist = new Date(d.getTime() + (5.5 * 60 * 60 * 1000));
+          return ist.toISOString().split("T")[0];
+        };
+
+        const startStr = toLocalDateStr(updatedLeave.start_date);
+        const endStr = toLocalDateStr(updatedLeave.end_date);
 
         if (startStr && endStr) {
-          const [y1, m1, d1] = startStr.split('-').map(Number);
-          const [y2, m2, d2] = endStr.split('-').map(Number);
-          let curr = new Date(Date.UTC(y1, m1 - 1, d1, 12, 0, 0));
-          const endLimit = new Date(Date.UTC(y2, m2 - 1, d2, 12, 0, 0));
+          let curr = new Date(startStr + "T00:00:00Z");
+          const endLimit = new Date(endStr + "T00:00:00Z");
           while (curr <= endLimit) {
             const dayStr = curr.toISOString().split("T")[0];
             const attId = `${updatedLeave.user_id}_${dayStr}`;
@@ -360,8 +303,17 @@ export const updateLeaveStatus = async (req, res) => {
 
       // Remove on-leave attendance entries
       try {
-        const startStr = formatDateOnly(updatedLeave.start_date);
-        const endStr = formatDateOnly(updatedLeave.end_date);
+        const toLocalDateStr = (val) => {
+          if (!val) return "";
+          if (typeof val === "string" && /^\d{4}-\d{2}-\d{2}/.test(val)) return val.substring(0, 10);
+          const d = new Date(val);
+          if (isNaN(d.getTime())) return "";
+          const ist = new Date(d.getTime() + (5.5 * 60 * 60 * 1000));
+          return ist.toISOString().split("T")[0];
+        };
+
+        const startStr = toLocalDateStr(updatedLeave.start_date);
+        const endStr = toLocalDateStr(updatedLeave.end_date);
 
         if (startStr && endStr) {
           await query(
@@ -407,8 +359,8 @@ export const updateLeaveStatus = async (req, res) => {
     })();
 
     const leaveType = updatedLeave.leave_type || "Casual Leave";
-    const startDateStr = formatDateOnly(updatedLeave.start_date);
-    const endDateStr = formatDateOnly(updatedLeave.end_date);
+    const startDateStr = updatedLeave.start_date ? (typeof updatedLeave.start_date === "string" ? updatedLeave.start_date.split("T")[0] : new Date(updatedLeave.start_date).toISOString().split("T")[0]) : "";
+    const endDateStr = updatedLeave.end_date ? (typeof updatedLeave.end_date === "string" ? updatedLeave.end_date.split("T")[0] : new Date(updatedLeave.end_date).toISOString().split("T")[0]) : "";
 
     res.json({
       ...updatedLeave,
@@ -471,8 +423,8 @@ export const getPaidLeaves = async (req, res) => {
     res.json(result.rows.map(r => ({
       ...r,
       companyId: r.company_id,
-      startDate: formatDateOnly(r.start_date),
-      endDate: formatDateOnly(r.end_date)
+      startDate: r.start_date,
+      endDate: r.end_date
     })));
   } catch (err) {
     console.error("getPaidLeaves error:", err);
@@ -519,8 +471,8 @@ export const updatePaidLeaveStatus = async (req, res) => {
     res.json({
       ...r,
       companyId: r.company_id,
-      startDate: formatDateOnly(r.start_date),
-      endDate: formatDateOnly(r.end_date)
+      startDate: r.start_date,
+      endDate: r.end_date
     });
   } catch (err) {
     console.error("updatePaidLeaveStatus error:", err);

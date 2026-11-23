@@ -831,6 +831,14 @@ export default function DashboardLayout({ children }) {
         onClick: () => { navigate("/admin?tab=live"); setIsMobileOpen(false); }
       });
     }
+    if (isAdminUser || can("read", "EmployeeManagement")) {
+      menuItems.push({
+        label: "Staff Directory",
+        icon: Users,
+        active: location.pathname === "/admin" && activeTabParam === "users",
+        onClick: () => { navigate("/admin?tab=users"); setIsMobileOpen(false); }
+      });
+    }
     if (isAdminUser || can("read", "AttendanceMonitoring") || can("read", "LiveActivity") || can("read", "Dashboard")) {
       menuItems.push({
         label: "Attendance Monitoring",
@@ -838,14 +846,6 @@ export default function DashboardLayout({ children }) {
         active: location.pathname === "/admin" && activeTabParam === "attendance-monitoring",
         module: "attendance",
         onClick: () => { navigate("/admin?tab=attendance-monitoring"); setIsMobileOpen(false); }
-      });
-    }
-    if (isAdminUser || can("read", "EmployeeManagement")) {
-      menuItems.push({
-        label: "Staff Directory",
-        icon: Users,
-        active: location.pathname === "/admin" && activeTabParam === "users",
-        onClick: () => { navigate("/admin?tab=users"); setIsMobileOpen(false); }
       });
     }
     if (isAdminUser || can("read", "LeaveApprovals")) {

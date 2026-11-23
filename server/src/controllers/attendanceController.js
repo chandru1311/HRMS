@@ -10,6 +10,7 @@ import { isValidEmbedding, evaluateFaceMatch } from "../services/faceVerificatio
 import { validateEnrollmentPayload, canEnrollFace } from "../services/faceEnrollmentValidation.js";
 import { generateVerificationSessionToken, hashToken } from "../services/livenessVerification.js";
 import { validateServerGeofence } from "../utils/geofence.js";
+import { reverseGeocode } from "../services/reverseGeocodingService.js";
 import { withTransaction } from "../utils/transaction.js";
 import { sendNotificationOnce } from "../services/notificationService.js";
 
@@ -807,7 +808,7 @@ export const adminRevertPenalty = async (req, res) => {
     await query(
       "DELETE FROM attendance WHERE user_id = $1 AND date = $2 AND id != $3",
       [record.user_id, record.date, record.id]
-    ).catch(() => {});
+    ).catch(() => { });
     const updatedAttendance = attRes.rows[0];
     const updated = updatedAttendance || record;
 
@@ -927,7 +928,7 @@ export const getFaceStatus = async (req, res) => {
     const row = result.rows[0];
     let meta = (row.metadata && typeof row.metadata === "object") ? { ...row.metadata } : {};
     if (typeof row.metadata === "string") {
-      try { meta = JSON.parse(row.metadata); } catch {}
+      try { meta = JSON.parse(row.metadata); } catch { }
     }
 
     const reenrollPerm = await getActiveFaceReenrollmentPermission(targetUserId, row.company_id || companyId);
@@ -1540,8 +1541,8 @@ export const getAttendance = async (req, res) => {
         }
       }
 
-      const durationHours = totalMins > 0 
-        ? (totalMins / 60).toFixed(2) 
+      const durationHours = totalMins > 0
+        ? (totalMins / 60).toFixed(2)
         : (row.check_out ? "0.00" : (row.check_in ? "Live" : "0.00"));
 
       // Extract reliable local YYYY-MM-DD from date_str, id suffix, or check_in
@@ -1657,12 +1658,66 @@ export const checkIn = async (req, res) => {
       });
     }
 
+    const consumedSession = sessionRes.rows[0];
+    const attemptId = consumedSession?.attempt_id || null;
+    const sessionId = consumedSession?.id || null;
+    const verificationMeta = {
+      verificationAttemptId: attemptId,
+      verificationSessionId: sessionId,
+      verificationMethod: "FACE",
+      verifiedAt: now
+    };
+
     const geoCheck = await validateServerGeofence({ companyId, location, user: req.user });
     if (!geoCheck.allowed) {
       return res.status(400).json({
         error: geoCheck.reason || "Check-in denied: You are outside the permitted workplace area."
       });
     }
+
+    // Extract & validate GPS location parameters
+    const rawLat = location?.latitude ?? location?.lat;
+    const rawLon = location?.longitude ?? location?.lng ?? location?.lon;
+    const accuracy = location?.accuracy != null && !isNaN(Number(location.accuracy)) ? Number(location.accuracy) : null;
+    const numLat = rawLat !== null && rawLat !== undefined && rawLat !== "" ? Number(rawLat) : null;
+    const numLon = rawLon !== null && rawLon !== undefined && rawLon !== "" ? Number(rawLon) : null;
+    const hasValidCoords = numLat !== null && numLon !== null && !isNaN(numLat) && !isNaN(numLon) && (numLat !== 0 || numLon !== 0) && numLat >= -90 && numLat <= 90 && numLon >= -180 && numLon <= 180;
+
+    let locationStatus = "Not Available";
+    if (hasValidCoords) {
+      if (accuracy !== null && accuracy > 500) {
+        locationStatus = "Accuracy Insufficient";
+      } else if (geoCheck.gpsResult === "not_required") {
+        locationStatus = "Location Captured";
+      } else if (geoCheck.allowed) {
+        locationStatus = "Verified";
+      } else {
+        locationStatus = "Outside Geofence";
+      }
+    }
+
+    let resolvedAddress = location?.locationName || location?.address || null;
+    if (hasValidCoords && (!resolvedAddress || !resolvedAddress.includes(","))) {
+      try {
+        const geoAddress = await Promise.race([
+          reverseGeocode(numLat, numLon),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("geo_timeout")), 800))
+        ]).catch(() => null);
+        if (geoAddress) {
+          resolvedAddress = geoAddress;
+        }
+      } catch (e) {}
+    }
+
+    const locationPayload = {
+      latitude: hasValidCoords ? numLat : null,
+      longitude: hasValidCoords ? numLon : null,
+      accuracy: accuracy,
+      locationName: resolvedAddress || (hasValidCoords ? `${numLat.toFixed(4)}, ${numLon.toFixed(4)}` : "Office / Remote (Location unavailable)"),
+      inGeofence: geoCheck.gpsResult === "inside",
+      status: locationStatus,
+      capturedAt: hasValidCoords ? now : null
+    };
 
     const existingRes = await query(
       `SELECT * FROM attendance 
@@ -1679,9 +1734,30 @@ export const checkIn = async (req, res) => {
       const targetId = prev.id || recordId;
 
       if (prev.is_admin_locked) {
-        return res.status(403).json({
-          error: "Your attendance is currently locked by Administrator. Please contact your Admin to unlock your attendance before checking in."
-        });
+        // Fail-safe: If attendance was locked due to task compliance but employee has 0 active tasks, auto-resolve false lock
+        if (prev.penalty_status === "unseen_task_penalty" || prev.penalty_status === "missed_hourly_report_penalty") {
+          const activeTasks = await query(
+            `SELECT id FROM tasks WHERE assigned_to = $1 AND company_id = $2 AND status NOT IN ('completed', 'cancelled', 'suspended')`,
+            [userId, companyId]
+          );
+          if (activeTasks.rows.length === 0) {
+            await query(
+              `UPDATE attendance 
+               SET is_admin_locked = FALSE, penalty_status = NULL, penalty_reason = NULL, penalized_by_task_id = NULL 
+               WHERE id = $1`,
+              [targetId]
+            );
+            prev.is_admin_locked = false;
+          } else {
+            return res.status(403).json({
+              error: "Your attendance is currently locked due to task compliance policy. Please contact your Admin."
+            });
+          }
+        } else {
+          return res.status(403).json({
+            error: "Your attendance is currently locked by Administrator. Please contact your Admin to unlock your attendance before checking in."
+          });
+        }
       }
 
       // 1. Ensure any previous sessions are closed and deduplicated
@@ -1748,7 +1824,9 @@ export const checkIn = async (req, res) => {
         checkOut: null,
         durationMinutes: 0,
         breaks: [],
-        checkInLocation: location || {}
+        checkInLocation: locationPayload,
+        verificationAttemptId: attemptId,
+        verificationSessionId: sessionId
       });
       sessions = cleanSessions;
 
@@ -1759,6 +1837,7 @@ export const checkIn = async (req, res) => {
              check_out = NULL,
              status = 'present',
              check_in_location = $2,
+             location = $2,
              sessions = $3,
              accumulated_working_minutes = $4,
              duration_minutes = $4,
@@ -1768,10 +1847,33 @@ export const checkIn = async (req, res) => {
              penalty_reason = NULL,
              penalized_by_task_id = NULL,
              auto_checked_out = FALSE,
+             biometric_verified = TRUE,
+             verification_method = 'FACE',
+             metadata = COALESCE(attendance.metadata, '{}'::jsonb) || $7::jsonb,
+             latitude = $8,
+             longitude = $9,
+             accuracy = $10,
+             resolved_address = $11,
+             location_status = $12,
+             location_captured_at = $13,
              updated_at = CURRENT_TIMESTAMP
          WHERE id = $6 OR id = $5
          RETURNING *`,
-        [now, JSON.stringify(location || {}), JSON.stringify(sessions), accumulatedMins, recordId, targetId]
+        [
+          now,
+          JSON.stringify(locationPayload),
+          JSON.stringify(sessions),
+          accumulatedMins,
+          recordId,
+          targetId,
+          JSON.stringify(verificationMeta),
+          hasValidCoords ? numLat : null,
+          hasValidCoords ? numLon : null,
+          accuracy,
+          resolvedAddress,
+          locationStatus,
+          hasValidCoords ? now : null
+        ]
       );
       row = updateRes.rows[0];
 
@@ -1779,7 +1881,7 @@ export const checkIn = async (req, res) => {
       await query(
         `DELETE FROM attendance WHERE user_id = $1 AND date = $2 AND id != $3`,
         [userId, today, recordId]
-      ).catch(() => {});
+      ).catch(() => { });
     } else {
       sessions = [{
         sessionId: `sess_${Date.now()}_1`,
@@ -1787,27 +1889,75 @@ export const checkIn = async (req, res) => {
         checkOut: null,
         durationMinutes: 0,
         breaks: [],
-        checkInLocation: location || {}
+        checkInLocation: locationPayload,
+        verificationAttemptId: attemptId,
+        verificationSessionId: sessionId
       }];
 
       const insertRes = await query(
-        `INSERT INTO attendance (id, user_id, company_id, date, check_in, status, work_mode, check_in_location, location, sessions, accumulated_working_minutes, duration_minutes)
-         VALUES ($1, $2, $3, $4, $5, 'present', $6, $7, $7, $8, 0, 0)
+        `INSERT INTO attendance (
+           id, user_id, company_id, date, check_in, status, work_mode,
+           check_in_location, location, sessions, accumulated_working_minutes,
+           duration_minutes, biometric_verified, verification_method, metadata,
+           latitude, longitude, accuracy, resolved_address, location_status, location_captured_at
+         )
+         VALUES ($1, $2, $3, $4, $5, 'present', $6, $7, $7, $8, 0, 0, TRUE, 'FACE', $9, $10, $11, $12, $13, $14, $15)
          ON CONFLICT (id) DO UPDATE SET
            check_in = EXCLUDED.check_in,
            check_out = NULL,
            status = 'present',
            check_in_location = EXCLUDED.check_in_location,
+           location = EXCLUDED.location,
            sessions = EXCLUDED.sessions,
+           biometric_verified = TRUE,
+           verification_method = 'FACE',
+           metadata = COALESCE(attendance.metadata, '{}'::jsonb) || EXCLUDED.metadata,
+           latitude = EXCLUDED.latitude,
+           longitude = EXCLUDED.longitude,
+           accuracy = EXCLUDED.accuracy,
+           resolved_address = EXCLUDED.resolved_address,
+           location_status = EXCLUDED.location_status,
+           location_captured_at = EXCLUDED.location_captured_at,
            is_admin_locked = FALSE,
            penalty_status = NULL,
            penalty_reason = NULL,
            auto_checked_out = FALSE,
            updated_at = CURRENT_TIMESTAMP
          RETURNING *`,
-        [recordId, userId, companyId, today, now, workMode, JSON.stringify(location || {}), JSON.stringify(sessions)]
+        [
+          recordId,
+          userId,
+          companyId,
+          today,
+          now,
+          workMode,
+          JSON.stringify(locationPayload),
+          JSON.stringify(sessions),
+          JSON.stringify(verificationMeta),
+          hasValidCoords ? numLat : null,
+          hasValidCoords ? numLon : null,
+          accuracy,
+          resolvedAddress,
+          locationStatus,
+          hasValidCoords ? now : null
+        ]
       );
       row = insertRes.rows[0];
+    }
+
+    if (hasValidCoords && (!resolvedAddress || !resolvedAddress.includes(","))) {
+      reverseGeocode(numLat, numLon).then(async (bgAddr) => {
+        if (bgAddr && row?.id) {
+          await query(
+            `UPDATE attendance 
+             SET resolved_address = $1, 
+                 check_in_location = jsonb_set(COALESCE(check_in_location, '{}'::jsonb), '{locationName}', to_jsonb($1::text)),
+                 location = jsonb_set(COALESCE(location, '{}'::jsonb), '{locationName}', to_jsonb($1::text))
+             WHERE id = $2`,
+            [bgAddr, row.id]
+          ).catch(() => {});
+        }
+      }).catch(() => {});
     }
 
     const checkInDate = row.check_in ? new Date(row.check_in) : new Date();
