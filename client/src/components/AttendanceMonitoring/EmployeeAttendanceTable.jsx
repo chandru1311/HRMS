@@ -48,9 +48,12 @@ export default function EmployeeAttendanceTable({
       } else if (sortField === "checkIn") {
         valA = a.check_in_time || a.checkIn || "";
         valB = b.check_in_time || b.checkIn || "";
-      } else if (sortField === "workingHours") {
-        valA = Number(a.working_hours || a.workingHours || 0);
-        valB = Number(b.working_hours || b.workingHours || 0);
+      } else if (sortField === "workingHours" || sortField === "netWorkingHours") {
+        valA = Number(a.netWorkingMinutes || a.workingMinutes || a.working_hours || 0);
+        valB = Number(b.netWorkingMinutes || b.workingMinutes || b.working_hours || 0);
+      } else if (sortField === "totalBreakDuration") {
+        valA = Number(a.totalBreakMinutes || a.total_break_minutes || 0);
+        valB = Number(b.totalBreakMinutes || b.total_break_minutes || 0);
       } else if (sortField === "status") {
         valA = a.attendance_status || a.status || "";
         valB = b.attendance_status || b.status || "";
@@ -234,6 +237,43 @@ export default function EmployeeAttendanceTable({
     );
   };
 
+  const renderBreakBadge = (breakObj) => {
+    const isTaken = breakObj && breakObj.taken !== false && breakObj.duration !== "Not Taken" && breakObj.duration !== "—";
+    if (!isTaken) {
+      return (
+        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-zinc-800/80 text-zinc-500 border border-zinc-800">
+          Not Taken
+        </span>
+      );
+    }
+    const isOngoing = breakObj.status === "Ongoing" || breakObj.isOngoing || String(breakObj.duration || "").includes("Ongoing");
+    if (isOngoing) {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-500/10 text-amber-300 border border-amber-500/30 animate-pulse">
+          <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+          {breakObj.duration}
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-zinc-800 text-zinc-300 border border-zinc-700/50">
+        {breakObj.duration}
+      </span>
+    );
+  };
+
+  const renderLocationCell = (locText) => {
+    const isUnavailable = !locText || locText.toLowerCase().includes("unavailable");
+    return (
+      <div className="flex items-center gap-1 max-w-[130px] truncate" title={locText || "GPS unavailable"}>
+        <MapPin className={`w-3.5 h-3.5 shrink-0 ${isUnavailable ? "text-zinc-600" : "text-purple-400"}`} />
+        <span className={`text-[11px] truncate ${isUnavailable ? "text-zinc-500 italic" : "text-zinc-300 font-medium"}`}>
+          {locText || "GPS unavailable"}
+        </span>
+      </div>
+    );
+  };
+
   return (
     <div className="bg-[#12131A] border border-zinc-800/80 rounded-2xl overflow-hidden shadow-xl">
       {/* Table Header Meta */}
@@ -272,28 +312,27 @@ export default function EmployeeAttendanceTable({
           <thead>
             <tr className="border-b border-zinc-800 text-zinc-400 bg-zinc-900/60 font-semibold uppercase tracking-wider text-[11px]">
               <th
+                onClick={() => handleSort("name")}
+                className="py-3.5 px-4 cursor-pointer hover:text-zinc-200 transition-colors select-none min-w-[170px]"
+              >
+                <div className="flex items-center gap-1.5">
+                  <span>Employee Name</span>
+                  {renderSortIcon("name")}
+                </div>
+              </th>
+              <th
                 onClick={() => handleSort("empId")}
-                className="py-3.5 px-4 cursor-pointer hover:text-zinc-200 transition-colors select-none"
+                className="py-3.5 px-3 cursor-pointer hover:text-zinc-200 transition-colors select-none"
               >
                 <div className="flex items-center gap-1.5">
                   <span>EMP ID</span>
                   {renderSortIcon("empId")}
                 </div>
               </th>
-              <th
-                onClick={() => handleSort("name")}
-                className="py-3.5 px-4 cursor-pointer hover:text-zinc-200 transition-colors select-none min-w-[180px]"
-              >
-                <div className="flex items-center gap-1.5">
-                  <span>Employee</span>
-                  {renderSortIcon("name")}
-                </div>
-              </th>
-              <th className="py-3.5 px-4">Department</th>
-              <th className="py-3.5 px-4">Shift</th>
+              <th className="py-3.5 px-3">Department</th>
               <th
                 onClick={() => handleSort("date")}
-                className="py-3.5 px-4 cursor-pointer hover:text-zinc-200 transition-colors select-none"
+                className="py-3.5 px-3 cursor-pointer hover:text-zinc-200 transition-colors select-none"
               >
                 <div className="flex items-center gap-1.5">
                   <span>Date</span>
@@ -302,37 +341,47 @@ export default function EmployeeAttendanceTable({
               </th>
               <th
                 onClick={() => handleSort("checkIn")}
-                className="py-3.5 px-4 cursor-pointer hover:text-zinc-200 transition-colors select-none"
+                className="py-3.5 px-3 cursor-pointer hover:text-zinc-200 transition-colors select-none"
               >
                 <div className="flex items-center gap-1.5">
                   <span>Check In</span>
                   {renderSortIcon("checkIn")}
                 </div>
               </th>
-              <th className="py-3.5 px-4">Check Out</th>
+              <th className="py-3.5 px-3 min-w-[130px]">Check-in Location</th>
+              <th className="py-3.5 px-3">Break 1 Duration</th>
+              <th className="py-3.5 px-3">Break 2 Duration</th>
+              <th className="py-3.5 px-3">Break 3 Duration</th>
               <th
-                onClick={() => handleSort("workingHours")}
-                className="py-3.5 px-4 cursor-pointer hover:text-zinc-200 transition-colors select-none"
+                onClick={() => handleSort("totalBreakDuration")}
+                className="py-3.5 px-3 cursor-pointer hover:text-zinc-200 transition-colors select-none"
               >
                 <div className="flex items-center gap-1.5">
-                  <span>Working Hrs</span>
+                  <span>Total Break</span>
+                  {renderSortIcon("totalBreakDuration")}
+                </div>
+              </th>
+              <th className="py-3.5 px-3">Check Out</th>
+              <th className="py-3.5 px-3 min-w-[130px]">Check-out Location</th>
+              <th
+                onClick={() => handleSort("workingHours")}
+                className="py-3.5 px-3 cursor-pointer hover:text-zinc-200 transition-colors select-none"
+              >
+                <div className="flex items-center gap-1.5">
+                  <span>Net Working Hours</span>
                   {renderSortIcon("workingHours")}
                 </div>
               </th>
-              <th className="py-3.5 px-3">Late By</th>
-              <th className="py-3.5 px-3">Early Dep.</th>
-              <th className="py-3.5 px-3 text-center">GPS</th>
-              <th className="py-3.5 px-3 text-center">Face</th>
               <th
                 onClick={() => handleSort("status")}
-                className="py-3.5 px-4 cursor-pointer hover:text-zinc-200 transition-colors select-none"
+                className="py-3.5 px-3 cursor-pointer hover:text-zinc-200 transition-colors select-none"
               >
                 <div className="flex items-center gap-1.5">
                   <span>Status</span>
                   {renderSortIcon("status")}
                 </div>
               </th>
-              <th className="py-3.5 px-4 text-right">Actions</th>
+              <th className="py-3.5 px-4 text-right min-w-[140px]">Actions</th>
             </tr>
           </thead>
 
@@ -341,33 +390,34 @@ export default function EmployeeAttendanceTable({
               // Skeleton loading rows
               Array.from({ length: 6 }).map((_, i) => (
                 <tr key={`skel-${i}`} className="animate-pulse">
-                  <td className="py-4 px-4"><div className="h-4 w-12 bg-zinc-800 rounded" /></td>
                   <td className="py-4 px-4">
                     <div className="flex items-center gap-3">
                       <div className="w-8 h-8 rounded-full bg-zinc-800" />
                       <div className="space-y-1.5">
-                        <div className="h-3.5 w-28 bg-zinc-800 rounded" />
-                        <div className="h-2.5 w-36 bg-zinc-800/60 rounded" />
+                        <div className="h-3.5 w-24 bg-zinc-800 rounded" />
+                        <div className="h-2.5 w-32 bg-zinc-800/60 rounded" />
                       </div>
                     </div>
                   </td>
-                  <td className="py-4 px-4"><div className="h-4 w-20 bg-zinc-800 rounded" /></td>
-                  <td className="py-4 px-4"><div className="h-4 w-16 bg-zinc-800 rounded" /></td>
-                  <td className="py-4 px-4"><div className="h-4 w-20 bg-zinc-800 rounded" /></td>
-                  <td className="py-4 px-4"><div className="h-4 w-16 bg-zinc-800 rounded" /></td>
-                  <td className="py-4 px-4"><div className="h-4 w-16 bg-zinc-800 rounded" /></td>
-                  <td className="py-4 px-4"><div className="h-4 w-14 bg-zinc-800 rounded" /></td>
                   <td className="py-4 px-3"><div className="h-4 w-12 bg-zinc-800 rounded" /></td>
-                  <td className="py-4 px-3"><div className="h-4 w-12 bg-zinc-800 rounded" /></td>
-                  <td className="py-4 px-3 text-center"><div className="h-4 w-14 mx-auto bg-zinc-800 rounded" /></td>
-                  <td className="py-4 px-3 text-center"><div className="h-4 w-14 mx-auto bg-zinc-800 rounded" /></td>
-                  <td className="py-4 px-4"><div className="h-5 w-18 bg-zinc-800 rounded-full" /></td>
+                  <td className="py-4 px-3"><div className="h-4 w-16 bg-zinc-800 rounded" /></td>
+                  <td className="py-4 px-3"><div className="h-4 w-16 bg-zinc-800 rounded" /></td>
+                  <td className="py-4 px-3"><div className="h-4 w-14 bg-zinc-800 rounded" /></td>
+                  <td className="py-4 px-3"><div className="h-4 w-20 bg-zinc-800 rounded" /></td>
+                  <td className="py-4 px-3"><div className="h-4 w-14 bg-zinc-800 rounded" /></td>
+                  <td className="py-4 px-3"><div className="h-4 w-14 bg-zinc-800 rounded" /></td>
+                  <td className="py-4 px-3"><div className="h-4 w-14 bg-zinc-800 rounded" /></td>
+                  <td className="py-4 px-3"><div className="h-4 w-14 bg-zinc-800 rounded" /></td>
+                  <td className="py-4 px-3"><div className="h-4 w-14 bg-zinc-800 rounded" /></td>
+                  <td className="py-4 px-3"><div className="h-4 w-20 bg-zinc-800 rounded" /></td>
+                  <td className="py-4 px-3"><div className="h-4 w-16 bg-zinc-800 rounded" /></td>
+                  <td className="py-4 px-3"><div className="h-5 w-16 bg-zinc-800 rounded-full" /></td>
                   <td className="py-4 px-4 text-right"><div className="h-7 w-20 ml-auto bg-zinc-800 rounded" /></td>
                 </tr>
               ))
             ) : error ? (
               <tr>
-                <td colSpan={14} className="py-12 px-4 text-center">
+                <td colSpan={15} className="py-12 px-4 text-center">
                   <div className="flex flex-col items-center justify-center max-w-md mx-auto text-zinc-400 space-y-3">
                     <div className="p-3 rounded-full bg-rose-500/10 border border-rose-500/20 text-rose-400">
                       <AlertTriangle className="w-8 h-8" />
@@ -392,7 +442,7 @@ export default function EmployeeAttendanceTable({
               </tr>
             ) : paginatedRecords.length === 0 ? (
               <tr>
-                <td colSpan={14} className="py-12 px-4 text-center">
+                <td colSpan={15} className="py-12 px-4 text-center">
                   <div className="flex flex-col items-center justify-center max-w-sm mx-auto text-zinc-400">
                     <Clock className="w-10 h-10 text-zinc-600 mb-3" />
                     <p className="text-base font-semibold text-zinc-300">No attendance records match the selected criteria.</p>
@@ -407,41 +457,40 @@ export default function EmployeeAttendanceTable({
                 const empName = rec.employeeName || rec.name || rec.user_name || "Unknown Employee";
                 const empId = rec.empId || rec.employeeId || rec.employee_id || rec.userId?.slice(-6) || "EMP";
                 const dept = rec.department || "General";
-                const shiftName = rec.shift_name || rec.shift || "General Shift";
-                const shiftWindow = (rec.shift_start && rec.shift_end)
-                  ? `${rec.shift_start} - ${rec.shift_end}`
-                  : (rec.shiftStart && rec.shiftEnd ? `${rec.shiftStart} - ${rec.shiftEnd}` : "");
                 const dateStr = rec.date_formatted || rec.date || "N/A";
                 const checkIn = rec.check_in_formatted || rec.checkIn || rec.check_in_time || rec.check_in || "--";
+                const checkInLoc = rec.checkInLocation || rec.check_in_location || "GPS unavailable";
                 const checkOut = rec.check_out_formatted || rec.checkOut || rec.check_out_time || rec.check_out || "--";
-                const workHours = rec.working_hours_formatted || rec.workingHours || (rec.working_hours ? `${rec.working_hours}h` : "--");
-                const lateBy = rec.late_by_formatted || rec.lateByText || (rec.late_minutes > 0 ? `${rec.late_minutes}m` : (rec.lateByMinutes > 0 ? `${rec.lateByMinutes}m` : "--"));
-                const earlyDep = rec.early_departure_formatted || rec.earlyDepartureText || (rec.early_departure_minutes > 0 ? `${rec.early_departure_minutes}m` : (rec.earlyDepartureMinutes > 0 ? `${rec.earlyDepartureMinutes}m` : "--"));
+                const checkOutLoc = rec.checkOutLocation || rec.check_out_location || "GPS unavailable";
+                const netHours = rec.netWorkingHours || rec.net_working_hours || rec.working_hours_formatted || rec.workingHours || "--";
                 const status = rec.attendance_status || rec.attendanceStatus || rec.status || "Present";
-                const gpsStatus = rec.gps_verification_status || rec.gpsVerification || rec.gpsStatus || "Not Available";
-                const faceStatus = rec.face_verification_status || rec.faceVerification || rec.faceStatus || "Not Available";
                 const isLocked = Boolean(rec.locked || rec.attendance_locked || rec.isAdminLocked || rec.is_admin_locked);
+
+                const b1 = rec.break1 || { duration: rec.break1Duration || "Not Taken", taken: rec.break1Duration && rec.break1Duration !== "Not Taken" };
+                const b2 = rec.break2 || { duration: rec.break2Duration || "Not Taken", taken: rec.break2Duration && rec.break2Duration !== "Not Taken" };
+                const b3 = rec.break3 || { duration: rec.break3Duration || "Not Taken", taken: rec.break3Duration && rec.break3Duration !== "Not Taken" };
+                const totalBrk = rec.totalBreakDuration || rec.total_break_duration || "00h 00m";
 
                 return (
                   <tr
                     key={rec.recordId || `${rec.userId}_${rec.date}`}
                     className="hover:bg-zinc-800/30 transition-colors group"
                   >
-                    {/* Emp ID */}
-                    <td className="py-3.5 px-4 font-mono text-[11px] text-zinc-400 font-medium">
-                      #{empId}
-                    </td>
-
                     {/* Employee Profile */}
                     <td className="py-3.5 px-4">
                       <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-purple-600 to-indigo-600 flex items-center justify-center text-white text-xs font-bold uppercase shadow-sm">
+                        <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-purple-600 to-indigo-600 flex items-center justify-center text-white text-xs font-bold uppercase shadow-sm shrink-0">
                           {empName.charAt(0)}
                         </div>
-                        <div className="truncate max-w-[150px] sm:max-w-[200px]">
-                          <div className="font-semibold text-zinc-200 group-hover:text-purple-300 transition-colors truncate">
+                        <div className="truncate max-w-[150px] sm:max-w-[180px]">
+                          <button
+                            type="button"
+                            onClick={() => onViewEmployee && onViewEmployee(rec.userId, rec)}
+                            className="font-semibold text-zinc-200 hover:text-purple-300 hover:underline transition-colors truncate block text-left"
+                            title={`Click to view details for ${empName}`}
+                          >
                             {empName}
-                          </div>
+                          </button>
                           <div className="text-[11px] text-zinc-500 truncate">
                             {rec.email || ""}
                           </div>
@@ -449,79 +498,84 @@ export default function EmployeeAttendanceTable({
                       </div>
                     </td>
 
+                    {/* Emp ID */}
+                    <td className="py-3.5 px-3 font-mono text-[11px] text-zinc-400 font-medium whitespace-nowrap">
+                      #{empId}
+                    </td>
+
                     {/* Department */}
-                    <td className="py-3.5 px-4 text-zinc-300 whitespace-nowrap">
+                    <td className="py-3.5 px-3 text-zinc-300 whitespace-nowrap">
                       <span className="px-2 py-0.5 rounded bg-zinc-800/80 text-zinc-300 text-[11px]">
                         {dept}
                       </span>
                     </td>
 
-                    {/* Shift */}
-                    <td className="py-3.5 px-4 whitespace-nowrap">
-                      <div className="text-zinc-300 font-medium">{shiftName}</div>
-                      {shiftWindow && (
-                        <div className="text-[10px] text-zinc-500 font-mono">{shiftWindow}</div>
-                      )}
-                    </td>
-
                     {/* Date */}
-                    <td className="py-3.5 px-4 text-zinc-300 font-mono text-[11px] whitespace-nowrap">
+                    <td className="py-3.5 px-3 text-zinc-300 font-mono text-[11px] whitespace-nowrap">
                       {dateStr}
                     </td>
 
                     {/* Check In */}
-                    <td className="py-3.5 px-4 whitespace-nowrap font-mono text-zinc-300">
+                    <td className="py-3.5 px-3 whitespace-nowrap font-mono text-zinc-300">
                       {checkIn !== "--" ? (
-                        <span className="text-emerald-400 font-medium">{checkIn}</span>
+                        <span className="text-emerald-400 font-semibold">{checkIn}</span>
                       ) : (
                         <span className="text-zinc-500">--</span>
+                      )}
+                    </td>
+
+                    {/* Check In Location */}
+                    <td className="py-3.5 px-3 whitespace-nowrap">
+                      {renderLocationCell(checkInLoc)}
+                    </td>
+
+                    {/* Break 1 Duration */}
+                    <td className="py-3.5 px-3 whitespace-nowrap">
+                      {renderBreakBadge(b1)}
+                    </td>
+
+                    {/* Break 2 Duration */}
+                    <td className="py-3.5 px-3 whitespace-nowrap">
+                      {renderBreakBadge(b2)}
+                    </td>
+
+                    {/* Break 3 Duration */}
+                    <td className="py-3.5 px-3 whitespace-nowrap">
+                      {renderBreakBadge(b3)}
+                    </td>
+
+                    {/* Total Break Duration */}
+                    <td className="py-3.5 px-3 whitespace-nowrap font-mono text-[11px] font-medium text-zinc-300">
+                      {totalBrk !== "00h 00m" ? (
+                        <span className="text-amber-300/90">{totalBrk}</span>
+                      ) : (
+                        <span className="text-zinc-500">00h 00m</span>
                       )}
                     </td>
 
                     {/* Check Out */}
-                    <td className="py-3.5 px-4 whitespace-nowrap font-mono text-zinc-300">
+                    <td className="py-3.5 px-3 whitespace-nowrap font-mono text-zinc-300">
                       {checkOut !== "--" ? (
-                        <span className="text-indigo-400 font-medium">{checkOut}</span>
+                        <span className="text-indigo-400 font-semibold">{checkOut}</span>
                       ) : (
                         <span className="text-zinc-500">--</span>
                       )}
                     </td>
 
-                    {/* Working Hours */}
-                    <td className="py-3.5 px-4 whitespace-nowrap font-mono font-medium text-zinc-200">
-                      {workHours}
+                    {/* Check Out Location */}
+                    <td className="py-3.5 px-3 whitespace-nowrap">
+                      {renderLocationCell(checkOutLoc)}
                     </td>
 
-                    {/* Late By */}
-                    <td className="py-3.5 px-3 whitespace-nowrap font-mono text-[11px]">
-                      {lateBy !== "--" ? (
-                        <span className="text-amber-400 font-medium">{lateBy}</span>
-                      ) : (
-                        <span className="text-zinc-600">0m</span>
-                      )}
-                    </td>
-
-                    {/* Early Departure */}
-                    <td className="py-3.5 px-3 whitespace-nowrap font-mono text-[11px]">
-                      {earlyDep !== "--" ? (
-                        <span className="text-rose-400 font-medium">{earlyDep}</span>
-                      ) : (
-                        <span className="text-zinc-600">0m</span>
-                      )}
-                    </td>
-
-                    {/* GPS Verification */}
-                    <td className="py-3.5 px-3 text-center whitespace-nowrap">
-                      {getGpsBadge(gpsStatus)}
-                    </td>
-
-                    {/* Face Verification */}
-                    <td className="py-3.5 px-3 text-center whitespace-nowrap">
-                      {getFaceBadge(faceStatus)}
+                    {/* Net Working Hours */}
+                    <td className="py-3.5 px-3 whitespace-nowrap font-mono font-bold text-zinc-200">
+                      <span className={netHours !== "00h 00m" && netHours !== "0.00 hrs" && netHours !== "--" ? "text-purple-300 font-extrabold" : "text-zinc-500"}>
+                        {netHours}
+                      </span>
                     </td>
 
                     {/* Attendance Status */}
-                    <td className="py-3.5 px-4 whitespace-nowrap">
+                    <td className="py-3.5 px-3 whitespace-nowrap">
                       <div className="flex items-center gap-1.5">
                         {getStatusBadge(status)}
                         {isLocked && (
@@ -538,26 +592,20 @@ export default function EmployeeAttendanceTable({
                         <button
                           type="button"
                           onClick={() => onViewEmployee && onViewEmployee(rec.userId, rec)}
-                          title="View Attendance Details"
-                          className="p-1.5 rounded-lg text-zinc-400 hover:text-purple-300 hover:bg-purple-500/10 transition-colors"
+                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-purple-600/10 hover:bg-purple-600 text-purple-300 hover:text-white border border-purple-500/20 hover:border-purple-600 transition-all cursor-pointer shadow-sm"
+                          title="View detailed employee attendance, breaks, and reports"
                         >
-                          <Eye className="w-4 h-4" />
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>View Details</span>
                         </button>
+
                         <button
                           type="button"
                           onClick={() => onReviewRecord && onReviewRecord(rec)}
                           title="Review & Adjust Attendance"
                           className="p-1.5 rounded-lg text-zinc-400 hover:text-amber-300 hover:bg-amber-500/10 transition-colors"
                         >
-                          <Edit3 className="w-4 h-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => onRegularizeRecord && onRegularizeRecord(rec)}
-                          title="Regularization Shortcut"
-                          className="p-1.5 rounded-lg text-zinc-400 hover:text-cyan-300 hover:bg-cyan-500/10 transition-colors"
-                        >
-                          <Clock className="w-4 h-4" />
+                          <Edit3 className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     </td>

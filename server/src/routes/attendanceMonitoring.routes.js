@@ -4,6 +4,7 @@ import {
   getAttendanceMonitoringRecords,
   getLiveAttendanceMonitoring,
   getEmployeeAttendanceProfile,
+  getEmployeeAttendanceReport,
   getAttendanceAnalytics,
   reviewAttendanceRecord
 } from "../controllers/attendanceMonitoringController.js";
@@ -24,6 +25,9 @@ router.get("/records", getAttendanceMonitoringRecords);
 
 // Real-Time Live Attendance Pulse
 router.get("/live", getLiveAttendanceMonitoring);
+
+// Individual Employee Attendance Report Download / Data Export (supports ?format=csv or ?format=json)
+router.get("/employee/:userId/report", getEmployeeAttendanceReport);
 
 // Individual Employee Detailed Attendance Profile
 router.get("/employee/:userId", getEmployeeAttendanceProfile);

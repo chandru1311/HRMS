@@ -2305,8 +2305,19 @@ export const getLiveAttendanceMonitoring = async (params = {}) => {
   return apiFetch(`/attendance-monitoring/live${query ? `?${query}` : ""}`);
 };
 
-export const getEmployeeAttendanceProfile = async (userId, days = 60) => {
-  return apiFetch(`/attendance-monitoring/employee/${encodeURIComponent(userId)}?days=${days}`);
+export const getEmployeeAttendanceProfile = async (userId, params = 60) => {
+  let query = "";
+  if (typeof params === "object" && params !== null) {
+    query = toCleanQueryString(params);
+  } else {
+    query = `days=${params}`;
+  }
+  return apiFetch(`/attendance-monitoring/employee/${encodeURIComponent(userId)}${query ? `?${query}` : ""}`);
+};
+
+export const getEmployeeAttendanceReportApi = async (userId, params = {}) => {
+  const query = toCleanQueryString(params);
+  return apiFetch(`/attendance-monitoring/employee/${encodeURIComponent(userId)}/report${query ? `?${query}` : ""}`);
 };
 
 export const getAttendanceAnalytics = async (params = {}) => {

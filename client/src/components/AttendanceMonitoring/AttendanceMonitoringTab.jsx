@@ -407,8 +407,10 @@ export default function AttendanceMonitoringTab({ currentUser, showToast }) {
           userId={detailsModal.userId}
           initialRecord={detailsModal.record}
           isOpen={detailsModal.open}
+          allRecords={records}
           onClose={() => setDetailsModal({ open: false, userId: null, record: null })}
           onReviewRecord={(rec) => setReviewModal({ open: true, record: rec })}
+          showToast={showToast}
         />
       )}
 

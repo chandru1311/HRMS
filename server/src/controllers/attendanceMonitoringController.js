@@ -113,6 +113,204 @@ const formatTimeDisplay = (timeVal) => {
 };
 
 /**
+ * Processes break logs, calculates net working hours and location strings
+ * for any attendance row.
+ */
+export const processAttendanceBreaksAndHours = (att, user = {}, targetDateStr = null) => {
+  const now = new Date();
+  const recDateStr = formatDateOnly(att?.date || targetDateStr || now);
+  const isToday = recDateStr === getTodayDateStr();
+
+  // 1. Parse Breaks
+  let rawBreaks = [];
+  if (Array.isArray(att?.breaks)) {
+    rawBreaks = att.breaks;
+  } else if (typeof att?.breaks === "string") {
+    try {
+      rawBreaks = JSON.parse(att.breaks || "[]");
+    } catch {
+      rawBreaks = [];
+    }
+  }
+
+  let totalBreakMinutes = 0;
+  let hasOngoingBreak = false;
+
+  const processedBreaks = rawBreaks.map((b, index) => {
+    const rawStart = b.start || b.startTime;
+    const rawEnd = b.end || b.resumeTime;
+    const bStart = rawStart ? new Date(rawStart) : null;
+    const bEnd = rawEnd ? new Date(rawEnd) : null;
+
+    let durationMins = 0;
+    let isOngoing = false;
+
+    if (bStart && bEnd && !isNaN(bStart.getTime()) && !isNaN(bEnd.getTime())) {
+      durationMins = Math.max(0, Math.floor((bEnd.getTime() - bStart.getTime()) / 60000));
+      totalBreakMinutes += durationMins;
+    } else if (bStart && (!bEnd || isNaN(bEnd?.getTime?.()))) {
+      isOngoing = true;
+      hasOngoingBreak = true;
+      if (isToday) {
+        durationMins = Math.max(0, Math.floor((now.getTime() - bStart.getTime()) / 60000));
+      } else {
+        durationMins = Number(b.durationMinutes || b.duration) || 0;
+      }
+      totalBreakMinutes += durationMins;
+    } else if (b.durationMinutes || b.duration) {
+      durationMins = Number(b.durationMinutes || b.duration) || 0;
+      totalBreakMinutes += durationMins;
+    }
+
+    const bStartFormatted = bStart && !isNaN(bStart.getTime()) ? formatTimeDisplay(bStart) : "—";
+    const bEndFormatted = isOngoing ? "Ongoing" : (bEnd && !isNaN(bEnd.getTime()) ? formatTimeDisplay(bEnd) : "—");
+    const durFormatted = isOngoing
+      ? `Ongoing (${durationMins}m)`
+      : (durationMins > 0 ? (durationMins >= 60 ? `${Math.floor(durationMins / 60)}h ${durationMins % 60}m` : `${durationMins}m`) : "0m");
+
+    return {
+      index: index + 1,
+      breakNumber: index + 1,
+      type: b.breakType || b.type || `Break ${index + 1}`,
+      breakType: b.breakType || b.type || `Break ${index + 1}`,
+      start: bStart ? bStart.toISOString() : (rawStart || null),
+      end: bEnd ? bEnd.toISOString() : (rawEnd || null),
+      startTime: bStart ? bStart.toISOString() : (rawStart || null),
+      endTime: bEnd ? bEnd.toISOString() : (rawEnd || null),
+      startTimeFormatted: bStartFormatted,
+      endTimeFormatted: bEndFormatted,
+      durationMinutes: durationMins,
+      duration: durationMins,
+      durationFormatted: durFormatted,
+      isOngoing,
+      location: b.location || b.endLocation || null,
+      reason: b.reason || "break"
+    };
+  });
+
+  // Extract Break 1, Break 2, Break 3
+  const getBreakSlot = (idx) => {
+    if (idx < processedBreaks.length) {
+      const b = processedBreaks[idx];
+      return {
+        start: b.startTimeFormatted,
+        end: b.endTimeFormatted,
+        duration: b.durationFormatted,
+        durationMinutes: b.durationMinutes,
+        status: b.isOngoing ? "Ongoing" : "Completed",
+        taken: true,
+        type: b.type
+      };
+    }
+    return {
+      start: "—",
+      end: "—",
+      duration: "Not Taken",
+      durationMinutes: 0,
+      status: "Not Taken",
+      taken: false,
+      type: `Break ${idx + 1}`
+    };
+  };
+
+  const break1 = getBreakSlot(0);
+  const break2 = getBreakSlot(1);
+  const break3 = getBreakSlot(2);
+
+  // Format Total Break Duration
+  const totalBreakHours = Math.floor(totalBreakMinutes / 60);
+  const totalBreakRemMins = totalBreakMinutes % 60;
+  const totalBreakFormatted = `${String(totalBreakHours).padStart(2, "0")}h ${String(totalBreakRemMins).padStart(2, "0")}m`;
+
+  // 2. Locations
+  const formatLoc = (locObj) => {
+    if (!locObj || typeof locObj !== "object" || Object.keys(locObj).length === 0) {
+      return "GPS unavailable";
+    }
+    if (locObj.locationName && typeof locObj.locationName === "string" && locObj.locationName.trim() && !locObj.locationName.toLowerCase().includes("unavailable")) {
+      return locObj.locationName.trim();
+    }
+    if (locObj.latitude != null && locObj.longitude != null && !isNaN(Number(locObj.latitude)) && !isNaN(Number(locObj.longitude))) {
+      return `${Number(locObj.latitude).toFixed(4)}, ${Number(locObj.longitude).toFixed(4)}`;
+    }
+    return "GPS unavailable";
+  };
+
+  const checkInLocationDisplay = formatLoc(att?.check_in_location || att?.location);
+  const checkOutLocationDisplay = formatLoc(att?.check_out_location);
+
+  // 3. Working Hours & Net Working Hours
+  let checkInDate = att?.check_in ? new Date(att.check_in) : null;
+  let checkOutDate = att?.check_out ? new Date(att.check_out) : null;
+
+  let totalAttendanceMinutes = 0;
+  if (checkInDate && !isNaN(checkInDate.getTime())) {
+    if (checkOutDate && !isNaN(checkOutDate.getTime())) {
+      totalAttendanceMinutes = Math.max(0, Math.floor((checkOutDate.getTime() - checkInDate.getTime()) / 60000));
+      // Handle overnight shift: if checkOut is chronologically before checkIn on same date record
+      if (checkOutDate < checkInDate) {
+        totalAttendanceMinutes += 1440;
+      }
+    } else if (isToday) {
+      totalAttendanceMinutes = Math.max(0, Math.floor((now.getTime() - checkInDate.getTime()) / 60000));
+    } else {
+      totalAttendanceMinutes = Number(att?.duration_minutes) || Number(att?.accumulated_working_minutes) || 0;
+    }
+  }
+
+  // Prevent attendance duration capping past 24 hours for a single day record
+  totalAttendanceMinutes = Math.min(1440, totalAttendanceMinutes);
+
+  // Net Working Hours = Total Attendance Duration - Total Break Duration
+  const netWorkingMinutes = Math.max(0, totalAttendanceMinutes - totalBreakMinutes);
+
+  const formatHoursMins = (totalMins) => {
+    const h = Math.floor(totalMins / 60);
+    const m = totalMins % 60;
+    return `${String(h).padStart(2, "0")}h ${String(m).padStart(2, "0")}m`;
+  };
+
+  const totalAttendanceFormatted = formatHoursMins(totalAttendanceMinutes);
+  const netWorkingFormatted = formatHoursMins(netWorkingMinutes);
+
+  return {
+    breaks: processedBreaks,
+    totalBreaksCount: processedBreaks.length,
+    hasOngoingBreak,
+    break1,
+    break2,
+    break3,
+    break1Duration: break1.duration,
+    break2Duration: break2.duration,
+    break3Duration: break3.duration,
+    totalBreakMinutes,
+    totalBreakDuration: totalBreakFormatted,
+    total_break_duration: totalBreakFormatted,
+    checkInLocation: checkInLocationDisplay,
+    check_in_location: checkInLocationDisplay,
+    checkInCoordinates: (att?.check_in_location?.latitude != null && !isNaN(Number(att.check_in_location.latitude))) ? {
+      latitude: Number(att.check_in_location.latitude),
+      longitude: Number(att.check_in_location.longitude),
+      accuracy: att.check_in_location.accuracy ? Number(att.check_in_location.accuracy) : null
+    } : null,
+    checkOutLocation: checkOutLocationDisplay,
+    check_out_location: checkOutLocationDisplay,
+    checkOutCoordinates: (att?.check_out_location?.latitude != null && !isNaN(Number(att.check_out_location.latitude))) ? {
+      latitude: Number(att.check_out_location.latitude),
+      longitude: Number(att.check_out_location.longitude),
+      accuracy: att.check_out_location.accuracy ? Number(att.check_out_location.accuracy) : null
+    } : null,
+    totalAttendanceMinutes,
+    totalAttendanceDuration: totalAttendanceFormatted,
+    total_attendance_duration: totalAttendanceFormatted,
+    netWorkingMinutes,
+    netWorkingHours: netWorkingFormatted,
+    net_working_hours: netWorkingFormatted,
+    netWorkingHoursDecimal: parseFloat((netWorkingMinutes / 60).toFixed(2))
+  };
+};
+
+/**
  * Helper to get target company ID enforcing tenant isolation
  */
 const resolveTargetCompany = (req) => {
@@ -559,26 +757,19 @@ export const getAttendanceMonitoringRecords = async (req, res) => {
       const shiftStartMins = parseTimeToMinutes(shiftStartStr) || 540;
       const shiftEndMins = parseTimeToMinutes(shiftEndStr) || 1080;
 
+      const breakCalc = processAttendanceBreaksAndHours(att, user, dStr);
+
       let checkInTime = null;
       let checkOutTime = null;
-      let workingHoursStr = "0.00 hrs";
-      let workingHoursDec = 0;
-      let workingMinutes = 0;
+      let workingHoursStr = breakCalc.netWorkingHours;
+      let workingHoursDec = breakCalc.netWorkingHoursDecimal;
+      let workingMinutes = breakCalc.netWorkingMinutes;
       let lateMinutes = 0;
       let earlyDepartureMinutes = 0;
 
       if (att && att.check_in) {
         checkInTime = att.check_in;
         checkOutTime = att.check_out || null;
-
-        workingMinutes = Number(att.duration_minutes) || Number(att.accumulated_working_minutes) || 0;
-        if (workingMinutes <= 0 && checkInTime) {
-          const inD = new Date(checkInTime);
-          const outD = checkOutTime ? new Date(checkOutTime) : new Date();
-          workingMinutes = Math.max(0, Math.floor((outD.getTime() - inD.getTime()) / 60000));
-        }
-        workingHoursDec = parseFloat((workingMinutes / 60).toFixed(2));
-        workingHoursStr = `${workingHoursDec.toFixed(2)} hrs`;
 
         const inMins = parseTimeToMinutes(checkInTime);
         if (inMins !== null && inMins > shiftStartMins) {
@@ -715,6 +906,41 @@ export const getAttendanceMonitoringRecords = async (req, res) => {
         working_hours: workingHoursDec,
         working_hours_formatted: workingHoursStr,
         workingMinutes,
+        // Detailed Breaks Breakdown
+        break1: breakCalc.break1,
+        break2: breakCalc.break2,
+        break3: breakCalc.break3,
+        break1Duration: breakCalc.break1.duration,
+        break2Duration: breakCalc.break2.duration,
+        break3Duration: breakCalc.break3.duration,
+        break_1_duration: breakCalc.break1.duration,
+        break_2_duration: breakCalc.break2.duration,
+        break_3_duration: breakCalc.break3.duration,
+        totalBreaksCount: breakCalc.totalBreaksCount,
+        total_breaks_count: breakCalc.totalBreaksCount,
+        totalBreakMinutes: breakCalc.totalBreakMinutes,
+        total_break_minutes: breakCalc.totalBreakMinutes,
+        totalBreakDuration: breakCalc.totalBreakDuration,
+        total_break_duration: breakCalc.totalBreakDuration,
+        breaks: breakCalc.breaks,
+        allBreaks: breakCalc.breaks,
+        hasOngoingBreak: breakCalc.hasOngoingBreak,
+        // Check-in and Check-out Locations
+        checkInLocation: breakCalc.checkInLocation,
+        check_in_location: breakCalc.check_in_location,
+        checkInCoordinates: breakCalc.checkInCoordinates,
+        checkOutLocation: breakCalc.checkOutLocation,
+        check_out_location: breakCalc.check_out_location,
+        checkOutCoordinates: breakCalc.checkOutCoordinates,
+        // Net Working Hours & Duration
+        totalAttendanceMinutes: breakCalc.totalAttendanceMinutes,
+        total_attendance_minutes: breakCalc.totalAttendanceMinutes,
+        totalAttendanceDuration: breakCalc.totalAttendanceDuration,
+        total_attendance_duration: breakCalc.totalAttendanceDuration,
+        netWorkingMinutes: breakCalc.netWorkingMinutes,
+        net_working_minutes: breakCalc.netWorkingMinutes,
+        netWorkingHours: breakCalc.netWorkingHours,
+        net_working_hours: breakCalc.netWorkingHours,
         lateByMinutes: lateMinutes,
         late_minutes: lateMinutes,
         lateByText: lateFormatted,
@@ -1017,7 +1243,7 @@ export const getEmployeeAttendanceProfile = async (req, res) => {
   try {
     const { isSuperAdmin, targetCompanyId } = resolveTargetCompany(req);
     const { userId } = req.params;
-    const { days = 60 } = req.query;
+    const { days = 60, startDate: qStartDate, endDate: qEndDate } = req.query;
 
     if (!userId) {
       return res.status(400).json({ error: "User ID is required." });
@@ -1056,16 +1282,31 @@ export const getEmployeeAttendanceProfile = async (req, res) => {
       }
     }
 
-    // 3. Fetch Attendance History (last N days)
-    const attSql = `
-      SELECT a.*, a.date::text as date_str
-      FROM attendance a
-      WHERE a.user_id = $1
-      ORDER BY a.date DESC
-      LIMIT $2
-    `;
-    const attRes = await query(attSql, [userId, Math.min(Number(days) || 60, 180)]);
-    const attendanceHistory = attRes.rows;
+    // 3. Fetch Attendance History
+    let attendanceHistory = [];
+    let startDate = qStartDate ? formatDateOnly(qStartDate) : null;
+    let endDate = qEndDate ? formatDateOnly(qEndDate) : null;
+
+    if (startDate && endDate) {
+      const attSql = `
+        SELECT a.*, a.date::text as date_str
+        FROM attendance a
+        WHERE a.user_id = $1 AND a.date >= $2 AND a.date <= $3
+        ORDER BY a.date DESC
+      `;
+      const attRes = await query(attSql, [userId, startDate, endDate]);
+      attendanceHistory = attRes.rows;
+    } else {
+      const attSql = `
+        SELECT a.*, a.date::text as date_str
+        FROM attendance a
+        WHERE a.user_id = $1
+        ORDER BY a.date DESC
+        LIMIT $2
+      `;
+      const attRes = await query(attSql, [userId, Math.min(Number(days) || 60, 180)]);
+      attendanceHistory = attRes.rows;
+    }
 
     // 4. Fetch Verification Attempts (Biometric & GPS)
     const avaSql = `
@@ -1110,7 +1351,7 @@ export const getEmployeeAttendanceProfile = async (req, res) => {
     const auditRes = await query(auditSql, [userId]);
     const auditHistory = auditRes.rows;
 
-    // 7. Calculate Aggregates for Profile
+    // 7. Calculate Aggregates & Process Breaks for Profile
     const shiftStartStr = user.shift_start || "09:00";
     const shiftEndStr = user.shift_end || "18:00";
     const shiftStartMins = parseTimeToMinutes(shiftStartStr) || 540;
@@ -1121,19 +1362,22 @@ export const getEmployeeAttendanceProfile = async (req, res) => {
     let absentDays = 0;
     let halfDays = 0;
     let onLeaveDays = 0;
-    let totalWorkingMinutes = 0;
+    let totalNetWorkingMinutes = 0;
+    let totalAllBreaksMinutes = 0;
 
     const formattedHistory = attendanceHistory.map(a => {
       const dStr = formatDateOnly(a.date_str || a.date);
-      let mins = Number(a.duration_minutes) || Number(a.accumulated_working_minutes) || 0;
-      totalWorkingMinutes += mins;
+      const breakCalc = processAttendanceBreaksAndHours(a, user, dStr);
+
+      totalNetWorkingMinutes += breakCalc.netWorkingMinutes;
+      totalAllBreaksMinutes += breakCalc.totalBreakMinutes;
 
       let lateMins = 0;
       let earlyMins = 0;
 
       if (a.check_in) {
         const inMins = parseTimeToMinutes(a.check_in);
-        if (inMins !== null && inMins > shiftStartMins) {
+        if (inMins !== null && inMins > (shiftStartMins + 5)) {
           lateMins = inMins - shiftStartMins;
           lateDays++;
         }
@@ -1147,12 +1391,18 @@ export const getEmployeeAttendanceProfile = async (req, res) => {
         }
       }
 
+      let status = a.status || "Present";
       if (a.status === "on-leave") {
         onLeaveDays++;
+        status = "On Leave";
       } else if (a.status === "absent" || a.is_admin_locked) {
         absentDays++;
-      } else if (mins > 0 && mins < 270) {
+        status = a.is_admin_locked ? "Attendance Locked" : "Absent";
+      } else if (breakCalc.netWorkingMinutes > 0 && breakCalc.netWorkingMinutes < 270) {
         halfDays++;
+        status = "Half Day";
+      } else if (lateMins > 0) {
+        status = "Late";
       }
 
       // GPS verification status
@@ -1166,16 +1416,51 @@ export const getEmployeeAttendanceProfile = async (req, res) => {
       return {
         id: a.id,
         date: dStr,
+        date_formatted: dStr,
         checkIn: formatTimeDisplay(a.check_in),
+        check_in: formatTimeDisplay(a.check_in),
+        checkInTime: formatTimeDisplay(a.check_in),
         checkOut: formatTimeDisplay(a.check_out),
+        check_out: formatTimeDisplay(a.check_out),
+        checkOutTime: formatTimeDisplay(a.check_out),
         checkInRaw: a.check_in,
         checkOutRaw: a.check_out,
-        workingHours: (mins / 60).toFixed(2) + " hrs",
-        workingMinutes: mins,
+        // Detailed Breaks
+        break1: breakCalc.break1,
+        break2: breakCalc.break2,
+        break3: breakCalc.break3,
+        break1Duration: breakCalc.break1.duration,
+        break2Duration: breakCalc.break2.duration,
+        break3Duration: breakCalc.break3.duration,
+        totalBreaksCount: breakCalc.totalBreaksCount,
+        totalBreakMinutes: breakCalc.totalBreakMinutes,
+        totalBreakDuration: breakCalc.totalBreakDuration,
+        total_break_duration: breakCalc.totalBreakDuration,
+        breaks: breakCalc.breaks,
+        hasOngoingBreak: breakCalc.hasOngoingBreak,
+        // Locations
+        checkInLocation: breakCalc.checkInLocation,
+        check_in_location: breakCalc.check_in_location,
+        checkInCoordinates: breakCalc.checkInCoordinates,
+        checkOutLocation: breakCalc.checkOutLocation,
+        check_out_location: breakCalc.check_out_location,
+        checkOutCoordinates: breakCalc.checkOutCoordinates,
+        // Hours
+        totalAttendanceDuration: breakCalc.totalAttendanceDuration,
+        total_attendance_duration: breakCalc.totalAttendanceDuration,
+        totalAttendanceMinutes: breakCalc.totalAttendanceMinutes,
+        netWorkingHours: breakCalc.netWorkingHours,
+        net_working_hours: breakCalc.netWorkingHours,
+        netWorkingMinutes: breakCalc.netWorkingMinutes,
+        workingHours: breakCalc.netWorkingHours,
+        working_hours: breakCalc.netWorkingHoursDecimal,
         lateMinutes: lateMins,
         earlyDepartureMinutes: earlyMins,
-        status: a.status,
+        status,
+        attendanceStatus: status,
+        attendance_status: status,
         gpsStatus,
+        gpsVerification: gpsStatus,
         distanceMeters: a.distance_from_office_meters ? Number(a.distance_from_office_meters) : null,
         biometricVerified: Boolean(a.biometric_verified),
         livenessPassed: Boolean(a.liveness_passed),
@@ -1184,34 +1469,61 @@ export const getEmployeeAttendanceProfile = async (req, res) => {
       };
     });
 
-    const avgHoursPerDay = presentDays > 0 ? (totalWorkingMinutes / presentDays / 60).toFixed(2) : "0.00";
+    const totalNetH = Math.floor(totalNetWorkingMinutes / 60);
+    const totalNetM = totalNetWorkingMinutes % 60;
+    const totalNetWorkingFormatted = `${String(totalNetH).padStart(2, "0")}h ${String(totalNetM).padStart(2, "0")}m`;
+
+    const totalBrkH = Math.floor(totalAllBreaksMinutes / 60);
+    const totalBrkM = totalAllBreaksMinutes % 60;
+    const totalBreakDurationFormatted = `${String(totalBrkH).padStart(2, "0")}h ${String(totalBrkM).padStart(2, "0")}m`;
+
+    const avgMins = presentDays > 0 ? Math.floor(totalNetWorkingMinutes / presentDays) : 0;
+    const avgH = Math.floor(avgMins / 60);
+    const avgM = avgMins % 60;
+    const avgHoursPerDayFormatted = `${String(avgH).padStart(2, "0")}h ${String(avgM).padStart(2, "0")}m`;
+    const avgHoursDec = presentDays > 0 ? (totalNetWorkingMinutes / presentDays / 60).toFixed(2) : "0.00";
 
     res.json({
       employee: {
         id: user.id,
         name: user.name,
+        employeeName: user.name,
         email: user.email,
         employeeId: user.employee_id || `EMP-${user.id.slice(-4).toUpperCase()}`,
+        empId: user.employee_id || `EMP-${user.id.slice(-4).toUpperCase()}`,
         role: user.role,
         department: user.department || "General",
         designation: user.designation || "Staff",
         shift: `${formatTimeDisplay(shiftStartStr)} - ${formatTimeDisplay(shiftEndStr)}`,
+        shift_name: `${formatTimeDisplay(shiftStartStr)} - ${formatTimeDisplay(shiftEndStr)}`,
         shiftStart: shiftStartStr,
+        shift_start: shiftStartStr,
         shiftEnd: shiftEndStr,
+        shift_end: shiftEndStr,
         avatarUrl: user.avatar_url,
+        avatar_url: user.avatar_url,
         phone: user.phone || "—",
         status: user.status
       },
       officeLocation,
       summary: {
         totalLoggedDays: formattedHistory.length,
+        totalWorkingDays: formattedHistory.length,
         presentDays,
+        totalPresentDays: presentDays,
         lateDays,
+        totalLateArrivals: lateDays,
         absentDays,
+        totalAbsentDays: absentDays,
         halfDays,
         onLeaveDays,
-        totalWorkingHours: (totalWorkingMinutes / 60).toFixed(2),
-        avgHoursPerDay
+        totalBreakMinutes: totalAllBreaksMinutes,
+        totalBreakDuration: totalBreakDurationFormatted,
+        totalNetWorkingMinutes,
+        totalNetWorkingHours: totalNetWorkingFormatted,
+        totalWorkingHours: (totalNetWorkingMinutes / 60).toFixed(2),
+        avgHoursPerDay: avgHoursDec,
+        avgDailyWorkingHours: avgHoursPerDayFormatted
       },
       history: formattedHistory,
       verificationAttempts,
@@ -1221,6 +1533,234 @@ export const getEmployeeAttendanceProfile = async (req, res) => {
   } catch (err) {
     console.error("getEmployeeAttendanceProfile error:", err);
     res.status(500).json({ error: "Failed to fetch employee attendance profile." });
+  }
+};
+
+/**
+ * 4. Individual Employee Attendance Report Download / Data Export
+ * Generates structured JSON or CSV containing Employee Info, Summary Statistics,
+ * and Daily Attendance Records with breaks and locations.
+ */
+export const getEmployeeAttendanceReport = async (req, res) => {
+  try {
+    const { isSuperAdmin, targetCompanyId } = resolveTargetCompany(req);
+    const { userId } = req.params;
+    let { startDate, endDate, format = "json" } = req.query;
+
+    if (!userId) {
+      return res.status(400).json({ error: "User ID is required." });
+    }
+
+    // 1. Fetch User Record
+    const userRes = await query(
+      `SELECT id, company_id, name, email, employee_id, role, department, designation, shift_start, shift_end, phone, status
+       FROM users
+       WHERE id = $1 ${!isSuperAdmin && targetCompanyId ? "AND company_id = $2" : ""}`,
+      !isSuperAdmin && targetCompanyId ? [userId, targetCompanyId] : [userId]
+    );
+
+    if (userRes.rows.length === 0) {
+      return res.status(404).json({ error: "Employee not found or access denied." });
+    }
+    const user = userRes.rows[0];
+
+    // Default dates if not specified (current month)
+    if (!startDate || !endDate) {
+      const monthRange = getThisMonthRange();
+      startDate = startDate || monthRange.startDate;
+      endDate = endDate || monthRange.endDate;
+    }
+    startDate = formatDateOnly(startDate);
+    endDate = formatDateOnly(endDate);
+
+    // 2. Fetch Attendance Records for range
+    const attSql = `
+      SELECT a.*, a.date::text as date_str
+      FROM attendance a
+      WHERE a.user_id = $1 AND a.date >= $2 AND a.date <= $3
+      ORDER BY a.date DESC
+    `;
+    const attRes = await query(attSql, [userId, startDate, endDate]);
+    const attendanceRecords = attRes.rows;
+
+    // 3. Process each day's attendance
+    let totalPresentDays = 0;
+    let totalLateArrivals = 0;
+    let totalAbsentDays = 0;
+    let totalNetWorkingMinutes = 0;
+    let totalBreakMinutes = 0;
+
+    const shiftStartStr = user.shift_start || "09:00";
+    const shiftEndStr = user.shift_end || "18:00";
+    const shiftStartMins = parseTimeToMinutes(shiftStartStr) || 540;
+
+    const dailyRecords = attendanceRecords.map(a => {
+      const dStr = formatDateOnly(a.date_str || a.date);
+      const breakCalc = processAttendanceBreaksAndHours(a, user, dStr);
+
+      totalNetWorkingMinutes += breakCalc.netWorkingMinutes;
+      totalBreakMinutes += breakCalc.totalBreakMinutes;
+
+      let status = a.status || "Present";
+      if (a.check_in) {
+        totalPresentDays++;
+        const inMins = parseTimeToMinutes(a.check_in);
+        if (inMins !== null && inMins > (shiftStartMins + 5)) {
+          totalLateArrivals++;
+          status = "Late";
+        }
+      } else if (a.status === "on-leave") {
+        status = "On Leave";
+      } else {
+        totalAbsentDays++;
+        status = "Absent";
+      }
+
+      return {
+        date: dStr,
+        checkInTime: formatTimeDisplay(a.check_in),
+        checkInLocation: breakCalc.checkInLocation,
+        break1Start: breakCalc.break1.start,
+        break1End: breakCalc.break1.end,
+        break1Duration: breakCalc.break1.duration,
+        break2Start: breakCalc.break2.start,
+        break2End: breakCalc.break2.end,
+        break2Duration: breakCalc.break2.duration,
+        break3Start: breakCalc.break3.start,
+        break3End: breakCalc.break3.end,
+        break3Duration: breakCalc.break3.duration,
+        totalBreakDuration: breakCalc.totalBreakDuration,
+        checkOutTime: formatTimeDisplay(a.check_out),
+        checkOutLocation: breakCalc.checkOutLocation,
+        totalAttendanceDuration: breakCalc.totalAttendanceDuration,
+        netWorkingHours: breakCalc.netWorkingHours,
+        attendanceStatus: status
+      };
+    });
+
+    const totalWorkingDays = dailyRecords.length;
+    const totalNetH = Math.floor(totalNetWorkingMinutes / 60);
+    const totalNetM = totalNetWorkingMinutes % 60;
+    const totalNetWorkingHours = `${String(totalNetH).padStart(2, "0")}h ${String(totalNetM).padStart(2, "0")}m`;
+
+    const totalBrkH = Math.floor(totalBreakMinutes / 60);
+    const totalBrkM = totalBreakMinutes % 60;
+    const totalBreakDuration = `${String(totalBrkH).padStart(2, "0")}h ${String(totalBrkM).padStart(2, "0")}m`;
+
+    const avgMins = totalPresentDays > 0 ? Math.floor(totalNetWorkingMinutes / totalPresentDays) : 0;
+    const avgH = Math.floor(avgMins / 60);
+    const avgM = avgMins % 60;
+    const averageDailyWorkingHours = `${String(avgH).padStart(2, "0")}h ${String(avgM).padStart(2, "0")}m`;
+
+    const summary = {
+      totalWorkingDays,
+      totalPresentDays,
+      totalAbsentDays,
+      totalLateArrivals,
+      totalBreakDuration,
+      totalNetWorkingHours,
+      averageDailyWorkingHours
+    };
+
+    const employee = {
+      employeeName: user.name,
+      employeeId: user.employee_id || `EMP-${user.id.slice(-4).toUpperCase()}`,
+      department: user.department || "General",
+      designation: user.designation || "Staff"
+    };
+
+    if (String(format).toLowerCase() === "csv") {
+      const escapeCsv = (val) => {
+        if (val == null) return '""';
+        const str = String(val).replace(/"/g, '""');
+        return `"${str}"`;
+      };
+
+      const csvLines = [
+        `"INDIVIDUAL EMPLOYEE ATTENDANCE REPORT"`,
+        `"Generated On",${escapeCsv(new Date().toLocaleString())}`,
+        `"Reporting Period",${escapeCsv(`${startDate} to ${endDate}`)}`,
+        `""`,
+        `"EMPLOYEE INFORMATION"`,
+        `"Employee Name",${escapeCsv(employee.employeeName)}`,
+        `"Employee ID",${escapeCsv(employee.employeeId)}`,
+        `"Department",${escapeCsv(employee.department)}`,
+        `"Designation",${escapeCsv(employee.designation)}`,
+        `""`,
+        `"SUMMARY STATISTICS"`,
+        `"Total Working Days",${summary.totalWorkingDays}`,
+        `"Total Present Days",${summary.totalPresentDays}`,
+        `"Total Absent Days",${summary.totalAbsentDays}`,
+        `"Total Late Arrivals",${summary.totalLateArrivals}`,
+        `"Total Break Duration",${escapeCsv(summary.totalBreakDuration)}`,
+        `"Total Net Working Hours",${escapeCsv(summary.totalNetWorkingHours)}`,
+        `"Average Daily Working Hours",${escapeCsv(summary.averageDailyWorkingHours)}`,
+        `""`,
+        `"DAILY ATTENDANCE RECORDS"`,
+        [
+          "Date",
+          "Check-in Time",
+          "Check-in Location",
+          "Break 1 Start",
+          "Break 1 End",
+          "Break 1 Duration",
+          "Break 2 Start",
+          "Break 2 End",
+          "Break 2 Duration",
+          "Break 3 Start",
+          "Break 3 End",
+          "Break 3 Duration",
+          "Total Break Duration",
+          "Check-out Time",
+          "Check-out Location",
+          "Total Attendance Duration",
+          "Net Working Hours",
+          "Attendance Status"
+        ].map(escapeCsv).join(",")
+      ];
+
+      dailyRecords.forEach(r => {
+        const row = [
+          r.date,
+          r.checkInTime,
+          r.checkInLocation,
+          r.break1Start,
+          r.break1End,
+          r.break1Duration,
+          r.break2Start,
+          r.break2End,
+          r.break2Duration,
+          r.break3Start,
+          r.break3End,
+          r.break3Duration,
+          r.totalBreakDuration,
+          r.checkOutTime,
+          r.checkOutLocation,
+          r.totalAttendanceDuration,
+          r.netWorkingHours,
+          r.attendanceStatus
+        ].map(escapeCsv).join(",");
+        csvLines.push(row);
+      });
+
+      const csvString = csvLines.join("\r\n");
+      const safeFilename = `Attendance_Report_${employee.employeeName.replace(/\s+/g, "_")}_${startDate}_${endDate}.csv`;
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="${safeFilename}"`);
+      return res.send(csvString);
+    }
+
+    res.json({
+      success: true,
+      employee,
+      summary,
+      records: dailyRecords,
+      startDate,
+      endDate
+    });
+  } catch (err) {
+    console.error("getEmployeeAttendanceReport error:", err);
+    res.status(500).json({ error: "Failed to generate employee attendance report." });
   }
 };
 
