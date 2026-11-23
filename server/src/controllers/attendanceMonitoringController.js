@@ -1491,7 +1491,7 @@ export const exportAttendanceReport = async (req, res) => {
     if (format === "xlsx" || format === "excel") {
       return await sendExcelExport(exportData, res);
     } else if (format === "pdf") {
-      return sendPdfExport(exportData, res);
+      return await sendPdfExport(exportData, res);
     } else {
       return sendCsvExport(exportData, res);
     }

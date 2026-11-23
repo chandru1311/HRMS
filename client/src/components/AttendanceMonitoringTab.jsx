@@ -43,7 +43,9 @@ import {
   getAttendanceMonitoringAnalytics,
   reviewRegularizationRequest,
   unlockEmployeeAttendance,
-  manualCorrectAttendanceRecord
+  manualCorrectAttendanceRecord,
+  apiDownload,
+  downloadAttendanceReport
 } from "../firebase";
 
 export default function AttendanceMonitoringTab({ currentUser, users = [], showToast = () => {} }) {
@@ -307,14 +309,29 @@ export default function AttendanceMonitoringTab({ currentUser, users = [], showT
   };
 
   // Export CSV (Direct)
-  const handleExportCsv = () => {
-    const params = new URLSearchParams({
-      preset,
-      dateFrom,
-      dateTo,
-      department: selectedDept
-    }).toString();
-    window.open(`/api/attendance/monitoring/export?${params}`, "_blank");
+  const handleExportCsv = async () => {
+    try {
+      const params = new URLSearchParams({
+        preset,
+        dateFrom,
+        dateTo,
+        department: selectedDept
+      }).toString();
+      const { blob, filename: serverFilename } = await apiDownload(`/attendance/monitoring/export?${params}`);
+      const filename = serverFilename || `attendance_export_${dateFrom}_${dateTo}.csv`;
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      showToast("CSV export downloaded successfully.", "success");
+    } catch (err) {
+      console.error("Export CSV failed:", err);
+      showToast(err.message || "Failed to export CSV.", "error");
+    }
   };
 
   // Download Attendance Report Handler (Excel / PDF / CSV)
@@ -325,40 +342,15 @@ export default function AttendanceMonitoringTab({ currentUser, users = [], showT
     }
     setDownloadLoading(true);
     try {
-      const token = localStorage.getItem("token") || currentUser?.token;
-      const endpoint = `/api/attendance/monitoring/export-${downloadFormat}`;
-      const params = new URLSearchParams({
+      const { blob, filename: serverFilename } = await downloadAttendanceReport({
         format: downloadFormat,
-        preset: downloadPreset
-      });
-      if (downloadPreset === "custom") {
-        params.append("startDate", downloadStartDate);
-        params.append("endDate", downloadEndDate);
-      }
-      if (downloadScope === "individual" && downloadEmployeeId) {
-        params.append("employeeId", downloadEmployeeId);
-      }
-
-      const response = await fetch(`${endpoint}?${params.toString()}`, {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
+        preset: downloadPreset,
+        startDate: downloadPreset === "custom" ? downloadStartDate : "",
+        endDate: downloadPreset === "custom" ? downloadEndDate : "",
+        employeeId: downloadScope === "individual" ? downloadEmployeeId : ""
       });
 
-      if (!response.ok) {
-        const errJson = await response.json().catch(() => ({}));
-        throw new Error(errJson.error || `Server responded with ${response.status}`);
-      }
-
-      const disposition = response.headers.get("Content-Disposition");
-      let filename = `attendance_report_${downloadPreset}.${downloadFormat}`;
-      if (disposition && disposition.indexOf("filename=") !== -1) {
-        const match = disposition.match(/filename="?([^"]+)"?/);
-        if (match && match[1]) filename = match[1];
-      }
-
-      const blob = await response.blob();
+      const filename = serverFilename || `attendance_report_${downloadPreset}.${downloadFormat}`;
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -368,8 +360,8 @@ export default function AttendanceMonitoringTab({ currentUser, users = [], showT
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
 
-      showToast(`Attendance report (${downloadFormat.toUpperCase()}) downloaded successfully.`, "success");
       setShowDownloadModal(false);
+      showToast(`Attendance report (${downloadFormat.toUpperCase()}) downloaded successfully.`, "success");
     } catch (err) {
       console.error("Download report failed:", err);
       showToast(`Download failed: ${err.message}`, "error");

@@ -569,30 +569,47 @@ export async function sendExcelExport(exportData, res) {
 
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-  await workbook.xlsx.write(res);
-  res.end();
+  const buffer = await workbook.xlsx.writeBuffer();
+  res.setHeader("Content-Length", buffer.byteLength || buffer.length);
+  res.send(Buffer.from(buffer));
 }
 
 /**
  * Generate and stream PDF (.pdf) using pdfkit
  */
 export function sendPdfExport(exportData, res) {
-  const { companyName, isIndividual, employee, summary, startDate, endDate, records } = exportData;
-  const filename = isIndividual
-    ? `attendance_${employee.employee_id || employee.id}_${startDate}_to_${endDate}.pdf`
-    : `company_attendance_${startDate}_to_${endDate}.pdf`;
+  return new Promise((resolve, reject) => {
+    try {
+      const { companyName, isIndividual, employee, summary, startDate, endDate, records } = exportData;
+      const filename = isIndividual
+        ? `attendance_${employee.employee_id || employee.id}_${startDate}_to_${endDate}.pdf`
+        : `company_attendance_${startDate}_to_${endDate}.pdf`;
 
-  // Landscape A4 (841.89 x 595.28 pt)
-  const doc = new PDFDocument({
-    size: "A4",
-    layout: "landscape",
-    margin: 25,
-    bufferPages: true
-  });
+      // Landscape A4 (841.89 x 595.28 pt)
+      const doc = new PDFDocument({
+        size: "A4",
+        layout: "landscape",
+        margin: 25,
+        bufferPages: true
+      });
 
-  res.setHeader("Content-Type", "application/pdf");
-  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-  doc.pipe(res);
+      const chunks = [];
+      doc.on("data", (chunk) => chunks.push(chunk));
+      doc.on("end", () => {
+        try {
+          const pdfBuffer = Buffer.concat(chunks);
+          res.setHeader("Content-Type", "application/pdf");
+          res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+          res.setHeader("Content-Length", pdfBuffer.length);
+          res.send(pdfBuffer);
+          resolve();
+        } catch (err) {
+          reject(err);
+        }
+      });
+      doc.on("error", (err) => {
+        reject(err);
+      });
 
   const pageWidth = 841.89;
   const pageHeight = 595.28;
@@ -752,4 +769,8 @@ export function sendPdfExport(exportData, res) {
   }
 
   doc.end();
+    } catch (err) {
+      reject(err);
+    }
+  });
 }

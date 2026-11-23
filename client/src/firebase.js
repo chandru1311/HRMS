@@ -106,6 +106,75 @@ export const apiFetch = async (endpoint, options = {}) => {
   throw lastError || new Error(`Failed to fetch ${endpoint}`);
 };
 
+// Resilient Binary Downloader for Reports (Excel, PDF, CSV)
+export const apiDownload = async (endpoint, options = {}) => {
+  const isLocal = typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+  const uniqueUrls = buildCandidateUrls(endpoint);
+  const token = localStorage.getItem("att_auth_token") || localStorage.getItem("token");
+
+  let lastError = null;
+
+  for (let index = 0; index < uniqueUrls.length; index += 1) {
+    const url = uniqueUrls[index];
+    try {
+      const response = await fetch(url, {
+        ...options,
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(options.headers || {})
+        }
+      });
+
+      const contentType = response.headers.get("content-type") || "";
+
+      // Reject HTML fallback responses (e.g. Vite dev server index.html on unhandled route)
+      if (contentType.includes("text/html")) {
+        if (isLocal && index < uniqueUrls.length - 1) {
+          continue;
+        }
+        throw new Error("Received an HTML page instead of the requested export document. Please check server connectivity.");
+      }
+
+      if ((response.status === 404 || response.status === 405) && isLocal && index < uniqueUrls.length - 1) {
+        continue;
+      }
+
+      if (!response.ok) {
+        let errorMsg = `Download failed with status ${response.status}`;
+        if (contentType.includes("application/json")) {
+          const err = await response.json().catch(() => ({}));
+          errorMsg = err.error || err.message || errorMsg;
+        }
+        const apiError = new Error(errorMsg);
+        apiError.status = response.status;
+        throw apiError;
+      }
+
+      const blob = await response.blob();
+      if (!blob || blob.size === 0) {
+        throw new Error("Downloaded document is empty (0 bytes).");
+      }
+
+      // Extract filename from Content-Disposition header
+      const disposition = response.headers.get("content-disposition");
+      let filename = null;
+      if (disposition && disposition.includes("filename=")) {
+        const match = disposition.match(/filename="?([^";]+)"?/);
+        if (match && match[1]) filename = match[1].trim();
+      }
+
+      return { blob, filename, contentType };
+    } catch (err) {
+      lastError = err;
+      if (err.status && err.status !== 404 && err.status !== 405) {
+        throw err;
+      }
+    }
+  }
+
+  throw lastError || new Error(`Failed to download report from ${endpoint}`);
+};
+
 // ----------------------------------------------------
 // SERVICE INTERFACE
 // ----------------------------------------------------
@@ -2323,4 +2392,20 @@ export const manualCorrectAttendanceRecord = async (data) => {
     body: JSON.stringify(data)
   });
 };
+
+export const downloadAttendanceReport = async ({
+  format = "xlsx",
+  preset = "this_month",
+  startDate = "",
+  endDate = "",
+  employeeId = ""
+}) => {
+  const params = new URLSearchParams({ format, preset });
+  if (startDate) params.append("startDate", startDate);
+  if (endDate) params.append("endDate", endDate);
+  if (employeeId) params.append("employeeId", employeeId);
+
+  return await apiDownload(`/attendance/monitoring/export-${format}?${params.toString()}`);
+};
+
 
