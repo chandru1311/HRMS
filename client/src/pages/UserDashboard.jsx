@@ -231,6 +231,7 @@ export default function UserDashboard() {
   const [endDate, setEndDate] = useState("");
   const [leaveReason, setLeaveReason] = useState("");
   const [isEmergency, setIsEmergency] = useState(false);
+  const [isLeaveOverlapping, setIsLeaveOverlapping] = useState(false);
   const [myLeaveRequests, setMyLeaveRequests] = useState([]);
   const [selectedPaidLeaveDetail, setSelectedPaidLeaveDetail] = useState(null);
 
@@ -999,6 +1000,24 @@ export default function UserDashboard() {
       return showToast("End Date cannot be before Start Date.", "warning");
     }
 
+    // 1 & 2 & 3. Before calculating leave duration, check employee's existing leave requests (Pending and Approved)
+    const cleanStart = startDate;
+    const cleanEnd = finalEndDate || startDate;
+
+    const hasOverlap = myLeaveRequests.some(leave => {
+      const st = String(leave.status || "").toLowerCase();
+      if (st !== "pending" && st !== "approved") return false;
+      const exStart = String(leave.startDate || leave.start_date || "").split("T")[0];
+      const exEnd = String(leave.endDate || leave.end_date || exStart).split("T")[0];
+      if (!exStart) return false;
+      return cleanStart <= exEnd && cleanEnd >= exStart;
+    });
+
+    if (hasOverlap || isLeaveOverlapping) {
+      return showToast("You already have a leave request for some of these dates. Please select a different date range.", "error");
+    }
+
+    // 5. If there is no overlap, calculate the leave duration correctly
     const diffTime = Math.abs(endD - startD);
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
     const durationStr = `${diffDays} Day${diffDays > 1 ? "s" : ""}`;
@@ -1837,6 +1856,8 @@ export default function UserDashboard() {
                     setStartDate={setStartDate}
                     setEndDate={setEndDate}
                     minDate={isEmergency ? todayStr : tomorrowStr}
+                    existingLeaves={myLeaveRequests}
+                    onOverlapChange={setIsLeaveOverlapping}
                   />
                 </div>
 
@@ -1868,6 +1889,12 @@ export default function UserDashboard() {
                 </div>
 
                 {/* Submit Buttons */}
+                {isLeaveOverlapping && (
+                  <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-[12px] text-red-500 dark:text-red-400 text-xs font-bold flex items-center gap-2 mb-2 text-left">
+                    <AlertCircle size={16} className="flex-shrink-0" />
+                    <span>You already have a leave request for some of these dates. Please select a different date range.</span>
+                  </div>
+                )}
                 <div className="flex justify-end gap-3 border-t border-border-card pt-4">
                   <button
                     type="button"
@@ -1876,6 +1903,7 @@ export default function UserDashboard() {
                       setStartDate("");
                       setEndDate("");
                       setLeaveReason("");
+                      setIsLeaveOverlapping(false);
                       navigate("/dashboard");
                     }}
                     className="py-2.5 px-6 border border-border-card rounded-[12px] bg-bg-card hover:bg-bg-base text-text-sec text-xs font-bold transition-all cursor-pointer"
@@ -1885,8 +1913,13 @@ export default function UserDashboard() {
                   </button>
                   <button
                     type="submit"
-                    className="py-2.5 px-6 bg-brand-primary text-white text-xs font-bold rounded-[12px] hover:bg-brand-hover transition-colors cursor-pointer"
-                    disabled={actionLoading}
+                    className={`py-2.5 px-6 text-white text-xs font-bold rounded-[12px] transition-colors ${
+                      isLeaveOverlapping
+                        ? "bg-slate-400 cursor-not-allowed opacity-60"
+                        : "bg-brand-primary hover:bg-brand-hover cursor-pointer"
+                    }`}
+                    disabled={actionLoading || isLeaveOverlapping}
+                    title={isLeaveOverlapping ? "You already have a leave request for some of these dates. Please select a different date range." : ""}
                   >
                     {actionLoading ? "Submitting..." : "Submit Request"}
                   </button>

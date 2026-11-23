@@ -110,7 +110,50 @@ export const createLeaveRequest = async (req, res) => {
 
     const cleanStartDate = String(startDate).split("T")[0];
     const cleanEndDate = String(endDate).split("T")[0];
-    const parsedDays = Number(parseInt(totalDays) || 1);
+
+    if (cleanEndDate < cleanStartDate) {
+      return res.status(400).json({ error: "End Date cannot be before Start Date." });
+    }
+
+    // 1. Before calculating leave duration, check the employee's existing leave requests.
+    // 2. Check both Pending and Approved leave requests.
+    // 3. Detect overlapping dates using: newStartDate <= existingEndDate && newEndDate >= existingStartDate
+    const existingRes = await query(
+      `SELECT id, leave_type, start_date, end_date, total_days, status
+       FROM leave_requests
+       WHERE user_id = $1
+         AND status IN ('pending', 'approved')`,
+      [userId]
+    );
+
+    const toDateStr = (val) => {
+      if (!val) return "";
+      if (typeof val === "string" && /^\d{4}-\d{2}-\d{2}/.test(val)) return val.substring(0, 10);
+      const d = new Date(val);
+      if (isNaN(d.getTime())) return "";
+      const ist = new Date(d.getTime() + (5.5 * 60 * 60 * 1000));
+      return ist.toISOString().split("T")[0];
+    };
+
+    const hasOverlap = existingRes.rows.some(r => {
+      const existingStartDate = toDateStr(r.start_date);
+      const existingEndDate = toDateStr(r.end_date) || existingStartDate;
+      if (!existingStartDate) return false;
+      return cleanStartDate <= existingEndDate && cleanEndDate >= existingStartDate;
+    });
+
+    if (hasOverlap) {
+      return res.status(400).json({
+        error: "You already have a leave request for some of these dates. Please select a different date range."
+      });
+    }
+
+    // 5. If there is no overlap, calculate duration correctly
+    const startObj = new Date(cleanStartDate);
+    const endObj = new Date(cleanEndDate);
+    const diffTime = Math.abs(endObj - startObj);
+    const calculatedDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+    const parsedDays = calculatedDays > 0 ? calculatedDays : Number(parseInt(totalDays) || 1);
 
     const id = "leave_" + Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
     const result = await query(

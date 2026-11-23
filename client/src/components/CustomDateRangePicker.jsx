@@ -1,7 +1,7 @@
-import React, { useState, useMemo } from 'react';
-import { ChevronLeft, ChevronRight, Calendar, CheckCircle2 } from 'lucide-react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { ChevronLeft, ChevronRight, Calendar, CheckCircle2, AlertCircle } from 'lucide-react';
 
-export default function CustomDateRangePicker({ startDate, endDate, setStartDate, setEndDate, minDate }) {
+export default function CustomDateRangePicker({ startDate, endDate, setStartDate, setEndDate, minDate, existingLeaves = [], onOverlapChange }) {
   const [currentMonth, setCurrentMonth] = useState(
     startDate ? new Date(startDate) : new Date()
   );
@@ -98,11 +98,57 @@ export default function CustomDateRangePicker({ startDate, endDate, setStartDate
   const startObj = startDate ? new Date(startDate) : null;
   const endObj = endDate ? new Date(endDate) : null;
 
+  const getCleanDate = (val) => {
+    if (!val) return "";
+    if (typeof val === "string" && /^\d{4}-\d{2}-\d{2}/.test(val)) return val.substring(0, 10);
+    const d = new Date(val);
+    if (isNaN(d.getTime())) return "";
+    return d.toISOString().split("T")[0];
+  };
+
+  const overlappingLeave = useMemo(() => {
+    if (!startDate) return null;
+    const newStart = startDate;
+    const newEnd = endDate || startDate;
+
+    return (existingLeaves || []).find(leave => {
+      const st = String(leave.status || "").toLowerCase();
+      if (st !== "pending" && st !== "approved") return false;
+      const exStart = getCleanDate(leave.startDate || leave.start_date);
+      const exEnd = getCleanDate(leave.endDate || leave.end_date) || exStart;
+      if (!exStart) return false;
+
+      return newStart <= exEnd && newEnd >= exStart;
+    });
+  }, [startDate, endDate, existingLeaves]);
+
+  const isOverlapping = Boolean(overlappingLeave);
+
+  useEffect(() => {
+    if (typeof onOverlapChange === "function") {
+      onOverlapChange(isOverlapping);
+    }
+  }, [isOverlapping, onOverlapChange]);
+
   const durationDays = useMemo(() => {
-    if (!startDate || !endDate) return startDate ? 1 : 0;
+    // 1. Before calculating leave duration, check employee's existing leave requests.
+    // 4. If an overlap is detected, do not calculate or add duplicate leave days.
+    if (!startDate || isOverlapping) return 0;
+    if (!endDate) return 1;
     const diffTime = Math.abs(endObj - startObj);
     return Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
-  }, [startDate, endDate, startObj, endObj]);
+  }, [startDate, endDate, startObj, endObj, isOverlapping]);
+
+  const getExistingLeaveForDate = (dateStr) => {
+    return (existingLeaves || []).find(leave => {
+      const st = String(leave.status || "").toLowerCase();
+      if (st !== "pending" && st !== "approved") return false;
+      const exStart = getCleanDate(leave.startDate || leave.start_date);
+      const exEnd = getCleanDate(leave.endDate || leave.end_date) || exStart;
+      if (!exStart) return false;
+      return dateStr >= exStart && dateStr <= exEnd;
+    });
+  };
 
   const includesWeekend = useMemo(() => {
     if (!startDate) return false;
@@ -167,6 +213,8 @@ export default function CustomDateRangePicker({ startDate, endDate, setStartDate
             const isEndNode = dateStr === endDate || (startDate && !endDate && dateStr === hoverDate && hoverDate > startDate);
             const isHoverStartNode = (startDate && !endDate && dateStr === hoverDate && hoverDate < startDate);
 
+            const existingForDay = getExistingLeaveForDate(dateStr);
+
             return (
               <div 
                 key={i} 
@@ -176,35 +224,35 @@ export default function CustomDateRangePicker({ startDate, endDate, setStartDate
               >
                 {/* Connecting Trail Background */}
                 {between && (
-                  <div className="absolute inset-y-1 inset-x-0 bg-brand-primary/15" />
+                  <div className={`absolute inset-y-1 inset-x-0 ${isOverlapping ? "bg-red-500/15" : "bg-brand-primary/15"}`} />
                 )}
                 {selected && endDate && isStartNode && startDate < endDate && (
-                  <div className="absolute inset-y-1 right-0 left-1/2 bg-brand-primary/15" />
+                  <div className={`absolute inset-y-1 right-0 left-1/2 ${isOverlapping ? "bg-red-500/15" : "bg-brand-primary/15"}`} />
                 )}
                 {selected && endDate && isEndNode && endDate > startDate && (
-                  <div className="absolute inset-y-1 left-0 right-1/2 bg-brand-primary/15" />
+                  <div className={`absolute inset-y-1 left-0 right-1/2 ${isOverlapping ? "bg-red-500/15" : "bg-brand-primary/15"}`} />
                 )}
 
                 {/* Hover state for trailing start (when hovering before start date) */}
                 {!endDate && startDate && isStartNode && hoverDate && hoverDate < startDate && (
-                  <div className="absolute inset-y-1 left-0 right-1/2 bg-brand-primary/15" />
+                  <div className={`absolute inset-y-1 left-0 right-1/2 ${isOverlapping ? "bg-red-500/15" : "bg-brand-primary/15"}`} />
                 )}
                 {!endDate && startDate && isHoverStartNode && (
-                  <div className="absolute inset-y-1 right-0 left-1/2 bg-brand-primary/15" />
+                  <div className={`absolute inset-y-1 right-0 left-1/2 ${isOverlapping ? "bg-red-500/15" : "bg-brand-primary/15"}`} />
                 )}
                 {!endDate && startDate && hoverDate > startDate && isStartNode && (
-                  <div className="absolute inset-y-1 right-0 left-1/2 bg-brand-primary/15" />
+                  <div className={`absolute inset-y-1 right-0 left-1/2 ${isOverlapping ? "bg-red-500/15" : "bg-brand-primary/15"}`} />
                 )}
 
                 {/* Node Circle */}
                 <div 
                   className={`relative z-10 w-9 h-9 flex items-center justify-center rounded-full text-sm font-bold transition-all ${
                     selected
-                      ? "bg-brand-primary text-white shadow-md shadow-brand-primary/30"
+                      ? (isOverlapping ? "bg-red-500 text-white shadow-md shadow-red-500/30" : "bg-brand-primary text-white shadow-md shadow-brand-primary/30")
                       : (!endDate && startDate && dateStr === hoverDate)
-                      ? "bg-brand-primary text-white shadow-md shadow-brand-primary/30 scale-95"
+                      ? (isOverlapping ? "bg-red-500 text-white shadow-md shadow-red-500/30 scale-95" : "bg-brand-primary text-white shadow-md shadow-brand-primary/30 scale-95")
                       : between
-                      ? "text-brand-primary"
+                      ? (isOverlapping ? "text-red-500 font-extrabold" : "text-brand-primary")
                       : isMinDisabled
                       ? "text-text-mut/30 cursor-not-allowed"
                       : !dayObj.isCurrentMonth
@@ -213,6 +261,14 @@ export default function CustomDateRangePicker({ startDate, endDate, setStartDate
                   }`}
                 >
                   {dayObj.date.getDate()}
+                  {existingForDay && !selected && (
+                    <span 
+                      className={`absolute bottom-1 w-1.5 h-1.5 rounded-full ${
+                        existingForDay.status === "approved" ? "bg-emerald-500" : "bg-amber-500"
+                      }`}
+                      title={`${existingForDay.leaveType || existingForDay.leave_type || "Leave"} (${existingForDay.status})`}
+                    />
+                  )}
                 </div>
               </div>
             );
@@ -223,10 +279,10 @@ export default function CustomDateRangePicker({ startDate, endDate, setStartDate
       {/* Summary Panel */}
       <div className="bg-bg-base/50 p-6 sm:p-8 flex-1 border-t sm:border-t-0 sm:border-l border-border-card flex flex-col justify-center">
         
-        <div className="mb-8">
+        <div className="mb-6">
           <span className="text-[11px] font-bold text-text-sec block mb-2">Selected Dates</span>
           {startDate ? (
-            <div className="text-xl sm:text-2xl font-black text-text-main tracking-tight">
+            <div className={`text-xl sm:text-2xl font-black tracking-tight ${isOverlapping ? "text-red-500" : "text-text-main"}`}>
               {startObj.toLocaleDateString([], { day: 'numeric', month: 'short' })}
               {endDate && endDate !== startDate ? (
                 <>
@@ -234,7 +290,7 @@ export default function CustomDateRangePicker({ startDate, endDate, setStartDate
                   {endObj.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })}
                 </>
               ) : (
-                <span className="text-text-main"> {startObj.getFullYear()}</span>
+                <span className={isOverlapping ? "text-red-500" : "text-text-main"}> {startObj.getFullYear()}</span>
               )}
             </div>
           ) : (
@@ -244,19 +300,34 @@ export default function CustomDateRangePicker({ startDate, endDate, setStartDate
           )}
         </div>
 
-        <div className="h-px bg-border-card w-full mb-8" />
+        <div className="h-px bg-border-card w-full mb-6" />
 
-        <div className="mb-8">
+        <div className="mb-6">
           <span className="text-[11px] font-bold text-text-sec block mb-3">Total Duration</span>
           <div className="flex items-center gap-3">
-            <div className="text-brand-primary">
+            <div className={isOverlapping ? "text-red-500" : "text-brand-primary"}>
               <Calendar size={28} />
             </div>
-            <span className="text-2xl sm:text-3xl font-black text-brand-primary tracking-tight">
-              {durationDays} {durationDays === 1 ? 'Day' : 'Days'}
+            <span className={`text-2xl sm:text-3xl font-black tracking-tight ${isOverlapping ? "text-red-500" : "text-brand-primary"}`}>
+              {isOverlapping ? "0 Days" : `${durationDays} ${durationDays === 1 ? 'Day' : 'Days'}`}
             </span>
           </div>
         </div>
+
+        {/* Clear Overlapping Error Message */}
+        {isOverlapping && (
+          <div className="mb-6 p-3.5 bg-red-500/10 border border-red-500/30 rounded-[14px] text-red-500 dark:text-red-400 text-xs font-bold flex items-start gap-2.5 shadow-sm">
+            <AlertCircle size={18} className="flex-shrink-0 mt-0.5 text-red-500" />
+            <div className="flex flex-col gap-1 text-left">
+              <span className="leading-snug">You already have a leave request for some of these dates. Please select a different date range.</span>
+              {overlappingLeave && (
+                <span className="text-[10px] font-semibold text-text-mut">
+                  Conflict with: <strong className="text-text-main">{overlappingLeave.leaveType || overlappingLeave.leave_type || "Leave"}</strong> ({overlappingLeave.startDate} to {overlappingLeave.endDate}) - <span className="uppercase font-extrabold text-amber-500">{overlappingLeave.status}</span>
+                </span>
+              )}
+            </div>
+          </div>
+        )}
 
         <div className="flex items-center gap-2 text-sm font-bold text-text-sec">
           Includes weekend
