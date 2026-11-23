@@ -50,9 +50,11 @@ export default function AttendanceMonitoringTab({ currentUser, showToast }) {
   const [analyticsData, setAnalyticsData] = useState(null);
   const [regularizationRequests, setRegularizationRequests] = useState([]);
 
-  // Loading States
+  // Loading & Error States
   const [loadingSummary, setLoadingSummary] = useState(false);
+  const [errorSummary, setErrorSummary] = useState(null);
   const [loadingRecords, setLoadingRecords] = useState(false);
+  const [errorRecords, setErrorRecords] = useState(null);
   const [loadingLive, setLoadingLive] = useState(false);
   const [loadingAnalytics, setLoadingAnalytics] = useState(false);
   const [lastRefreshed, setLastRefreshed] = useState(new Date().toLocaleTimeString());
@@ -64,6 +66,7 @@ export default function AttendanceMonitoringTab({ currentUser, showToast }) {
   // Load Summary
   const loadSummary = useCallback(async () => {
     setLoadingSummary(true);
+    setErrorSummary(null);
     try {
       const res = await getAttendanceMonitoringSummary(filters);
       if (res) {
@@ -71,6 +74,7 @@ export default function AttendanceMonitoringTab({ currentUser, showToast }) {
       }
     } catch (err) {
       console.error("Failed to load attendance summary:", err);
+      setErrorSummary(err.message || "Failed to load attendance summary.");
     } finally {
       setLoadingSummary(false);
     }
@@ -79,6 +83,7 @@ export default function AttendanceMonitoringTab({ currentUser, showToast }) {
   // Load Records
   const loadRecords = useCallback(async () => {
     setLoadingRecords(true);
+    setErrorRecords(null);
     try {
       const res = await getAttendanceMonitoringRecords(filters);
       if (res) {
@@ -91,10 +96,12 @@ export default function AttendanceMonitoringTab({ currentUser, showToast }) {
       }
     } catch (err) {
       console.error("Failed to load attendance records:", err);
+      setErrorRecords(err.message || "Failed to fetch attendance records.");
+      showToast && showToast("Failed to fetch attendance records.", "error");
     } finally {
       setLoadingRecords(false);
     }
-  }, [filters]);
+  }, [filters, showToast]);
 
   // Load Live Data
   const loadLive = useCallback(async () => {
@@ -246,6 +253,8 @@ export default function AttendanceMonitoringTab({ currentUser, showToast }) {
       <AttendanceOverviewCards
         summary={summary}
         loading={loadingSummary}
+        error={errorSummary}
+        onRetry={loadSummary}
         onCardClick={(statusKey) => {
           setFilters((prev) => ({ ...prev, status: statusKey }));
           setSubTab("records");
@@ -345,6 +354,8 @@ export default function AttendanceMonitoringTab({ currentUser, showToast }) {
         <EmployeeAttendanceTable
           records={records}
           loading={loadingRecords}
+          error={errorRecords}
+          onRetry={loadRecords}
           onViewEmployee={(userId, rec) => setDetailsModal({ open: true, userId, record: rec })}
           onReviewRecord={(rec) => setReviewModal({ open: true, record: rec })}
           onRegularizeRecord={(rec) => {

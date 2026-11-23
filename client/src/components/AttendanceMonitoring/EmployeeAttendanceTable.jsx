@@ -24,6 +24,8 @@ import {
 export default function EmployeeAttendanceTable({
   records = [],
   loading = false,
+  error = null,
+  onRetry,
   onViewEmployee,
   onReviewRecord,
   onRegularizeRecord,
@@ -363,12 +365,37 @@ export default function EmployeeAttendanceTable({
                   <td className="py-4 px-4 text-right"><div className="h-7 w-20 ml-auto bg-zinc-800 rounded" /></td>
                 </tr>
               ))
+            ) : error ? (
+              <tr>
+                <td colSpan={14} className="py-12 px-4 text-center">
+                  <div className="flex flex-col items-center justify-center max-w-md mx-auto text-zinc-400 space-y-3">
+                    <div className="p-3 rounded-full bg-rose-500/10 border border-rose-500/20 text-rose-400">
+                      <AlertTriangle className="w-8 h-8" />
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-base font-bold text-zinc-200">Unable to Load Attendance Records</p>
+                      <p className="text-xs text-rose-400/90 font-mono">
+                        {typeof error === "string" ? error : (error.message || "Failed to fetch attendance records from server.")}
+                      </p>
+                    </div>
+                    {onRetry && (
+                      <button
+                        type="button"
+                        onClick={onRetry}
+                        className="px-4 py-2 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-500 text-white transition-all shadow-md shadow-purple-950/40 cursor-pointer"
+                      >
+                        Retry Request
+                      </button>
+                    )}
+                  </div>
+                </td>
+              </tr>
             ) : paginatedRecords.length === 0 ? (
               <tr>
                 <td colSpan={14} className="py-12 px-4 text-center">
                   <div className="flex flex-col items-center justify-center max-w-sm mx-auto text-zinc-400">
                     <Clock className="w-10 h-10 text-zinc-600 mb-3" />
-                    <p className="text-base font-semibold text-zinc-300">No attendance records found</p>
+                    <p className="text-base font-semibold text-zinc-300">No attendance records match the selected criteria.</p>
                     <p className="text-xs text-zinc-500 mt-1">
                       Try adjusting the date range, status, or search filters above.
                     </p>
@@ -377,21 +404,23 @@ export default function EmployeeAttendanceTable({
               </tr>
             ) : (
               paginatedRecords.map((rec) => {
-                const empName = rec.employeeName || rec.name || "Unknown Employee";
-                const empId = rec.empId || rec.employeeId || rec.userId?.slice(-6) || "EMP";
+                const empName = rec.employeeName || rec.name || rec.user_name || "Unknown Employee";
+                const empId = rec.empId || rec.employeeId || rec.employee_id || rec.userId?.slice(-6) || "EMP";
                 const dept = rec.department || "General";
-                const shiftName = rec.shift_name || "General Shift";
-                const shiftWindow = rec.shift_start && rec.shift_end ? `${rec.shift_start} - ${rec.shift_end}` : "";
-                const dateStr = rec.date || "N/A";
-                const checkIn = rec.check_in_formatted || rec.checkIn || rec.check_in_time || "--";
-                const checkOut = rec.check_out_formatted || rec.checkOut || rec.check_out_time || "--";
-                const workHours = rec.working_hours_formatted || (rec.working_hours ? `${rec.working_hours}h` : "--");
-                const lateBy = rec.late_by_formatted || (rec.late_minutes > 0 ? `${rec.late_minutes}m` : "--");
-                const earlyDep = rec.early_departure_formatted || (rec.early_departure_minutes > 0 ? `${rec.early_departure_minutes}m` : "--");
-                const status = rec.attendance_status || rec.status || "Present";
-                const gpsStatus = rec.gps_verification_status || rec.gpsStatus || "Not Available";
-                const faceStatus = rec.face_verification_status || rec.faceStatus || "Not Available";
-                const isLocked = Boolean(rec.locked || rec.attendance_locked);
+                const shiftName = rec.shift_name || rec.shift || "General Shift";
+                const shiftWindow = (rec.shift_start && rec.shift_end)
+                  ? `${rec.shift_start} - ${rec.shift_end}`
+                  : (rec.shiftStart && rec.shiftEnd ? `${rec.shiftStart} - ${rec.shiftEnd}` : "");
+                const dateStr = rec.date_formatted || rec.date || "N/A";
+                const checkIn = rec.check_in_formatted || rec.checkIn || rec.check_in_time || rec.check_in || "--";
+                const checkOut = rec.check_out_formatted || rec.checkOut || rec.check_out_time || rec.check_out || "--";
+                const workHours = rec.working_hours_formatted || rec.workingHours || (rec.working_hours ? `${rec.working_hours}h` : "--");
+                const lateBy = rec.late_by_formatted || rec.lateByText || (rec.late_minutes > 0 ? `${rec.late_minutes}m` : (rec.lateByMinutes > 0 ? `${rec.lateByMinutes}m` : "--"));
+                const earlyDep = rec.early_departure_formatted || rec.earlyDepartureText || (rec.early_departure_minutes > 0 ? `${rec.early_departure_minutes}m` : (rec.earlyDepartureMinutes > 0 ? `${rec.earlyDepartureMinutes}m` : "--"));
+                const status = rec.attendance_status || rec.attendanceStatus || rec.status || "Present";
+                const gpsStatus = rec.gps_verification_status || rec.gpsVerification || rec.gpsStatus || "Not Available";
+                const faceStatus = rec.face_verification_status || rec.faceVerification || rec.faceStatus || "Not Available";
+                const isLocked = Boolean(rec.locked || rec.attendance_locked || rec.isAdminLocked || rec.is_admin_locked);
 
                 return (
                   <tr
@@ -541,43 +570,45 @@ export default function EmployeeAttendanceTable({
       </div>
 
       {/* Pagination Bar */}
-      <div className="px-5 py-3.5 border-t border-zinc-800/80 flex flex-wrap items-center justify-between gap-3 bg-zinc-900/40 text-xs text-zinc-400">
-        <div>
-          Showing{" "}
-          <span className="font-semibold text-zinc-200">
-            {sortedRecords.length === 0 ? 0 : (currentPage - 1) * pageSize + 1}
-          </span>{" "}
-          to{" "}
-          <span className="font-semibold text-zinc-200">
-            {Math.min(currentPage * pageSize, sortedRecords.length)}
-          </span>{" "}
-          of <span className="font-semibold text-zinc-200">{sortedRecords.length}</span> records
+      {!error && (
+        <div className="px-5 py-3.5 border-t border-zinc-800/80 flex flex-wrap items-center justify-between gap-3 bg-zinc-900/40 text-xs text-zinc-400">
+          <div>
+            Showing{" "}
+            <span className="font-semibold text-zinc-200">
+              {sortedRecords.length === 0 ? 0 : (currentPage - 1) * pageSize + 1}
+            </span>{" "}
+            to{" "}
+            <span className="font-semibold text-zinc-200">
+              {Math.min(currentPage * pageSize, sortedRecords.length)}
+            </span>{" "}
+            of <span className="font-semibold text-zinc-200">{sortedRecords.length}</span> records
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              disabled={currentPage <= 1}
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              className="p-1.5 rounded-lg border border-zinc-700/60 bg-zinc-800/60 text-zinc-300 hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+
+            <span className="px-3 py-1 text-zinc-300 font-medium">
+              Page {currentPage} of {totalPages}
+            </span>
+
+            <button
+              type="button"
+              disabled={currentPage >= totalPages}
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              className="p-1.5 rounded-lg border border-zinc-700/60 bg-zinc-800/60 text-zinc-300 hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
         </div>
-
-        <div className="flex items-center gap-1.5">
-          <button
-            type="button"
-            disabled={currentPage <= 1}
-            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-            className="p-1.5 rounded-lg border border-zinc-700/60 bg-zinc-800/60 text-zinc-300 hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-          >
-            <ChevronLeft className="w-4 h-4" />
-          </button>
-
-          <span className="px-3 py-1 text-zinc-300 font-medium">
-            Page {currentPage} of {totalPages}
-          </span>
-
-          <button
-            type="button"
-            disabled={currentPage >= totalPages}
-            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-            className="p-1.5 rounded-lg border border-zinc-700/60 bg-zinc-800/60 text-zinc-300 hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-          >
-            <ChevronRight className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
+      )}
     </div>
   );
 }

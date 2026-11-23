@@ -12,24 +12,83 @@ import {
 import { formatDisplayDate } from '../../utils/dateUtils';
 
 export default function AttendanceFilterBar({
-  filterType,
-  setFilterType,
-  startDate,
-  setStartDate,
-  endDate,
-  setEndDate,
-  department,
-  setDepartment,
-  status,
-  setStatus,
-  searchQuery,
-  setSearchQuery,
+  filters,
+  onChange,
+  filterType: propFilterType,
+  setFilterType: propSetFilterType,
+  startDate: propStartDate,
+  setStartDate: propSetStartDate,
+  endDate: propEndDate,
+  setEndDate: propSetEndDate,
+  department: propDepartment,
+  setDepartment: propSetDepartment,
+  status: propStatus,
+  setStatus: propSetStatus,
+  searchQuery: propSearchQuery,
+  setSearchQuery: propSetSearchQuery,
   onRefresh,
-  isRefreshing,
+  loading = false,
+  isRefreshing = false,
   lastRefreshedAt,
+  lastRefreshed,
   departments = []
 }) {
   const [showCustomRange, setShowCustomRange] = useState(false);
+
+  // Unified resolution of filter values
+  const filterType = filters?.filterType || filters?.range || propFilterType || "today";
+  const startDate = filters?.startDate ?? propStartDate ?? "";
+  const endDate = filters?.endDate ?? propEndDate ?? "";
+  const department = filters?.department ?? propDepartment ?? "all";
+  const status = filters?.status ?? propStatus ?? "all";
+  const searchQuery = filters?.search ?? filters?.searchQuery ?? propSearchQuery ?? "";
+  const refreshing = loading || isRefreshing;
+  const refreshTimestamp = lastRefreshedAt || lastRefreshed;
+
+  const updateFilter = (key, value) => {
+    if (onChange) {
+      onChange((prev) => ({
+        ...prev,
+        [key]: value,
+        // Sync filterType and range
+        ...(key === "filterType" ? { range: value } : {}),
+        ...(key === "range" ? { filterType: value } : {}),
+        // Sync search
+        ...(key === "searchQuery" ? { search: value } : {}),
+        ...(key === "search" ? { searchQuery: value } : {})
+      }));
+    }
+  };
+
+  const setFilterType = (type) => {
+    updateFilter("filterType", type);
+    if (propSetFilterType) propSetFilterType(type);
+  };
+
+  const setStartDate = (val) => {
+    updateFilter("startDate", val);
+    if (propSetStartDate) propSetStartDate(val);
+  };
+
+  const setEndDate = (val) => {
+    updateFilter("endDate", val);
+    if (propSetEndDate) propSetEndDate(val);
+  };
+
+  const setDepartment = (val) => {
+    updateFilter("department", val);
+    if (propSetDepartment) propSetDepartment(val);
+  };
+
+  const setStatus = (val) => {
+    updateFilter("status", val);
+    if (propSetStatus) propSetStatus(val);
+  };
+
+  const setSearchQuery = (val) => {
+    updateFilter("search", val);
+    if (propSetSearchQuery) propSetSearchQuery(val);
+  };
 
   const filterOptions = [
     { id: "today", label: "Today" },
@@ -61,8 +120,10 @@ export default function AttendanceFilterBar({
     }
   };
 
-  const formattedRefreshTime = lastRefreshedAt
-    ? new Date(lastRefreshedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  const formattedRefreshTime = refreshTimestamp
+    ? (typeof refreshTimestamp === "string" && refreshTimestamp.includes(":") && !refreshTimestamp.includes("T")
+        ? refreshTimestamp
+        : new Date(refreshTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }))
     : "Just now";
 
   return (

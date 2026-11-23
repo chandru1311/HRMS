@@ -117,7 +117,9 @@ const formatTimeDisplay = (timeVal) => {
  */
 const resolveTargetCompany = (req) => {
   const isSuperAdmin = String(req.user?.role || "").toLowerCase() === "superadmin";
-  const targetCompanyId = isSuperAdmin && req.query.companyId ? req.query.companyId : req.user?.companyId;
+  const targetCompanyId = isSuperAdmin && req.query.companyId 
+    ? req.query.companyId 
+    : (req.user?.companyId || req.user?.company_id);
   return { isSuperAdmin, targetCompanyId };
 };
 
@@ -129,7 +131,8 @@ const resolveTargetCompany = (req) => {
 export const getAttendanceMonitoringSummary = async (req, res) => {
   try {
     const { isSuperAdmin, targetCompanyId } = resolveTargetCompany(req);
-    const { filterType = "today", department, employeeId, status } = req.query;
+    const filterType = req.query.filterType || req.query.range || "today";
+    const { department, employeeId, status } = req.query;
 
     let startDate = req.query.startDate;
     let endDate = req.query.endDate;
@@ -148,6 +151,9 @@ export const getAttendanceMonitoringSummary = async (req, res) => {
       const month = getThisMonthRange();
       startDate = month.startDate;
       endDate = month.endDate;
+    } else if (req.query.date) {
+      startDate = req.query.date;
+      endDate = req.query.date;
     } else if (!startDate || !endDate) {
       startDate = getTodayDateStr();
       endDate = startDate;
@@ -266,8 +272,6 @@ export const getAttendanceMonitoringSummary = async (req, res) => {
     // Check approved leaves coverage
     const leaveCoverage = new Set();
     approvedLeaves.forEach(l => {
-      const lStart = formatDateOnly(l.start_date);
-      const lEnd = formatDateOnly(l.end_date);
       users.forEach(u => {
         if (u.id === l.user_id) {
           leaveCoverage.add(`${l.user_id}`);
@@ -291,9 +295,9 @@ export const getAttendanceMonitoringSummary = async (req, res) => {
         evaluatedPresentUsers.add(a.user_id);
         presentCount++;
 
-        // Late calculation
+        // Late calculation (5-minute grace threshold)
         const inMins = parseTimeToMinutes(a.check_in);
-        if (inMins !== null && inMins > (shiftStartMins + 5)) { // 5-minute grace threshold
+        if (inMins !== null && inMins > (shiftStartMins + 5)) {
           lateCount++;
         }
 
@@ -306,7 +310,7 @@ export const getAttendanceMonitoringSummary = async (req, res) => {
       }
     });
 
-    // Absent employees for single-day query or overall active employees without present/leave records
+    // Absent employees
     let absentCount = 0;
     if (startDate === endDate) {
       users.forEach(u => {
@@ -355,24 +359,44 @@ export const getAttendanceMonitoringSummary = async (req, res) => {
 export const getAttendanceMonitoringRecords = async (req, res) => {
   try {
     const { isSuperAdmin, targetCompanyId } = resolveTargetCompany(req);
+    const filterType = req.query.filterType || req.query.range || "today";
     const {
-      filterType = "today",
       department,
       status,
       search = "",
       page = 1,
       limit = 25,
-      sortBy = "check_in",
+      sortBy = "date",
       sortOrder = "desc"
     } = req.query;
 
-    let targetDate = req.query.date || req.query.startDate;
-    if (!targetDate || filterType === "today") {
-      targetDate = getTodayDateStr();
+    let startDate = req.query.startDate;
+    let endDate = req.query.endDate;
+
+    if (filterType === "today") {
+      startDate = getTodayDateStr();
+      endDate = startDate;
     } else if (filterType === "yesterday") {
-      targetDate = getYesterdayDateStr();
+      startDate = getYesterdayDateStr();
+      endDate = startDate;
+    } else if (filterType === "this_week") {
+      const week = getThisWeekRange();
+      startDate = week.startDate;
+      endDate = week.endDate;
+    } else if (filterType === "this_month") {
+      const month = getThisMonthRange();
+      startDate = month.startDate;
+      endDate = month.endDate;
+    } else if (req.query.date) {
+      startDate = req.query.date;
+      endDate = req.query.date;
+    } else if (!startDate || !endDate) {
+      startDate = getTodayDateStr();
+      endDate = startDate;
     }
-    targetDate = formatDateOnly(targetDate);
+
+    startDate = formatDateOnly(startDate);
+    endDate = formatDateOnly(endDate);
 
     // Fetch company settings for geofencing
     let allowedRadius = 200;
@@ -408,90 +432,125 @@ export const getAttendanceMonitoringRecords = async (req, res) => {
     const users = userRes.rows;
     const userIds = users.map(u => u.id);
 
+    // Fetch tenant distinct departments
+    let deptSql = "SELECT DISTINCT department FROM users WHERE department IS NOT NULL";
+    const deptParams = [];
+    if (targetCompanyId) {
+      deptSql += " AND company_id = $1";
+      deptParams.push(targetCompanyId);
+    }
+    const deptRes = await query(deptSql, deptParams);
+    const departments = deptRes.rows.map(r => r.department).filter(Boolean).sort();
+
     if (userIds.length === 0) {
       return res.json({
         records: [],
+        departments,
         pagination: {
           total: 0,
           page: Number(page),
           limit: Number(limit),
           totalPages: 0
-        }
+        },
+        startDate,
+        endDate,
+        filterType
       });
     }
 
-    // 2. Fetch Attendance for Target Date
-    const attSql = `
+    const userMap = new Map();
+    users.forEach(u => userMap.set(u.id, u));
+
+    // 2. Fetch Attendance for Date Range
+    let attSql = `
       SELECT a.*, a.date::text as date_str
       FROM attendance a
-      WHERE a.date = $1
-        AND a.user_id = ANY($2::text[])
+      WHERE a.date >= $1 AND a.date <= $2
+        AND a.user_id = ANY($3::text[])
     `;
-    const attRes = await query(attSql, [targetDate, userIds]);
-    const attMap = new Map();
-    attRes.rows.forEach(r => attMap.set(r.user_id, r));
+    const attParams = [startDate, endDate, userIds];
+    if (targetCompanyId) {
+      attParams.push(targetCompanyId);
+      attSql += ` AND a.company_id = $${attParams.length}`;
+    }
+    attSql += " ORDER BY a.date DESC, a.check_in DESC NULLS LAST";
+    const attRes = await query(attSql, attParams);
+    const attendanceRecords = attRes.rows;
 
-    // 3. Fetch Approved Leaves for Target Date
-    const leaveSql = `
+    // 3. Fetch Approved Leaves for Date Range
+    let leaveSql = `
       SELECT l.*
       FROM leave_requests l
       WHERE l.status = 'approved'
-        AND l.start_date <= $1 AND l.end_date >= $1
-        AND l.user_id = ANY($2::text[])
+        AND l.start_date <= $2 AND l.end_date >= $1
+        AND l.user_id = ANY($3::text[])
     `;
-    const leaveRes = await query(leaveSql, [targetDate, userIds]);
-    const leaveMap = new Map();
-    leaveRes.rows.forEach(l => leaveMap.set(l.user_id, l));
+    const leaveParams = [startDate, endDate, userIds];
+    if (targetCompanyId) {
+      leaveParams.push(targetCompanyId);
+      leaveSql += ` AND l.company_id = $${leaveParams.length}`;
+    }
+    const leaveRes = await query(leaveSql, leaveParams);
+    const leaveRecords = leaveRes.rows;
 
-    // 4. Fetch Regularizations for Target Date
-    const regSql = `
+    // 4. Fetch Regularizations for Date Range
+    let regSql = `
       SELECT r.*
       FROM regularization_requests r
-      WHERE r.attendance_date = $1
-        AND r.user_id = ANY($2::text[])
+      WHERE r.attendance_date >= $1 AND r.attendance_date <= $2
+        AND r.user_id = ANY($3::text[])
     `;
-    const regRes = await query(regSql, [targetDate, userIds]);
+    const regParams = [startDate, endDate, userIds];
+    if (targetCompanyId) {
+      regParams.push(targetCompanyId);
+      regSql += ` AND r.company_id = $${regParams.length}`;
+    }
+    const regRes = await query(regSql, regParams);
     const regMap = new Map();
-    regRes.rows.forEach(r => regMap.set(r.user_id, r));
-
-    // 5. Fetch Verification Attempts for Target Date
-    const avaSql = `
-      SELECT ava.*
-      FROM attendance_verification_attempts ava
-      WHERE ava.attempted_at::date = $1::date
-        AND ava.user_id = ANY($2::text[])
-      ORDER BY ava.attempted_at DESC
-    `;
-    const avaRes = await query(avaSql, [targetDate, userIds]);
-    const avaMap = new Map();
-    avaRes.rows.forEach(v => {
-      if (!avaMap.has(v.user_id)) avaMap.set(v.user_id, v);
+    regRes.rows.forEach(r => {
+      const d = formatDateOnly(r.attendance_date);
+      regMap.set(`${r.user_id}_${d}`, r);
     });
 
-    // 6. Check if targetDate is a weekend or company holiday
-    const dateObj = new Date(targetDate);
-    const dayOfWeek = dateObj.getDay(); // 0 is Sun, 6 is Sat
-    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+    // 5. Fetch Verification Attempts for Date Range
+    let avaSql = `
+      SELECT ava.*
+      FROM attendance_verification_attempts ava
+      WHERE ava.attempted_at::date >= $1::date AND ava.attempted_at::date <= $2::date
+        AND ava.user_id = ANY($3::text[])
+      ORDER BY ava.attempted_at DESC
+    `;
+    const avaRes = await query(avaSql, [startDate, endDate, userIds]);
+    const avaMap = new Map();
+    avaRes.rows.forEach(v => {
+      const d = formatDateOnly(v.attempted_at);
+      const key = `${v.user_id}_${d}`;
+      if (!avaMap.has(key)) avaMap.set(key, v);
+    });
 
-    let isHoliday = false;
-    let holidayTitle = "";
+    // 6. Paid Holidays in range
+    let holidayMap = new Map();
     if (targetCompanyId) {
       const holRes = await query(
-        `SELECT title FROM paid_leaves WHERE status = 'active' AND start_date <= $1 AND end_date >= $1 AND (company_id = $2 OR company_id IS NULL) LIMIT 1`,
-        [targetDate, targetCompanyId]
+        `SELECT title, start_date, end_date FROM paid_leaves WHERE status = 'active' AND start_date <= $2 AND end_date >= $1 AND (company_id = $3 OR company_id IS NULL)`,
+        [startDate, endDate, targetCompanyId]
       );
-      if (holRes.rows.length > 0) {
-        isHoliday = true;
-        holidayTitle = holRes.rows[0].title;
-      }
+      holRes.rows.forEach(h => {
+        holidayMap.set(formatDateOnly(h.start_date), h.title);
+      });
     }
 
-    // 7. Assemble Detailed Rows
-    let allRecords = users.map(user => {
-      const att = attMap.get(user.id);
-      const leave = leaveMap.get(user.id);
-      const reg = regMap.get(user.id);
-      const ava = avaMap.get(user.id);
+    // Helper to format a single record
+    const formatRecordRow = (user, att, recDate) => {
+      const dStr = formatDateOnly(recDate);
+      const reg = regMap.get(`${user.id}_${dStr}`);
+      const ava = avaMap.get(`${user.id}_${dStr}`);
+
+      const leave = leaveRecords.find(l => {
+        const lStart = formatDateOnly(l.start_date);
+        const lEnd = formatDateOnly(l.end_date);
+        return l.user_id === user.id && dStr >= lStart && dStr <= lEnd;
+      });
 
       const shiftStartStr = user.shift_start || "09:00";
       const shiftEndStr = user.shift_end || "18:00";
@@ -503,6 +562,7 @@ export const getAttendanceMonitoringRecords = async (req, res) => {
       let checkInTime = null;
       let checkOutTime = null;
       let workingHoursStr = "0.00 hrs";
+      let workingHoursDec = 0;
       let workingMinutes = 0;
       let lateMinutes = 0;
       let earlyDepartureMinutes = 0;
@@ -511,22 +571,20 @@ export const getAttendanceMonitoringRecords = async (req, res) => {
         checkInTime = att.check_in;
         checkOutTime = att.check_out || null;
 
-        // Working minutes
         workingMinutes = Number(att.duration_minutes) || Number(att.accumulated_working_minutes) || 0;
         if (workingMinutes <= 0 && checkInTime) {
           const inD = new Date(checkInTime);
           const outD = checkOutTime ? new Date(checkOutTime) : new Date();
           workingMinutes = Math.max(0, Math.floor((outD.getTime() - inD.getTime()) / 60000));
         }
-        workingHoursStr = (workingMinutes / 60).toFixed(2) + " hrs";
+        workingHoursDec = parseFloat((workingMinutes / 60).toFixed(2));
+        workingHoursStr = `${workingHoursDec.toFixed(2)} hrs`;
 
-        // Late By calculation
         const inMins = parseTimeToMinutes(checkInTime);
         if (inMins !== null && inMins > shiftStartMins) {
           lateMinutes = inMins - shiftStartMins;
         }
 
-        // Early departure calculation
         if (checkOutTime) {
           const outMins = parseTimeToMinutes(checkOutTime);
           if (outMins !== null && outMins < shiftEndMins) {
@@ -553,7 +611,7 @@ export const getAttendanceMonitoringRecords = async (req, res) => {
         else if (ava.gps_result === "outside_geofence" || ava.gps_result === "failed") gpsVerification = "Failed";
       }
 
-      // Face Verification Result (NEVER exposing biometric templates or embeddings)
+      // Face Verification Result
       let faceVerification = "Not Available";
       if (att && att.biometric_verified && att.liveness_passed) {
         faceVerification = "Verified";
@@ -566,18 +624,21 @@ export const getAttendanceMonitoringRecords = async (req, res) => {
       }
 
       // Attendance Status Resolution
+      const dateObj = new Date(dStr + "T00:00:00");
+      const dayOfWeek = dateObj.getDay();
+      const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+      const isHoliday = holidayMap.has(dStr);
+
       let attendanceStatus = "Absent";
       if (att?.is_admin_locked) {
         attendanceStatus = "Attendance Locked";
-      } else if (leave) {
-        attendanceStatus = "On Leave";
-      } else if (att?.status === "on-leave") {
+      } else if (leave || att?.status === "on-leave") {
         attendanceStatus = "On Leave";
       } else if (att?.status === "absent" || att?.absence_reason || att?.penalty_status) {
         attendanceStatus = "Absent";
       } else if (checkInTime) {
         if (checkOutTime) {
-          if (workingMinutes < 270) { // less than 4.5 hours is half-day
+          if (workingMinutes < 270) {
             attendanceStatus = "Half Day";
           } else if (lateMinutes > 5) {
             attendanceStatus = "Late";
@@ -585,16 +646,9 @@ export const getAttendanceMonitoringRecords = async (req, res) => {
             attendanceStatus = "Present";
           }
         } else {
-          // Still checked in
-          const nowMins = new Date().getHours() * 60 + new Date().getMinutes();
-          if (targetDate === getTodayDateStr()) {
-            if (lateMinutes > 5) {
-              attendanceStatus = "Late";
-            } else {
-              attendanceStatus = "Present";
-            }
+          if (dStr === getTodayDateStr()) {
+            attendanceStatus = lateMinutes > 5 ? "Late" : "Present";
           } else {
-            // Missed checkout on past date
             attendanceStatus = "Incomplete Check-out";
           }
         }
@@ -602,65 +656,133 @@ export const getAttendanceMonitoringRecords = async (req, res) => {
         attendanceStatus = "Holiday";
       } else if (isWeekend) {
         attendanceStatus = "Weekly Off";
-      } else if (targetDate === getTodayDateStr()) {
+      } else if (dStr === getTodayDateStr()) {
         const now = new Date();
         const currentMins = now.getHours() * 60 + now.getMinutes();
         if (currentMins < shiftStartMins) {
           attendanceStatus = "Pending";
         } else if (currentMins > shiftStartMins + 15) {
-          attendanceStatus = "Late"; // Not checked in and past shift
+          attendanceStatus = "Late";
         } else {
           attendanceStatus = "Pending";
         }
       }
 
+      const checkInFormatted = formatTimeDisplay(checkInTime);
+      const checkOutFormatted = formatTimeDisplay(checkOutTime);
+      const lateFormatted = lateMinutes > 0 ? `${lateMinutes}m` : "0m";
+      const earlyFormatted = earlyDepartureMinutes > 0 ? `${earlyDepartureMinutes}m` : "0m";
+      const isLocked = Boolean(att?.is_admin_locked);
+      const dist = (att && att.distance_from_office_meters != null) ? Number(att.distance_from_office_meters) : null;
+
       return {
-        id: att?.id || `sim_${user.id}_${targetDate}`,
+        id: att?.id || `sim_${user.id}_${dStr}`,
+        recordId: att?.id || `sim_${user.id}_${dStr}`,
         attendanceId: att?.id || null,
         userId: user.id,
+        user_id: user.id,
+        empId: user.employee_id || `EMP-${user.id.slice(-4).toUpperCase()}`,
         employeeId: user.employee_id || `EMP-${user.id.slice(-4).toUpperCase()}`,
+        employee_id: user.employee_id || `EMP-${user.id.slice(-4).toUpperCase()}`,
+        name: user.name || "Employee",
         employeeName: user.name || "Employee",
+        user_name: user.name || "Employee",
         email: user.email,
         phone: user.phone || "—",
         department: user.department || "General",
         designation: user.designation || "Staff",
         avatarUrl: user.avatar_url || null,
+        avatar_url: user.avatar_url || null,
         shift: shiftDisplay,
+        shift_name: shiftDisplay,
         shiftStart: shiftStartStr,
+        shift_start: shiftStartStr,
         shiftEnd: shiftEndStr,
-        date: targetDate,
-        checkIn: formatTimeDisplay(checkInTime),
-        checkOut: formatTimeDisplay(checkOutTime),
+        shift_end: shiftEndStr,
+        date: dStr,
+        date_formatted: dStr,
+        checkIn: checkInFormatted,
+        check_in: checkInFormatted,
+        check_in_formatted: checkInFormatted,
+        check_in_time: checkInFormatted !== "—" ? checkInFormatted : null,
         checkInRaw: checkInTime,
+        checkOut: checkOutFormatted,
+        check_out: checkOutFormatted,
+        check_out_formatted: checkOutFormatted,
+        check_out_time: checkOutFormatted !== "—" ? checkOutFormatted : null,
         checkOutRaw: checkOutTime,
         workingHours: workingHoursStr,
+        working_hours: workingHoursDec,
+        working_hours_formatted: workingHoursStr,
         workingMinutes,
         lateByMinutes: lateMinutes,
-        lateByText: lateMinutes > 0 ? `${lateMinutes} mins` : "On Time",
+        late_minutes: lateMinutes,
+        lateByText: lateFormatted,
+        late_by_formatted: lateFormatted,
         earlyDepartureMinutes,
-        earlyDepartureText: earlyDepartureMinutes > 0 ? `${earlyDepartureMinutes} mins` : "None",
+        early_departure_minutes: earlyDepartureMinutes,
+        earlyDepartureText: earlyFormatted,
+        early_departure_formatted: earlyFormatted,
         gpsVerification,
+        gps_verification_status: gpsVerification,
+        gpsStatus: gpsVerification,
         faceVerification,
+        face_verification_status: faceVerification,
+        faceStatus: faceVerification,
         attendanceStatus,
+        attendance_status: attendanceStatus,
+        status: attendanceStatus,
         isRegularized: Boolean(att?.is_regularized || reg?.status === "approved"),
         regularizationStatus: reg?.status || null,
         regularizationId: reg?.id || null,
         adminNotes: att?.admin_notes || null,
-        isAdminLocked: Boolean(att?.is_admin_locked),
-        distanceMeters: (att && att.distance_from_office_meters != null) ? Number(att.distance_from_office_meters) : null,
+        admin_notes: att?.admin_notes || null,
+        admin_remarks: att?.admin_notes || null,
+        isAdminLocked: isLocked,
+        is_admin_locked: isLocked,
+        locked: isLocked,
+        attendance_locked: isLocked,
+        distanceMeters: dist,
+        distance_from_office_meters: dist,
         location: att?.check_in_location || att?.location || null
       };
+    };
+
+    let allRecords = [];
+
+    // Map all actual database attendance records
+    const coveredUserDateKeys = new Set();
+    attendanceRecords.forEach(att => {
+      const u = userMap.get(att.user_id);
+      if (u) {
+        const dStr = formatDateOnly(att.date_str || att.date);
+        coveredUserDateKeys.add(`${u.id}_${dStr}`);
+        allRecords.push(formatRecordRow(u, att, dStr));
+      }
     });
 
-    // Filter by status if selected
-    if (status && status !== "all") {
-      allRecords = allRecords.filter(r => r.attendanceStatus.toLowerCase() === status.toLowerCase());
+    // If single day view, or for today in range:
+    // Ensure every scheduled company user has an entry
+    const targetSingleDate = (startDate === endDate) ? startDate : (getTodayDateStr() >= startDate && getTodayDateStr() <= endDate ? getTodayDateStr() : null);
+    if (targetSingleDate) {
+      users.forEach(u => {
+        const key = `${u.id}_${targetSingleDate}`;
+        if (!coveredUserDateKeys.has(key)) {
+          allRecords.push(formatRecordRow(u, null, targetSingleDate));
+        }
+      });
     }
 
-    // Sorting
+    // Filter by status if requested
+    if (status && status !== "all") {
+      const sLower = status.toLowerCase();
+      allRecords = allRecords.filter(r => r.attendanceStatus.toLowerCase() === sLower || r.status.toLowerCase() === sLower);
+    }
+
+    // Sort
     allRecords.sort((a, b) => {
-      let valA = a[sortBy];
-      let valB = b[sortBy];
+      let valA = a[sortBy] !== undefined ? a[sortBy] : a.date;
+      let valB = b[sortBy] !== undefined ? b[sortBy] : b.date;
       if (valA === undefined) valA = "";
       if (valB === undefined) valB = "";
       if (typeof valA === "string") {
@@ -670,21 +792,24 @@ export const getAttendanceMonitoringRecords = async (req, res) => {
     });
 
     // Pagination
-    const pageNum = Math.max(1, parseInt(page, 10));
-    const limitNum = Math.max(1, parseInt(limit, 10));
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.max(1, parseInt(limit, 10) || 25);
     const totalRecords = allRecords.length;
     const totalPages = Math.ceil(totalRecords / limitNum);
     const paginatedRecords = allRecords.slice((pageNum - 1) * limitNum, pageNum * limitNum);
 
     res.json({
       records: paginatedRecords,
+      departments,
       pagination: {
         total: totalRecords,
         page: pageNum,
         limit: limitNum,
         totalPages
       },
-      targetDate
+      startDate,
+      endDate,
+      filterType
     });
   } catch (err) {
     console.error("getAttendanceMonitoringRecords error:", err);

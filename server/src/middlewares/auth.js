@@ -95,13 +95,29 @@ export const requireAdmin = (req, res, next) => {
   next();
 };
 
-export const requireManagerOrAdmin = (req, res, next) => {
+export const requireManagerOrAdmin = async (req, res, next) => {
   if (!req.user) {
     return res.status(401).json({ error: "Authentication required." });
   }
 
-  const role = req.user.role?.toLowerCase();
-  const isAllowed = role === "admin" || role === "superadmin" || role === "system admin" || role === "manager";
+  let role = req.user.role?.toLowerCase();
+  let isAllowed = role === "admin" || role === "superadmin" || role === "system admin" || role === "manager";
+
+  if (!isAllowed && (req.user.id || req.user.uid)) {
+    try {
+      const uRes = await query("SELECT role, company_id FROM users WHERE id = $1", [req.user.id || req.user.uid]);
+      if (uRes.rows.length > 0) {
+        const dbRole = uRes.rows[0].role?.toLowerCase();
+        if (dbRole === "admin" || dbRole === "superadmin" || dbRole === "system admin" || dbRole === "manager") {
+          req.user.role = uRes.rows[0].role;
+          req.user.companyId = req.user.companyId || uRes.rows[0].company_id;
+          isAllowed = true;
+        }
+      }
+    } catch (e) {
+      console.error("requireManagerOrAdmin DB role check error:", e);
+    }
+  }
 
   if (!isAllowed) {
     return res.status(403).json({ error: "Access forbidden. Manager or Admin role required." });

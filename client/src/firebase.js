@@ -2280,18 +2280,28 @@ export const fetchAllTasks = async (params = {}) => {
 // ADMIN ATTENDANCE MONITORING MODULE APIS
 // ==========================================
 
+const toCleanQueryString = (params = {}) => {
+  const clean = {};
+  for (const [key, val] of Object.entries(params)) {
+    if (val !== undefined && val !== null && val !== "") {
+      clean[key] = val;
+    }
+  }
+  return new URLSearchParams(clean).toString();
+};
+
 export const getAttendanceMonitoringSummary = async (params = {}) => {
-  const query = new URLSearchParams(params).toString();
+  const query = toCleanQueryString(params);
   return apiFetch(`/attendance-monitoring/summary${query ? `?${query}` : ""}`);
 };
 
 export const getAttendanceMonitoringRecords = async (params = {}) => {
-  const query = new URLSearchParams(params).toString();
+  const query = toCleanQueryString(params);
   return apiFetch(`/attendance-monitoring/records${query ? `?${query}` : ""}`);
 };
 
 export const getLiveAttendanceMonitoring = async (params = {}) => {
-  const query = new URLSearchParams(params).toString();
+  const query = toCleanQueryString(params);
   return apiFetch(`/attendance-monitoring/live${query ? `?${query}` : ""}`);
 };
 
@@ -2300,7 +2310,7 @@ export const getEmployeeAttendanceProfile = async (userId, days = 60) => {
 };
 
 export const getAttendanceAnalytics = async (params = {}) => {
-  const query = new URLSearchParams(params).toString();
+  const query = toCleanQueryString(params);
   return apiFetch(`/attendance-monitoring/analytics${query ? `?${query}` : ""}`);
 };
 
