@@ -29,6 +29,7 @@ router.get("/analytics", getMonitoringAnalytics);
 router.get("/export", exportAttendanceReport);
 router.get("/export-csv", exportAttendanceCsv);
 router.get("/export-excel", exportAttendanceExcel);
+router.get("/export-xlsx", exportAttendanceExcel);
 router.get("/export-pdf", exportAttendancePdf);
 
 // Admin Actions

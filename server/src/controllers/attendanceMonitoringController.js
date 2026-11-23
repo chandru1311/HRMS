@@ -1511,6 +1511,11 @@ export const exportAttendanceExcel = async (req, res) => {
   return exportAttendanceReport(req, res);
 };
 
+export const exportAttendanceXlsx = async (req, res) => {
+  req.query.format = "xlsx";
+  return exportAttendanceReport(req, res);
+};
+
 export const exportAttendancePdf = async (req, res) => {
   req.query.format = "pdf";
   return exportAttendanceReport(req, res);

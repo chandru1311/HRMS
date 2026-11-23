@@ -17,6 +17,9 @@ const buildCandidateUrls = (endpoint) => {
   }
 
   if (isLocal) {
+    if (typeof window !== "undefined" && window.location.origin) {
+      candidateUrls.push(`${window.location.origin}/api${cleanEndpoint}`);
+    }
     for (const port of LOCAL_API_PORTS) {
       candidateUrls.push(`http://localhost:${port}/api${cleanEndpoint}`);
       candidateUrls.push(`http://127.0.0.1:${port}/api${cleanEndpoint}`);
@@ -110,7 +113,17 @@ export const apiFetch = async (endpoint, options = {}) => {
 export const apiDownload = async (endpoint, options = {}) => {
   const isLocal = typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
   const uniqueUrls = buildCandidateUrls(endpoint);
-  const token = localStorage.getItem("att_auth_token") || localStorage.getItem("token");
+  
+  let token = options.token || localStorage.getItem("att_auth_token") || localStorage.getItem("token");
+  if (!token) {
+    try {
+      const rawUser = localStorage.getItem("att_current_user");
+      if (rawUser) {
+        const parsed = JSON.parse(rawUser);
+        token = parsed?.token || parsed?.authToken || null;
+      }
+    } catch (_) {}
+  }
 
   let lastError = null;
 
@@ -136,6 +149,7 @@ export const apiDownload = async (endpoint, options = {}) => {
       }
 
       if ((response.status === 404 || response.status === 405) && isLocal && index < uniqueUrls.length - 1) {
+        lastError = new Error(`Endpoint not found on ${url}`);
         continue;
       }
 
@@ -165,9 +179,14 @@ export const apiDownload = async (endpoint, options = {}) => {
 
       return { blob, filename, contentType };
     } catch (err) {
-      lastError = err;
       if (err.status && err.status !== 404 && err.status !== 405) {
         throw err;
+      }
+      if (err.message && (err.message.includes("HTML page") || err.message.includes("empty"))) {
+        throw err;
+      }
+      if (!lastError || (lastError.message && lastError.message.includes("Failed to fetch"))) {
+        lastError = err;
       }
     }
   }
@@ -2398,14 +2417,16 @@ export const downloadAttendanceReport = async ({
   preset = "this_month",
   startDate = "",
   endDate = "",
-  employeeId = ""
+  employeeId = "",
+  token = null
 }) => {
-  const params = new URLSearchParams({ format, preset });
+  const normFormat = (format === "excel" || format === "xlsx") ? "xlsx" : format;
+  const params = new URLSearchParams({ format: normFormat, preset });
   if (startDate) params.append("startDate", startDate);
   if (endDate) params.append("endDate", endDate);
   if (employeeId) params.append("employeeId", employeeId);
 
-  return await apiDownload(`/attendance/monitoring/export-${format}?${params.toString()}`);
+  return await apiDownload(`/attendance/monitoring/export-${normFormat}?${params.toString()}`, { token });
 };
 
 

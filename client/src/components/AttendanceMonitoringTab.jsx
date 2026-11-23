@@ -317,7 +317,10 @@ export default function AttendanceMonitoringTab({ currentUser, users = [], showT
         dateTo,
         department: selectedDept
       }).toString();
-      const { blob, filename: serverFilename } = await apiDownload(`/attendance/monitoring/export?${params}`);
+      const { blob, filename: serverFilename } = await apiDownload(
+        `/attendance/monitoring/export?format=csv&${params}`,
+        { token: currentUser?.token || null }
+      );
       const filename = serverFilename || `attendance_export_${dateFrom}_${dateTo}.csv`;
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -347,7 +350,8 @@ export default function AttendanceMonitoringTab({ currentUser, users = [], showT
         preset: downloadPreset,
         startDate: downloadPreset === "custom" ? downloadStartDate : "",
         endDate: downloadPreset === "custom" ? downloadEndDate : "",
-        employeeId: downloadScope === "individual" ? downloadEmployeeId : ""
+        employeeId: downloadScope === "individual" ? downloadEmployeeId : "",
+        token: currentUser?.token || null
       });
 
       const filename = serverFilename || `attendance_report_${downloadPreset}.${downloadFormat}`;

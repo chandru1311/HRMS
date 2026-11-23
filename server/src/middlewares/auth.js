@@ -5,6 +5,9 @@ import { validateActiveSession } from "./sessionValidator.js";
 const JWT_SECRET = process.env.JWT_SECRET || "hrms_jwt_super_secret_railway_2026";
 
 export const authenticateToken = (req, res, next) => {
+  if (req.method === "OPTIONS") {
+    return next();
+  }
   const authHeader = req.headers["authorization"];
   const token = authHeader && authHeader.split(" ")[1];
 
