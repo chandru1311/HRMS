@@ -8,7 +8,10 @@ import {
   reviewRegularization,
   unlockAttendance,
   manualCorrectAttendance,
+  exportAttendanceReport,
   exportAttendanceCsv,
+  exportAttendanceExcel,
+  exportAttendancePdf,
   resolveAddressEndpoint
 } from "../controllers/attendanceMonitoringController.js";
 import { authenticateToken } from "../middlewares/auth.js";
@@ -23,8 +26,10 @@ router.get("/records", getMonitoringRecords);
 router.get("/live", getMonitoringLive);
 router.get("/employee/:userId", getEmployeeAttendanceProfile);
 router.get("/analytics", getMonitoringAnalytics);
-router.get("/export", exportAttendanceCsv);
+router.get("/export", exportAttendanceReport);
 router.get("/export-csv", exportAttendanceCsv);
+router.get("/export-excel", exportAttendanceExcel);
+router.get("/export-pdf", exportAttendancePdf);
 
 // Admin Actions
 router.post("/regularize/:id/review", reviewRegularization);

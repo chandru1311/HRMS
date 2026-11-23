@@ -368,7 +368,7 @@ describe("Attendance Location Reverse Geocoding & Date Column Suite", () => {
     const headerLine = csv.split("\n")[0];
     assert.ok(headerLine.includes("Date"), "CSV header must include 'Date'");
     assert.ok(headerLine.includes("GPS Status"), "CSV header must include 'GPS Status'");
-    assert.ok(headerLine.includes("Location Place"), "CSV header must include 'Location Place'");
+    assert.ok(headerLine.includes("Location") && headerLine.includes("Place"), "CSV header must include 'Location' and 'Place'");
     assert.ok(headerLine.includes("Face Biometric"), "CSV header must include 'Face Biometric'");
   });
 

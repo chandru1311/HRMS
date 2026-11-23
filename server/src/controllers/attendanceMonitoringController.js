@@ -2,6 +2,12 @@ import { query } from "../config/db.js";
 import auditService from "../services/auditService.js";
 import { sendNotificationOnce } from "../services/notificationService.js";
 import { reverseGeocode } from "../services/reverseGeocodingService.js";
+import {
+  fetchExportData,
+  sendCsvExport,
+  sendExcelExport,
+  sendPdfExport
+} from "../services/attendanceExportService.js";
 
 /**
  * Attendance Monitoring Controller
@@ -19,14 +25,14 @@ import { reverseGeocode } from "../services/reverseGeocodingService.js";
 const resolveCompanyId = async (req) => {
   const role = (req.user?.role || "").toLowerCase();
   const isSuperAdmin = role === "superadmin" || (req.user?.email || "").toLowerCase().includes("superadmin@");
-  
+
   let compId = req.user?.companyId || req.user?.company_id;
-  
+
   // Superadmin can query specific company or defaults to requested companyId in query
   if (isSuperAdmin && req.query?.companyId) {
     return req.query.companyId;
   }
-  
+
   // If companyId is not in token, look it up from the database for this user
   if (!compId && req.user?.id) {
     try {
@@ -91,7 +97,7 @@ export const formatDateReadable = (dStr) => {
       const dt = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
       return dt.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
     }
-  } catch {}
+  } catch { }
   return String(dStr);
 };
 
@@ -104,7 +110,7 @@ export const formatDateLong = (dStr) => {
       const dt = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
       return dt.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
     }
-  } catch {}
+  } catch { }
   return String(dStr);
 };
 
@@ -144,7 +150,7 @@ const formatTimeHHMM = (val) => {
     if (!isNaN(d.getTime())) {
       return d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
     }
-  } catch {}
+  } catch { }
   return String(val);
 };
 
@@ -166,9 +172,12 @@ const formatDuration = (totalMinutes) => {
 
 // Helper: Resolve date range from request
 const resolveDateRange = (reqQuery, tz = "Asia/Kolkata") => {
-  const { preset = "today", date, dateFrom, dateTo } = reqQuery;
+  const { preset = "today", date, dateFrom, dateTo, startDate, endDate } = reqQuery;
   const now = new Date();
   const todayStr = formatDateStr(now, tz);
+
+  const customStart = startDate || dateFrom;
+  const customEnd = endDate || dateTo;
 
   if (date) {
     return { startDate: date, endDate: date, isTodayRange: date === todayStr };
@@ -204,11 +213,13 @@ const resolveDateRange = (reqQuery, tz = "Asia/Kolkata") => {
     };
   }
 
-  if (preset === "custom" && (dateFrom || dateTo)) {
+  if (customStart || customEnd || preset === "custom") {
+    const s = customStart || todayStr;
+    const e = customEnd || customStart || todayStr;
     return {
-      startDate: dateFrom || todayStr,
-      endDate: dateTo || dateFrom || todayStr,
-      isTodayRange: (dateFrom === todayStr && dateTo === todayStr)
+      startDate: s,
+      endDate: e,
+      isTodayRange: s === todayStr && e === todayStr
     };
   }
 
@@ -253,41 +264,46 @@ export const evaluateGpsVerification = (att, attempt, isGeofenceEnabled = false)
   const attemptGps = (attempt?.gps_result || "").toLowerCase();
   const loc = att?.check_in_location || att?.location || {};
 
-  // 1. Explicit outside geofence failure recorded during verification attempt or location payload
+  const rawLat = att?.latitude ?? loc.latitude;
+  const rawLon = att?.longitude ?? loc.longitude;
+  const accuracy = att?.accuracy != null ? Number(att.accuracy) : (loc.accuracy != null ? Number(loc.accuracy) : null);
+  const hasCoords = rawLat != null && rawLon != null && rawLat !== "" && rawLon !== "" && !isNaN(Number(rawLat)) && !isNaN(Number(rawLon)) && (Number(rawLat) !== 0 || Number(rawLon) !== 0);
+
+  // 1. If no coordinates were captured (e.g. GPS denied or unavailable)
+  if (!hasCoords) {
+    if (attemptGps === "outside" || (loc.inGeofence === false && isGeofenceEnabled)) {
+      return "Outside Geofence";
+    }
+    return "Not Available";
+  }
+
+  // 2. Accuracy threshold exceeded (>500m)
+  if (accuracy !== null && accuracy > 500) {
+    return "Accuracy Insufficient";
+  }
+
+  // 3. Explicit outside geofence failure
   if (attemptGps === "outside" || attemptGps === "failed" || attempt?.failure_category === "geofence_rejected" || (loc.inGeofence === false && isGeofenceEnabled)) {
     return "Outside Geofence";
   }
 
-  // 2. Explicit verified geofence match during attempt or location payload
-  if (attemptGps === "inside" || (attemptGps === "verified" && isGeofenceEnabled) || (loc.inGeofence === true && isGeofenceEnabled)) {
+  // 4. Explicit attempt verified inside geofence
+  if (attemptGps === "inside" || attemptGps === "verified" || attemptGps === "pass" || attemptGps === "passed") {
     return "Verified";
   }
 
-  // 3. Stored explicit location_status from check-in
+  // 5. Stored explicit location_status from check-in
   if (att?.location_status && att.location_status !== "Not Available") {
     return att.location_status;
   }
 
-  const rawLat = att?.latitude ?? loc.latitude;
-  const rawLon = att?.longitude ?? loc.longitude;
-  const accuracy = att?.accuracy != null ? Number(att.accuracy) : (loc.accuracy != null ? Number(loc.accuracy) : null);
-  const hasCoords = rawLat != null && rawLon != null && !isNaN(Number(rawLat)) && !isNaN(Number(rawLon)) && (Number(rawLat) !== 0 || Number(rawLon) !== 0);
-
-  // 4. Coordinates captured
-  if (hasCoords) {
-    if (accuracy !== null && accuracy > 500) {
-      return "Accuracy Insufficient";
-    }
-
-    if (isGeofenceEnabled) {
-      return "Verified";
-    } else {
-      return "Location Captured";
-    }
+  // 5. Geofence disabled -> Location Captured
+  if (!isGeofenceEnabled || attemptGps === "not_required") {
+    return "Location Captured";
   }
 
-  // 5. No coordinates captured
-  return "Not Available";
+  // 6. Geofence enabled -> Verified
+  return "Verified";
 };
 
 // Helper: Map Biometric & Liveness verification outcome
@@ -719,15 +735,15 @@ export const getMonitoringRecords = async (req, res) => {
           AND (
             (a.metadata->>'verificationSessionId' IS NOT NULL AND s.id = a.metadata->>'verificationSessionId')
             OR
-            (a.metadata->>'verificationSessionId' IS NULL AND a.check_in IS NOT NULL AND ABS(EXTRACT(EPOCH FROM (a.check_in - s.consumed_at))) <= 120)
+            (a.check_in IS NOT NULL AND ABS(EXTRACT(EPOCH FROM (a.check_in - s.consumed_at))) <= 120)
           )
          LEFT JOIN attendance_verification_attempts ava
            ON (
              (a.metadata->>'verificationAttemptId' IS NOT NULL AND ava.id = a.metadata->>'verificationAttemptId')
              OR
-             (a.metadata->>'verificationAttemptId' IS NULL AND s.attempt_id IS NOT NULL AND ava.id = s.attempt_id)
+             (s.attempt_id IS NOT NULL AND ava.id = s.attempt_id)
              OR
-             (a.metadata->>'verificationAttemptId' IS NULL AND a.check_in IS NOT NULL AND ava.user_id = a.user_id AND ava.company_id = a.company_id AND ABS(EXTRACT(EPOCH FROM (a.check_in - ava.attempted_at))) <= 120)
+             (a.check_in IS NOT NULL AND ava.user_id = a.user_id AND ava.company_id = a.company_id AND ABS(EXTRACT(EPOCH FROM (a.check_in - ava.attempted_at))) <= 120)
            )
          WHERE a.company_id = $1
            AND a.id = ANY($2::text[])
@@ -1250,7 +1266,7 @@ export const reviewRegularization = async (req, res) => {
       io: req.app?.get("io"),
       activityType: "regularization_reviewed",
       entityId: id
-    }).catch(() => {});
+    }).catch(() => { });
 
     res.json({ message: `Regularization request ${decision} successfully.`, request: result.rows[0] });
   } catch (err) {
@@ -1313,7 +1329,7 @@ export const unlockAttendance = async (req, res) => {
       await query(
         `UPDATE tasks SET sla_penalty_applied = FALSE WHERE id = $1`,
         [record.penalized_by_task_id]
-      ).catch(() => {});
+      ).catch(() => { });
     }
 
     // Audit log
@@ -1343,7 +1359,7 @@ export const unlockAttendance = async (req, res) => {
       io: req.app?.get("io"),
       activityType: "attendance_unlocked",
       entityId: attendanceId
-    }).catch(() => {});
+    }).catch(() => { });
 
     res.json({ message: "Attendance unlocked successfully.", attendance: updatedRes.rows[0] });
   } catch (err) {
@@ -1430,9 +1446,9 @@ export const manualCorrectAttendance = async (req, res) => {
 };
 
 // -------------------------------------------------------------
-// 9. GET /api/attendance/monitoring/export
+// 9. GET /api/attendance/monitoring/export (-csv, -excel, -pdf)
 // -------------------------------------------------------------
-export const exportAttendanceCsv = async (req, res) => {
+export const exportAttendanceReport = async (req, res) => {
   try {
     if (!authorizeAdmin(req, res)) return;
 
@@ -1440,98 +1456,64 @@ export const exportAttendanceCsv = async (req, res) => {
     const tz = await getCompanyTimezone(companyId);
     const isGeofenceEnabled = await getCompanyGeofenceEnabled(companyId);
     const { startDate, endDate } = resolveDateRange(req.query, tz);
+    const employeeId = req.query.employeeId || req.query.userId || null;
+    const format = String(req.query.format || "csv").toLowerCase();
 
-    const usersRes = await query(
-      `SELECT id, name, email, employee_id, department, shift_start, shift_end 
-       FROM users WHERE company_id = $1 AND role <> 'superadmin'`,
-      [companyId]
-    );
-
-    const attRes = await query(
-      `SELECT * FROM attendance WHERE company_id = $1 AND date >= $2::date AND date <= $3::date ORDER BY date DESC, check_in DESC`,
-      [companyId, startDate, endDate]
-    );
-
-    const userMap = new Map();
-    usersRes.rows.forEach(u => userMap.set(u.id, u));
-
-    const csvHeaders = [
-      "Employee ID",
-      "Date",
-      "Employee Name",
-      "Email",
-      "Department",
-      "Shift",
-      "Check In",
-      "Check Out",
-      "Duration (Minutes)",
-      "Duration (Hours)",
-      "Late By (Minutes)",
-      "Early Departure (Minutes)",
-      "GPS Status",
-      "Location Place",
-      "Latitude",
-      "Longitude",
-      "Face Biometric",
-      "Attendance Status"
-    ];
-
-    const rows = [csvHeaders.join(",")];
-
-    attRes.rows.forEach(att => {
-      const u = userMap.get(att.user_id) || {};
-      const { lateByMinutes, earlyDepartureMinutes } = calculateLateAndEarly(
-        att.check_in,
-        att.check_out,
-        u.shift_start,
-        u.shift_end
-      );
-
-      const dStr = formatDateStr(att.date, tz);
-      const cIn = att.check_in ? formatTimeHHMM(att.check_in) : "--:--";
-      const cOut = att.check_out ? formatTimeHHMM(att.check_out) : "--:--";
-      const durMins = Number(att.duration_minutes || att.accumulated_working_minutes) || 0;
-      const durHrs = (durMins / 60).toFixed(2);
-
-      const loc = att.check_in_location || att.location || {};
-      const lat = att.latitude != null ? att.latitude : (loc.latitude != null ? loc.latitude : "");
-      const lon = att.longitude != null ? att.longitude : (loc.longitude != null ? loc.longitude : "");
-      const place = att.resolved_address || loc.locationName || (lat !== "" && lon !== "" ? `${lat}, ${lon}` : "Not Available");
-      const gpsStatus = evaluateGpsVerification(att, null, isGeofenceEnabled);
-      const { faceBiometricStatus } = evaluateBiometricVerification(null, att);
-
-      const row = [
-        `"${u.employee_id || u.id || ""}"`,
-        `"${formatDateReadable(dStr)}"`,
-        `"${u.name || "Employee"}"`,
-        `"${u.email || ""}"`,
-        `"${u.department || "General"}"`,
-        `"${(u.shift_start || "10:00") + " - " + (u.shift_end || "19:00")}"`,
-        `"${cIn}"`,
-        `"${cOut}"`,
-        durMins,
-        durHrs,
-        lateByMinutes,
-        earlyDepartureMinutes,
-        `"${gpsStatus}"`,
-        `"${String(place).replace(/"/g, '""')}"`,
-        lat !== "" ? lat : '""',
-        lon !== "" ? lon : '""',
-        `"${faceBiometricStatus}"`,
-        `"${att.status || "present"}"`
-      ];
-
-      rows.push(row.join(","));
+    const exportData = await fetchExportData({
+      companyId,
+      employeeId,
+      startDate,
+      endDate,
+      tz,
+      isGeofenceEnabled
     });
 
-    const csvContent = rows.join("\n");
-    res.setHeader("Content-Type", "text/csv");
-    res.setHeader("Content-Disposition", `attachment; filename="attendance_report_${startDate}_to_${endDate}.csv"`);
-    res.send(csvContent);
+    if (exportData.error) {
+      return res.status(exportData.statusCode || 400).json({ error: exportData.error });
+    }
+
+    // Log Audit Event
+    auditService.logAudit({
+      req,
+      action: "ATTENDANCE_REPORT_EXPORTED",
+      resourceType: "attendance_monitoring",
+      details: {
+        format,
+        reportType: employeeId ? "individual_employee" : "company_wide",
+        employeeId: employeeId || null,
+        startDate,
+        endDate,
+        preset: req.query.preset || "custom",
+        recordCount: exportData.records.length
+      }
+    });
+
+    if (format === "xlsx" || format === "excel") {
+      return await sendExcelExport(exportData, res);
+    } else if (format === "pdf") {
+      return sendPdfExport(exportData, res);
+    } else {
+      return sendCsvExport(exportData, res);
+    }
   } catch (err) {
-    console.error("exportAttendanceCsv error:", err);
-    res.status(500).json({ error: "Failed to export attendance CSV." });
+    console.error("exportAttendanceReport error:", err);
+    res.status(500).json({ error: "Failed to export attendance report." });
   }
+};
+
+export const exportAttendanceCsv = async (req, res) => {
+  req.query.format = "csv";
+  return exportAttendanceReport(req, res);
+};
+
+export const exportAttendanceExcel = async (req, res) => {
+  req.query.format = "xlsx";
+  return exportAttendanceReport(req, res);
+};
+
+export const exportAttendancePdf = async (req, res) => {
+  req.query.format = "pdf";
+  return exportAttendanceReport(req, res);
 };
 
 // -------------------------------------------------------------
@@ -1553,7 +1535,7 @@ export const resolveAddressEndpoint = async (req, res) => {
              location = jsonb_set(COALESCE(location, '{}'::jsonb), '{locationName}', to_jsonb($1::text))
          WHERE id = $2`,
         [address, attendanceId]
-      ).catch(() => {});
+      ).catch(() => { });
     }
     res.json({
       address: address || `${Number(latitude).toFixed(4)}, ${Number(longitude).toFixed(4)}`,

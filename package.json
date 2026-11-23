@@ -34,5 +34,9 @@
     "railway"
   ],
   "author": "",
-  "license": "ISC"
+  "license": "ISC",
+  "dependencies": {
+    "exceljs": "^4.4.0",
+    "pdfkit": "^0.21.0"
+  }
 }

@@ -30,6 +30,7 @@ import {
   Unlock,
   Edit3,
   FileSpreadsheet,
+  FileText,
   AlertTriangle,
   ExternalLink,
   Compass
@@ -103,6 +104,17 @@ export default function AttendanceMonitoringTab({ currentUser, users = [], showT
   // Unlock modal
   const [unlockRecord, setUnlockRecord] = useState(null);
   const [unlockNotes, setUnlockNotes] = useState("");
+
+  // Download Attendance Report Modal state
+  const [showDownloadModal, setShowDownloadModal] = useState(false);
+  const [downloadScope, setDownloadScope] = useState("all"); // "all" | "individual"
+  const [downloadEmployeeId, setDownloadEmployeeId] = useState("");
+  const [employeeSearchTerm, setEmployeeSearchTerm] = useState("");
+  const [downloadPreset, setDownloadPreset] = useState("today"); // "today" | "yesterday" | "this_week" | "this_month" | "custom"
+  const [downloadStartDate, setDownloadStartDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [downloadEndDate, setDownloadEndDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [downloadFormat, setDownloadFormat] = useState("xlsx"); // "xlsx" | "pdf" | "csv"
+  const [downloadLoading, setDownloadLoading] = useState(false);
 
   // Unique departments from staff list
   const departments = useMemo(() => {
@@ -294,7 +306,7 @@ export default function AttendanceMonitoringTab({ currentUser, users = [], showT
     }
   };
 
-  // Export CSV
+  // Export CSV (Direct)
   const handleExportCsv = () => {
     const params = new URLSearchParams({
       preset,
@@ -303,6 +315,67 @@ export default function AttendanceMonitoringTab({ currentUser, users = [], showT
       department: selectedDept
     }).toString();
     window.open(`/api/attendance/monitoring/export?${params}`, "_blank");
+  };
+
+  // Download Attendance Report Handler (Excel / PDF / CSV)
+  const handleDownloadReport = async () => {
+    if (downloadScope === "individual" && !downloadEmployeeId) {
+      showToast("Please select an employee for the individual report.", "error");
+      return;
+    }
+    setDownloadLoading(true);
+    try {
+      const token = localStorage.getItem("token") || currentUser?.token;
+      const endpoint = `/api/attendance/monitoring/export-${downloadFormat}`;
+      const params = new URLSearchParams({
+        format: downloadFormat,
+        preset: downloadPreset
+      });
+      if (downloadPreset === "custom") {
+        params.append("startDate", downloadStartDate);
+        params.append("endDate", downloadEndDate);
+      }
+      if (downloadScope === "individual" && downloadEmployeeId) {
+        params.append("employeeId", downloadEmployeeId);
+      }
+
+      const response = await fetch(`${endpoint}?${params.toString()}`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => ({}));
+        throw new Error(errJson.error || `Server responded with ${response.status}`);
+      }
+
+      const disposition = response.headers.get("Content-Disposition");
+      let filename = `attendance_report_${downloadPreset}.${downloadFormat}`;
+      if (disposition && disposition.indexOf("filename=") !== -1) {
+        const match = disposition.match(/filename="?([^"]+)"?/);
+        if (match && match[1]) filename = match[1];
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+
+      showToast(`Attendance report (${downloadFormat.toUpperCase()}) downloaded successfully.`, "success");
+      setShowDownloadModal(false);
+    } catch (err) {
+      console.error("Download report failed:", err);
+      showToast(`Download failed: ${err.message}`, "error");
+    } finally {
+      setDownloadLoading(false);
+    }
   };
 
   // Format Helper for Status Badges
@@ -395,11 +468,11 @@ export default function AttendanceMonitoringTab({ currentUser, users = [], showT
             <span>Manual Correction</span>
           </button>
           <button
-            onClick={handleExportCsv}
-            className="px-3.5 py-2 bg-brand-primary/10 hover:bg-brand-primary text-brand-primary hover:text-white text-xs font-bold rounded-[12px] border border-brand-primary/20 flex items-center gap-1.5 transition-all cursor-pointer"
+            onClick={() => setShowDownloadModal(true)}
+            className="px-4 py-2 bg-brand-primary hover:bg-brand-primary/90 text-white text-xs font-bold rounded-[12px] shadow-sm flex items-center gap-1.5 transition-all cursor-pointer"
           >
-            <FileSpreadsheet size={14} />
-            <span>Export CSV</span>
+            <Download size={14} />
+            <span>Download Attendance</span>
           </button>
         </div>
       </div>
@@ -1562,6 +1635,254 @@ export default function AttendanceMonitoringTab({ currentUser, users = [], showT
                 className="w-full py-2 text-center text-xs font-bold text-text-sec hover:text-text-main transition-colors cursor-pointer"
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal 5: Download Attendance Report Modal ── */}
+      {showDownloadModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-bg-card border border-border-card rounded-[24px] p-6 max-w-lg w-full shadow-2xl space-y-5 animate-scale-up">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-border-card pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-brand-primary/10 text-brand-primary flex items-center justify-center">
+                  <Download size={18} />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-text-main">Download Attendance Report</h3>
+                  <p className="text-[11px] text-text-sec">Export official Excel, PDF, or CSV reports</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowDownloadModal(false)}
+                className="p-1.5 text-text-mut hover:text-text-main rounded-lg hover:bg-bg-base cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* 1. Report Scope */}
+            <div>
+              <label className="text-[11px] font-bold text-text-mut uppercase tracking-wider block mb-2">1. Report Scope</label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setDownloadScope("all"); setDownloadEmployeeId(""); }}
+                  className={`p-3 rounded-[14px] border text-left cursor-pointer transition-all ${
+                    downloadScope === "all"
+                      ? "border-brand-primary bg-brand-primary/10 text-text-main"
+                      : "border-border-card bg-bg-base/60 text-text-sec hover:bg-bg-base"
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <Users size={14} className={downloadScope === "all" ? "text-brand-primary" : "text-text-mut"} />
+                    <span className="text-xs font-bold">All Employees</span>
+                  </div>
+                  <p className="text-[10px] text-text-mut">Complete company attendance records</p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setDownloadScope("individual")}
+                  className={`p-3 rounded-[14px] border text-left cursor-pointer transition-all ${
+                    downloadScope === "individual"
+                      ? "border-brand-primary bg-brand-primary/10 text-text-main"
+                      : "border-border-card bg-bg-base/60 text-text-sec hover:bg-bg-base"
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <UserCheck size={14} className={downloadScope === "individual" ? "text-brand-primary" : "text-text-mut"} />
+                    <span className="text-xs font-bold">Individual Employee</span>
+                  </div>
+                  <p className="text-[10px] text-text-mut">With attendance summary & KPI totals</p>
+                </button>
+              </div>
+            </div>
+
+            {/* 1b. Employee Search / Selector (if individual) */}
+            {downloadScope === "individual" && (
+              <div className="space-y-2 bg-bg-base/50 p-3.5 rounded-[16px] border border-border-card">
+                <label className="text-[11px] font-bold text-text-mut block">Select Employee</label>
+                <div className="relative">
+                  <Search size={13} className="absolute left-3 top-3 text-text-mut" />
+                  <input
+                    type="text"
+                    value={employeeSearchTerm}
+                    onChange={(e) => setEmployeeSearchTerm(e.target.value)}
+                    placeholder="Search by Employee ID, Name, or Department..."
+                    className="w-full pl-9 pr-3 py-2 bg-bg-card rounded-[10px] border border-border-card text-xs text-text-main focus:outline-none focus:border-brand-primary"
+                  />
+                </div>
+                {downloadEmployeeId ? (
+                  <div className="flex items-center justify-between p-2.5 bg-brand-primary/10 border border-brand-primary/20 rounded-[10px]">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-full bg-brand-primary text-white font-bold text-xs flex items-center justify-center">
+                        {users.find(u => u.id === downloadEmployeeId || u.employee_id === downloadEmployeeId)?.name?.charAt(0) || "E"}
+                      </div>
+                      <div>
+                        <span className="text-xs font-bold text-text-main block">
+                          {users.find(u => u.id === downloadEmployeeId || u.employee_id === downloadEmployeeId)?.name}
+                        </span>
+                        <span className="text-[10px] text-text-mut font-mono">
+                          ID: {users.find(u => u.id === downloadEmployeeId || u.employee_id === downloadEmployeeId)?.employee_id || downloadEmployeeId} • {users.find(u => u.id === downloadEmployeeId || u.employee_id === downloadEmployeeId)?.department}
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setDownloadEmployeeId("")}
+                      className="text-xs text-brand-primary font-bold hover:underline cursor-pointer"
+                    >
+                      Change
+                    </button>
+                  </div>
+                ) : (
+                  <div className="max-h-36 overflow-y-auto divide-y divide-border-card border border-border-card rounded-[10px] bg-bg-card">
+                    {users
+                      .filter(u => {
+                        const term = employeeSearchTerm.toLowerCase();
+                        return (
+                          !term ||
+                          u.name?.toLowerCase().includes(term) ||
+                          u.employee_id?.toLowerCase().includes(term) ||
+                          u.department?.toLowerCase().includes(term)
+                        );
+                      })
+                      .slice(0, 6)
+                      .map(u => (
+                        <button
+                          key={u.id}
+                          type="button"
+                          onClick={() => {
+                            setDownloadEmployeeId(u.employee_id || u.id);
+                            setEmployeeSearchTerm("");
+                          }}
+                          className="w-full p-2 text-left hover:bg-bg-base/70 flex items-center justify-between text-xs transition-colors cursor-pointer"
+                        >
+                          <div>
+                            <span className="font-bold text-text-main">{u.name}</span>
+                            <span className="text-[10px] text-text-mut block font-mono">ID: {u.employee_id || u.id} • {u.department || "General"}</span>
+                          </div>
+                          <span className="text-[10px] font-bold text-brand-primary">Select</span>
+                        </button>
+                      ))}
+                    {users.length === 0 && (
+                      <div className="p-3 text-center text-xs text-text-mut">No employees available.</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 2. Date Range */}
+            <div>
+              <label className="text-[11px] font-bold text-text-mut uppercase tracking-wider block mb-2">2. Reporting Period</label>
+              <div className="flex flex-wrap gap-1.5 mb-2.5">
+                {[
+                  { id: "today", label: "Today" },
+                  { id: "yesterday", label: "Yesterday" },
+                  { id: "this_week", label: "This Week" },
+                  { id: "this_month", label: "This Month" },
+                  { id: "custom", label: "Custom Range" }
+                ].map(p => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => setDownloadPreset(p.id)}
+                    className={`px-3 py-1.5 rounded-[10px] text-xs font-bold transition-all cursor-pointer ${
+                      downloadPreset === p.id
+                        ? "bg-brand-primary text-white shadow-sm"
+                        : "bg-bg-base text-text-sec hover:text-text-main border border-border-card"
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+
+              {downloadPreset === "custom" && (
+                <div className="grid grid-cols-2 gap-2 p-3 bg-bg-base/60 rounded-[14px] border border-border-card animate-fade-in">
+                  <div>
+                    <label className="text-[10px] font-bold text-text-mut block mb-1">Start Date</label>
+                    <input
+                      type="date"
+                      value={downloadStartDate}
+                      onChange={(e) => setDownloadStartDate(e.target.value)}
+                      className="w-full bg-bg-card text-xs text-text-main p-2 rounded-[8px] border border-border-card focus:outline-none focus:border-brand-primary"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-text-mut block mb-1">End Date</label>
+                    <input
+                      type="date"
+                      value={downloadEndDate}
+                      onChange={(e) => setDownloadEndDate(e.target.value)}
+                      className="w-full bg-bg-card text-xs text-text-main p-2 rounded-[8px] border border-border-card focus:outline-none focus:border-brand-primary"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 3. Download Format */}
+            <div>
+              <label className="text-[11px] font-bold text-text-mut uppercase tracking-wider block mb-2">3. Download Format</label>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { id: "xlsx", label: "Excel (.xlsx)", desc: "Formatted spreadsheet", icon: FileSpreadsheet, color: "text-emerald-400" },
+                  { id: "pdf", label: "PDF (.pdf)", desc: "Executive document", icon: FileText, color: "text-rose-400" },
+                  { id: "csv", label: "CSV (.csv)", desc: "Data export table", icon: FileSpreadsheet, color: "text-blue-400" }
+                ].map(fmt => {
+                  const Icon = fmt.icon;
+                  return (
+                    <button
+                      key={fmt.id}
+                      type="button"
+                      onClick={() => setDownloadFormat(fmt.id)}
+                      className={`p-3 rounded-[14px] border text-center cursor-pointer transition-all ${
+                        downloadFormat === fmt.id
+                          ? "border-brand-primary bg-brand-primary/10 shadow-sm"
+                          : "border-border-card bg-bg-base/60 hover:bg-bg-base"
+                      }`}
+                    >
+                      <Icon size={18} className={`mx-auto mb-1 ${fmt.color}`} />
+                      <span className="text-xs font-bold text-text-main block">{fmt.label}</span>
+                      <span className="text-[10px] text-text-mut block mt-0.5">{fmt.desc}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-border-card">
+              <button
+                type="button"
+                onClick={() => setShowDownloadModal(false)}
+                className="px-4 py-2 text-xs font-bold text-text-sec hover:text-text-main rounded-[10px] hover:bg-bg-base transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={downloadLoading}
+                onClick={handleDownloadReport}
+                className="px-5 py-2.5 bg-brand-primary hover:bg-brand-primary/90 text-white text-xs font-extrabold rounded-[12px] shadow-md flex items-center gap-2 cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {downloadLoading ? (
+                  <>
+                    <RefreshCw size={14} className="animate-spin" />
+                    <span>Generating Report...</span>
+                  </>
+                ) : (
+                  <>
+                    <Download size={14} />
+                    <span>Generate & Download</span>
+                  </>
+                )}
               </button>
             </div>
           </div>
